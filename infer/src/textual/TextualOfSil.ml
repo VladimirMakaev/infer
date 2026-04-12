@@ -28,9 +28,10 @@ module LocationBridge = struct
 end
 
 let sanitize_template_args s =
-  (* Detect <...> zones (possibly nested) and replace <, >, comma, space within
-     with underscores so the result is a valid textual identifier. *)
-  if not (String.contains s '<') then s
+  (* Detect <...> zones (possibly nested) and replace <, >, comma, space,
+     *, & within with underscores so the result is a valid textual identifier.
+     Also replace stray > outside any zone (from operator<< consuming a <). *)
+  if not (String.contains s '<' || String.contains s '>') then s
   else
     let buf = Buffer.create (String.length s) in
     let depth = ref 0 in
@@ -42,7 +43,7 @@ let sanitize_template_args s =
         | '>' ->
             depth := max 0 (!depth - 1) ;
             Buffer.add_char buf '_'
-        | (',' | ' ') when !depth > 0 ->
+        | (',' | ' ' | '*' | '&') when !depth > 0 ->
             Buffer.add_char buf '_'
         | _ ->
             Buffer.add_char buf c ) ;
@@ -52,10 +53,35 @@ let sanitize_template_args s =
 let sanitize_ident s =
   (* Replace characters that are not valid in textual identifiers.
      Preserve :: (namespace separator) but replace lone : and . with _.
-     Also replace operator() with __operator_call to avoid ambiguity.
+     Also replace C++ operator overloads with safe names, and other
+     special characters with underscores.
      Prefix names starting with digits to make them valid identifiers. *)
   let s =
     String.substr_replace_all s ~pattern:"operator()" ~with_:"__operator_call"
+    |> String.substr_replace_all ~pattern:"operator>>=" ~with_:"__operator_shr_assign"
+    |> String.substr_replace_all ~pattern:"operator<<=" ~with_:"__operator_shl_assign"
+    |> String.substr_replace_all ~pattern:"operator>>" ~with_:"__operator_shr"
+    |> String.substr_replace_all ~pattern:"operator<<" ~with_:"__operator_shl"
+    |> String.substr_replace_all ~pattern:"operator->*" ~with_:"__operator_arrow_star"
+    |> String.substr_replace_all ~pattern:"operator->" ~with_:"__operator_arrow"
+    |> String.substr_replace_all ~pattern:"operator!=" ~with_:"__operator_ne"
+    |> String.substr_replace_all ~pattern:"operator==" ~with_:"__operator_eq"
+    |> String.substr_replace_all ~pattern:"operator>=" ~with_:"__operator_ge"
+    |> String.substr_replace_all ~pattern:"operator<=" ~with_:"__operator_le"
+    |> String.substr_replace_all ~pattern:"operator+=" ~with_:"__operator_plus_assign"
+    |> String.substr_replace_all ~pattern:"operator-=" ~with_:"__operator_minus_assign"
+    |> String.substr_replace_all ~pattern:"operator*=" ~with_:"__operator_mul_assign"
+    |> String.substr_replace_all ~pattern:"operator/=" ~with_:"__operator_div_assign"
+    |> String.substr_replace_all ~pattern:"operator++" ~with_:"__operator_incr"
+    |> String.substr_replace_all ~pattern:"operator--" ~with_:"__operator_decr"
+    |> String.substr_replace_all ~pattern:"operator[]" ~with_:"__operator_index"
+    |> String.substr_replace_all ~pattern:"operator!" ~with_:"__operator_not"
+    |> String.substr_replace_all ~pattern:"operator>" ~with_:"__operator_gt"
+    |> String.substr_replace_all ~pattern:"operator<" ~with_:"__operator_lt"
+    |> String.substr_replace_all ~pattern:"operator+" ~with_:"__operator_plus"
+    |> String.substr_replace_all ~pattern:"operator-" ~with_:"__operator_minus"
+    |> String.substr_replace_all ~pattern:"operator*" ~with_:"__operator_mul"
+    |> String.substr_replace_all ~pattern:"operator/" ~with_:"__operator_div"
     |> String.substr_replace_all ~pattern:"::" ~with_:"\x00\x00"
     |> sanitize_template_args
     |> String.tr ~target:'.' ~replacement:'_'

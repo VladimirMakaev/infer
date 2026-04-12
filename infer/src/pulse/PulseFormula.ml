@@ -265,6 +265,13 @@ let and_atom atom formula ~add_term =
   let open SatUnsat.Import in
   let* phi, new_eqs = Formula.Normalizer.and_atom atom (formula.phi, RevList.empty) ~add_term in
   let+ formula = Intervals.incorporate_new_eqs new_eqs {formula with phi} in
+  if Debug.tracing_active () then
+    Debug.trace_json
+      (`Assoc
+        [ ("op", `String "and_atom")
+        ; ("atom", `String (F.asprintf "%a" (Atom.pp_with_pp_var Var.pp) atom))
+        ; ("result", `String "sat")
+        ; ("formula", yojson_of_t formula) ] ) ;
   (formula, new_eqs)
 
 
@@ -341,6 +348,14 @@ let prune_atom ~depth atom (formula, new_eqs) ~add_term =
         add_condition (atom, depth) conditions )
   in
   let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions} in
+  if Debug.tracing_active () then
+    Debug.trace_json
+      (`Assoc
+        [ ("op", `String "prune_atom")
+        ; ("atom", `String (F.asprintf "%a" (Atom.pp_with_pp_var Var.pp) atom))
+        ; ("depth", `Int depth)
+        ; ("result", `String "sat")
+        ; ("formula", yojson_of_t formula) ] ) ;
   (formula, new_eqs)
 
 
@@ -915,6 +930,14 @@ let simplify ~precondition_vocabulary ~keep formula =
   (* TODO: doing [QuantifierElimination.eliminate_vars; DeadVariables.eliminate] a few times may
      eliminate even more variables *)
   let+ formula, live_vars = DeadVariables.eliminate ~precondition_vocabulary ~keep formula in
+  if Debug.tracing_active () then
+    Debug.trace_json
+      (`Assoc
+        [ ("op", `String "simplify")
+        ; ("result", `String "sat")
+        ; ("keep_count", `Int (Var.Set.cardinal keep))
+        ; ("live_vars_count", `Int (Var.Set.cardinal live_vars))
+        ; ("formula", yojson_of_t formula) ] ) ;
   (formula, live_vars, RevList.empty)
 
 

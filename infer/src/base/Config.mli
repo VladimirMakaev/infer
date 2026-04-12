@@ -614,6 +614,10 @@ val pulse_log_unknown_calls : bool
 
 val pulse_log_unknown_calls_sampled : int option
 
+val pulse_dump_formula_trace : string option
+
+val pulse_dump_domain_trace : string option
+
 val pulse_max_cfg_size : int
 
 val pulse_max_disjuncts : int

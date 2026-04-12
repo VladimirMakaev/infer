@@ -78,7 +78,7 @@ type t = private
   ; unknown_values: bool  (** did we generate at least one unknown abstract value on this path? *)
   ; skipped_calls: SkippedCalls.t  (** metadata: procedure calls for which no summary was found *)
   }
-[@@deriving equal]
+[@@deriving equal, yojson_of]
 
 val leq : lhs:t -> rhs:t -> bool
 

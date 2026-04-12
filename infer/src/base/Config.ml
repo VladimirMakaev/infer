@@ -2442,6 +2442,22 @@ and pulse_log_unknown_calls_sampled =
      excessive logging"
 
 
+and pulse_dump_formula_trace =
+  CLOpt.mk_string_opt ~long:"pulse-dump-formula-trace"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Dump per-operation formula traces to the given file (JSONL format). Each line is a JSON \
+     object recording a formula operation, its arguments, result (sat/unsat), and the formula \
+     state after the operation."
+
+
+and pulse_dump_domain_trace =
+  CLOpt.mk_string_opt ~long:"pulse-dump-domain-trace"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Dump per-instruction domain state to the given file (JSONL format). Each line is a JSON \
+     object recording the procedure name, SIL instruction, and the AbductiveDomain state before \
+     and after execution."
+
+
 and pulse_max_cfg_size =
   CLOpt.mk_int ~default:15000 ~long:"pulse-max-cfg-size"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
@@ -4593,6 +4609,10 @@ and pulse_log_summary_count = !pulse_log_summary_count
 and pulse_log_unknown_calls = !pulse_log_unknown_calls
 
 and pulse_log_unknown_calls_sampled = !pulse_log_unknown_calls_sampled
+
+and pulse_dump_formula_trace = !pulse_dump_formula_trace
+
+and pulse_dump_domain_trace = !pulse_dump_domain_trace
 
 and pulse_max_cfg_size = !pulse_max_cfg_size
 

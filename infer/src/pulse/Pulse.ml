@@ -1590,6 +1590,48 @@ module PulseTransferFunctions = struct
           ([ContinueProgram astate], path, astate_n) )
 
 
+  (* ── Domain trace infrastructure ── *)
+
+  let domain_trace_channel : Out_channel.t option ref = ref None
+
+  let init_domain_trace () =
+    match Config.pulse_dump_domain_trace with
+    | None ->
+        ()
+    | Some path ->
+        if Option.is_none !domain_trace_channel then
+          domain_trace_channel := Some (Out_channel.create path)
+
+  let extract_astate_opt (exec_domain : ExecutionDomain.t) =
+    match exec_domain with
+    | ContinueProgram astate | ExceptionRaised astate ->
+        Some astate
+    | Stopped _ ->
+        None
+
+  let dump_domain_trace_entry proc_name instr astate_before astates_after =
+    match !domain_trace_channel with
+    | None ->
+        ()
+    | Some ch ->
+        let post_states =
+          List.filter_map astates_after ~f:(fun (es, _path) ->
+              Option.map (extract_astate_opt es) ~f:AbductiveDomain.yojson_of_t )
+        in
+        let json =
+          `Assoc
+            [ ("proc", `String (Procname.to_string proc_name))
+            ; ( "instr"
+              , `String (F.asprintf "%a" (Sil.pp_instr ~print_types:true Pp.text) instr) )
+            ; ("pre_state", AbductiveDomain.yojson_of_t astate_before)
+            ; ("post_states", `List post_states)
+            ; ("post_count", `Int (List.length astates_after)) ]
+        in
+        Yojson.Safe.to_channel ch json ;
+        Out_channel.output_char ch '\n' ;
+        Out_channel.flush ch
+
+
   let exec_instr_with_oom_protection_and_path_update ~limit ((astate, path), astate_n) analysis_data
       cfg_node instr : DisjDomain.t list * NonDisjDomain.t =
     let heap_size = heap_size () in
@@ -1606,11 +1648,23 @@ module PulseTransferFunctions = struct
         raise_notrace AboutToOOM
     | _ ->
         () ) ;
+    (* Capture the pre-state for domain tracing *)
+    let pre_astate_opt = extract_astate_opt astate in
     let astates, path, astate_n =
       exec_instr_aux limit path astate astate_n analysis_data cfg_node instr
     in
-    ( List.map astates ~f:(fun exec_state -> (exec_state, PathContext.post_exec_instr path))
-    , astate_n )
+    let result =
+      ( List.map astates ~f:(fun exec_state -> (exec_state, PathContext.post_exec_instr path))
+      , astate_n )
+    in
+    (* Emit domain trace after instruction execution *)
+    ( match (pre_astate_opt, !domain_trace_channel) with
+    | Some pre_astate, Some _ ->
+        let proc_name = Procdesc.get_proc_name analysis_data.InterproceduralAnalysis.proc_desc in
+        dump_domain_trace_entry proc_name instr pre_astate (fst result)
+    | _, _ ->
+        () ) ;
+    result
 
 
   let exec_instr_with_bottom_non_disj ~limit one_disj_astate analysis_data cfg_node instr =
@@ -2010,23 +2064,30 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
 let checker ?specialization ({InterproceduralAnalysis.proc_desc} as analysis_data) =
   let open IOption.Let_syntax in
   if should_analyze proc_desc then (
+    (* Initialize trace channels for oracle generation (idempotent — appends to file) *)
+    Option.iter Config.pulse_dump_formula_trace ~f:(fun path ->
+        if not (PulseFormulaDebug.tracing_active ()) then PulseFormulaDebug.set_trace_file path ) ;
+    PulseTransferFunctions.init_domain_trace () ;
     DLS.set current_specialization specialization ;
-    try
-      match specialization with
-      | None ->
-          let+ pre_post_list = analyze None analysis_data in
-          {PulseSummary.main= pre_post_list; specialized= Specialization.Pulse.Map.empty}
-      | Some (current_summary, Specialization.Pulse specialization) ->
-          let+ pre_post_list = analyze (Some specialization) analysis_data in
-          let specialized =
-            Specialization.Pulse.Map.add specialization pre_post_list
-              current_summary.PulseSummary.specialized
-          in
-          {current_summary with PulseSummary.specialized}
-    with AboutToOOM ->
-      (* We trigger GC to avoid skipping the next procedure that will be analyzed. *)
-      Gc.major () ;
-      None )
+    let result =
+      try
+        match specialization with
+        | None ->
+            let+ pre_post_list = analyze None analysis_data in
+            {PulseSummary.main= pre_post_list; specialized= Specialization.Pulse.Map.empty}
+        | Some (current_summary, Specialization.Pulse specialization) ->
+            let+ pre_post_list = analyze (Some specialization) analysis_data in
+            let specialized =
+              Specialization.Pulse.Map.add specialization pre_post_list
+                current_summary.PulseSummary.specialized
+            in
+            {current_summary with PulseSummary.specialized}
+      with AboutToOOM ->
+        (* We trigger GC to avoid skipping the next procedure that will be analyzed. *)
+        Gc.major () ;
+        None
+    in
+    result )
   else None
 
 
