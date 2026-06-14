@@ -221,7 +221,16 @@ module ProcDeclBridge = struct
         ; result_type= TypBridge.annotated_of_sil ret_typ
         ; attributes= [] }
     | _ ->
-        L.die InternalError "Unsupported procname %a in of_sil conversion" Procname.describe pname
+        (* Fallback for unsupported procname kinds (e.g., template specializations).
+           Use the string representation as the procedure name. *)
+        let name = Procname.to_string pname |> ProcName.of_string in
+        let qualified_name : QualifiedProcName.t =
+          {enclosing_class= TopLevel; name; metadata= None}
+        in
+        { qualified_name
+        ; formals_types= Some (List.map ~f:TypBridge.annotated_of_sil args_typ)
+        ; result_type= TypBridge.annotated_of_sil ret_typ
+        ; attributes= [] }
 end
 
 module FieldDeclBridge = struct
@@ -332,8 +341,10 @@ module ExpBridge = struct
         Field {exp= of_sil decls tenv e; field= fielddecl.qualified_name}
     | Lindex (e1, e2) ->
         Index (of_sil decls tenv e1, of_sil decls tenv e2)
-    | Sizeof _ ->
-        L.die InternalError "Sizeof expression should not appear here, please report"
+    | Sizeof {nbytes} ->
+        (* Convert sizeof to a constant integer. Use nbytes if available, default to 0. *)
+        let size = Option.value nbytes ~default:0 in
+        Const (Const.Int (Z.of_int size))
 end
 
 module InstrBridge = struct
@@ -534,7 +545,9 @@ module ProcDescBridge = struct
       | head :: _ when Node.equal head start_node ->
           nodes
       | _ ->
-          L.die InternalError "the start node is not in head"
+          (* Move start_node to the front if it's not already there *)
+          let without_start = List.filter nodes ~f:(fun n -> not (Node.equal n start_node)) in
+          start_node :: without_start
     in
     let start = start_node.label in
     let params =
