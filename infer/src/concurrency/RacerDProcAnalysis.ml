@@ -105,8 +105,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         (* [std::lock] acquires all its arguments, which are then released one by one, and a lock
            function from [--lock-model] may take no argument *)
         Fn.apply_n_times ~n:(Int.max 1 (List.length locks)) Domain.acquire_lock astate
-    | GuardLock _ | GuardConstruct {acquire_now= true} ->
+    | GuardLock _ ->
         Domain.acquire_lock astate
+    | GuardConstruct {locks; acquire_now= true} ->
+        Fn.apply_n_times ~n:(List.length locks) Domain.acquire_lock astate
     | Unlock _ ->
         Domain.release_lock ~only_acquired:false astate
     | GuardUnlock guard ->
@@ -115,11 +117,12 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         (* a guard that is not a local variable is assumed to own a lock when destroyed, unless this
            procedure has already released a lock held on entry, e.g. by unlocking the guard *)
         let only_acquired =
-          is_local_guard proc_desc formals guard
-          || RacerDModels.is_scoped_lock_of_several_mutexes_destructor callee_pname
-          || Domain.LockDomain.has_released astate.locks
+          is_local_guard proc_desc formals guard || Domain.LockDomain.has_released astate.locks
         in
-        Domain.release_lock ~only_acquired astate
+        Fn.apply_n_times
+          ~n:(RacerDModels.get_guard_destructor_lock_count callee_pname)
+          (Domain.release_lock ~only_acquired)
+          astate
     | LockedIfTrue _ ->
         Domain.lock_if_true ~guard:false ret_access_exp astate
     | GuardLockedIfTrue _ ->
