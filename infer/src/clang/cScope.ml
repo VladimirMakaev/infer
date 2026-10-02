@@ -57,9 +57,11 @@ let collect_until kinds scope =
   aux [] ((scope.current, scope.current_kind) :: scope.outers)
 
 
-let breaks_control_flow = function
+let rec breaks_control_flow = function
   | `ReturnStmt _ | `BreakStmt _ | `ContinueStmt _ | `GotoStmt _ ->
       true
+  | `AttributedStmt (_, [stmt], _) ->
+      breaks_control_flow stmt
   | _ ->
       false
 
