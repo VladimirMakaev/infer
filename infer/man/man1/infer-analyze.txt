@@ -988,15 +988,17 @@ PULSE CHECKER OPTIONS
            
 
        --pulse-nullability-annotations
-           Activates: Use the nullability annotations of the return types of
-           C functions and C++ methods that are declared but not defined, and
-           so have no summary, in calls from C, C++ and Objective-C code: a
-           call may return null when the returned pointer is annotated
-           _Nullable or _Nullable_result, and returns a non-null pointer when
-           it is annotated _Nonnull, including in #pragma clang
-           assume_nonnull regions, or when the function has the
-           returns_nonnull attribute. Annotations written in typedefs and C++
-           type aliases, including alias templates, count. Calls to
+           Activates: Use the nullability annotations of C functions and C++
+           methods that are declared but not defined, and so have no summary,
+           in calls from C, C++ and Objective-C code. A call may return null
+           when the returned pointer is annotated _Nullable or
+           _Nullable_result, and returns a non-null pointer when it is
+           annotated _Nonnull or when the function has the returns_nonnull
+           attribute. Passing null to a parameter whose type is annotated
+           _Nonnull, or that the nonnull attribute of the function or of the
+           parameter covers, is reported. _Nonnull includes #pragma clang
+           assume_nonnull regions, and annotations written in typedefs and
+           C++ type aliases, including alias templates, count. Calls to
            Objective-C methods and calls of blocks are not concerned. Also
            models strsep, which returns null only when its string is null,
            and the Objective-C runtime functions that copy a list, such as

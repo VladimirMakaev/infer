@@ -483,6 +483,35 @@ let get_cxx_virtual_base_classes decl =
       []
 
 
+let is_nonnull_param decl ~index param =
+  match (Clang_ast_proj.get_function_decl_tuple decl, param) with
+  | Some _, Clang_ast_t.ParmVarDecl (_, _, qual_type, _) ->
+      (* [DecayedType]: an array parameter such as [int fds[_Nonnull 2]]; [ParenType]: a
+         parenthesized declarator such as [int* _Nonnull (p)] *)
+      let rec strip ({Clang_ast_t.qt_type_ptr} as qual_type) =
+        match get_type qt_type_ptr with
+        | Some (DecayedType (_, inner) | ParenType (_, inner)) ->
+            strip inner
+        | _ ->
+            qual_type
+      in
+      let annot = sil_annot_of_type_aux ~c_function:true (strip qual_type) in
+      let has_nonnull_attribute decl ~f =
+        List.exists (Clang_ast_proj.get_decl_tuple decl).di_attributes ~f:(function
+          | `NonNullAttr (_, {Clang_ast_t.nnai_args}) ->
+              f nnai_args
+          | _ ->
+              false )
+      in
+      Annotations.ia_is_nonnull annot
+      || (not (Annotations.ia_is_nullable annot))
+         && ( has_nonnull_attribute decl ~f:(fun args ->
+                  List.is_empty args || List.mem args index ~equal:Int.equal )
+            || has_nonnull_attribute param ~f:(fun _ -> true) )
+  | _ ->
+      false
+
+
 (* true if a decl has a NS_NOESCAPE attribute *)
 let is_no_escape_block_arg decl =
   let has_noescape_attr attr = match attr with `NoEscapeAttr _ -> true | _ -> false in
