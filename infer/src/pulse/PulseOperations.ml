@@ -38,6 +38,7 @@ let check_addr_access path ?must_be_valid_reason access_mode location (address, 
           | EndIterator
           | FClose _
           | GoneOutOfScope _
+          | HandedOverToStream _
           | OptionalEmpty
           | StdVector _
           | StdString _
