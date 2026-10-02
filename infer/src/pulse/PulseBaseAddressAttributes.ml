@@ -362,6 +362,10 @@ let has_contents_overwritten address attrs =
       Option.is_some (Attributes.get_contents_overwritten attribute) )
 
 
+let is_global_initializer_called address attrs =
+  Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_global_initializer_called
+
+
 let is_hack_constinit_called address attrs =
   Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_hack_constinit_called
 
@@ -536,6 +540,8 @@ module type S = sig
   val has_unknown_effect : key -> t -> bool
 
   val has_contents_overwritten : key -> t -> bool
+
+  val is_global_initializer_called : key -> t -> bool
 
   val is_hack_constinit_called : key -> t -> bool
 end
