@@ -14,7 +14,7 @@ INFER_OPTIONS = \
 
 INFERPRINT_OPTIONS = --issues-tests
 
-SOURCES = ../pulse/null_deref/nullable_return.m
+SOURCES = ../pulse/null_deref/nonnull_annotation.m ../pulse/null_deref/nullable_return.m
 
 include $(TESTS_DIR)/clang.make
 include $(TESTS_DIR)/objc.make
