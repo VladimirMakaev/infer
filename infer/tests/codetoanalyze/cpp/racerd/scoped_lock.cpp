@@ -35,7 +35,64 @@ class ScopedLock {
     return z;
   }
 
+  void store_v(int vv) {
+    std::scoped_lock g(mutex_, other_mutex_);
+    v = vv;
+  }
+
+  int get_v() {
+    std::scoped_lock g(mutex_, other_mutex_);
+    return v;
+  }
+
+  void store_w(int ww) {
+    std::scoped_lock g(mutex_, other_mutex_);
+    w = ww;
+  }
+
+  int get_w_bad() { return w; }
+
+  void store_u(int uu) {
+    std::scoped_lock<std::mutex> g(mutex_);
+    u = uu;
+  }
+
+  int get_u() {
+    std::lock(mutex_, other_mutex_);
+    std::scoped_lock g(std::adopt_lock, mutex_, other_mutex_);
+    return u;
+  }
+
+  int get_u_after_release_bad() {
+    {
+      std::lock(mutex_, other_mutex_);
+      std::scoped_lock g(std::adopt_lock, mutex_, other_mutex_);
+    }
+    return u;
+  }
+
+  struct Holder {
+    Holder(std::mutex& m1, std::mutex& m2) : lock_(m1, m2) {}
+    std::scoped_lock<std::mutex, std::mutex> lock_;
+  };
+
+  int get_v_after_member_scope_bad() {
+    { Holder h(mutex_, other_mutex_); }
+    return v;
+  }
+
+  int get_v_in_member_scope_ok() {
+    Holder h(mutex_, other_mutex_);
+    return v;
+  }
+
+  int get_v_after_local_scope_bad() {
+    { std::scoped_lock g(mutex_, other_mutex_); }
+    return v;
+  }
+
  private:
-  int x, y, z;
+  int x, y, z, v, w, u;
   std::mutex mutex_;
+  std::mutex other_mutex_;
 };

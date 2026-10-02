@@ -494,16 +494,16 @@ let should_analyze_proc =
     && not (is_assumed_thread_safe tenv pn)
 
 
-let is_scoped_lock_of_several_mutexes_destructor =
+let get_guard_destructor_lock_count =
   let matcher = QualifiedCppName.Match.of_fuzzy_qual_names ["std::scoped_lock::~scoped_lock"] in
   fun pname ->
-    QualifiedCppName.Match.match_qualifiers matcher (Procname.get_qualifiers pname)
-    &&
-    match Procname.get_class_type_name pname with
-    | Some (Typ.CppClass {template_spec_info= Template {args= [_]}}) ->
-        false
-    | _ ->
-        true
+    if QualifiedCppName.Match.match_qualifiers matcher (Procname.get_qualifiers pname) then
+      match Procname.get_class_type_name pname with
+      | Some (Typ.CppClass {template_spec_info= Template {args}}) ->
+          List.length args
+      | _ ->
+          1
+    else 1
 
 
 let get_current_class_and_threadsafe_superclasses tenv pname =
