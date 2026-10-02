@@ -15,6 +15,6 @@ INFER_OPTIONS = \
 
 INFERPRINT_OPTIONS = --issues-tests
 
-SOURCES = ../pulse/nullable_return.c ../pulse/strsep.c
+SOURCES = ../pulse/nonnull_annotation.c ../pulse/nullable_return.c ../pulse/strsep.c
 
 include $(TESTS_DIR)/clang.make

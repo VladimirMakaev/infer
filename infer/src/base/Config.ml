@@ -2728,16 +2728,18 @@ and ( pulse_monitor_transitive_callees
 and pulse_nullability_annotations =
   CLOpt.mk_bool ~long:"pulse-nullability-annotations" ~default:false
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
-    "Use the nullability annotations of the return types of C functions and C++ methods that are \
-     declared but not defined, and so have no summary, in calls from C, C++ and Objective-C code: \
-     a call may return null when the returned pointer is annotated $(b,_Nullable) or \
-     $(b,_Nullable_result), and returns a non-null pointer when it is annotated $(b,_Nonnull), \
-     including in $(b,#pragma clang assume_nonnull) regions, or when the function has the \
-     $(b,returns_nonnull) attribute. Annotations written in typedefs and C++ type aliases, \
-     including alias templates, count. Calls to Objective-C methods and calls of blocks are not \
-     concerned. Also models $(b,strsep), which returns null only when its string is null, and the \
-     Objective-C runtime functions that copy a list, such as $(b,class_copyPropertyList), which \
-     return null only after setting the count to 0."
+    "Use the nullability annotations of C functions and C++ methods that are declared but not \
+     defined, and so have no summary, in calls from C, C++ and Objective-C code. A call may return \
+     null when the returned pointer is annotated $(b,_Nullable) or $(b,_Nullable_result), and \
+     returns a non-null pointer when it is annotated $(b,_Nonnull) or when the function has the \
+     $(b,returns_nonnull) attribute. Passing null to a parameter whose type is annotated \
+     $(b,_Nonnull), or that the $(b,nonnull) attribute of the function or of the parameter covers, \
+     is reported. $(b,_Nonnull) includes $(b,#pragma clang assume_nonnull) regions, and \
+     annotations written in typedefs and C++ type aliases, including alias templates, count. Calls \
+     to Objective-C methods and calls of blocks are not concerned. Also models $(b,strsep), which \
+     returns null only when its string is null, and the Objective-C runtime functions that copy a \
+     list, such as $(b,class_copyPropertyList), which return null only after setting the count to \
+     0."
 
 
 and pulse_nullsafe_report_npe =
