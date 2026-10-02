@@ -85,3 +85,35 @@ let is_pointer_to_const {Clang_ast_t.qt_type_ptr} =
       qt_is_const
   | _ ->
       false
+
+
+let params_of_function_pointer_type {Clang_ast_t.qt_type_ptr} =
+  let open Clang_ast_t in
+  let rec desugar ~f type_ptr =
+    match CAst_utils.get_type type_ptr with
+    | Some (ParenType (_, {qt_type_ptr})) ->
+        desugar ~f qt_type_ptr
+    | Some c_type -> (
+      match f c_type with
+      | Some _ as res ->
+          res
+      | None -> (
+        match (Clang_ast_proj.get_type_tuple c_type).ti_desugared_type with
+        | Some desugared when Clang_ast_extend.TypePointerOrd.compare desugared type_ptr <> 0 ->
+            desugar ~f desugared
+        | _ ->
+            None ) )
+    | None ->
+        None
+  in
+  let params_of_function = function
+    | FunctionProtoType (_, _, {pti_params_type}) ->
+        Some pti_params_type
+    | _ ->
+        None
+  in
+  desugar qt_type_ptr ~f:(function
+    | PointerType (_, {qt_type_ptr}) ->
+        desugar ~f:params_of_function qt_type_ptr
+    | _ ->
+        None )
