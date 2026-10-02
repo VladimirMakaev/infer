@@ -129,3 +129,22 @@ void FN_field_ptr_after_callee_free_bad() {
   free_pair(p);
   *first = 42;
 }
+
+struct Matrix {
+  int* cells[2][2];
+};
+
+int* get_cell_1_0(struct Matrix* m) { return m->cells[1][0]; }
+
+void read_two_dim_array_in_callee_bad() {
+  struct Matrix m;
+  m.cells[1][0] = NULL;
+  *get_cell_1_0(&m) = 42;
+}
+
+void read_two_dim_array_in_callee_ok() {
+  int x = 0;
+  struct Matrix m;
+  m.cells[1][0] = &x;
+  *get_cell_1_0(&m) = 42;
+}
