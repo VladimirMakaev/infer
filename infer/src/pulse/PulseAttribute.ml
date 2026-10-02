@@ -32,7 +32,7 @@ module Attribute = struct
     | SwiftAlloc
     | HackBuilderResource of HackClassName.t
     | Awaitable (* used for Hack and Python *)
-    | FileDescriptor
+    | FileDescriptor of Procname.t
   [@@deriving compare, equal, yojson_of]
 
   let pp_allocator fmt = function
@@ -58,7 +58,7 @@ module Attribute = struct
         F.fprintf fmt "hack builder %a" HackClassName.pp class_name
     | Awaitable ->
         F.fprintf fmt "awaitable"
-    | FileDescriptor ->
+    | FileDescriptor _ ->
         F.pp_print_string fmt "file descriptor"
 
 
@@ -692,7 +692,7 @@ module Attribute = struct
     | CppNewArray, Some (CppDeleteArray, _)
     | ObjCAlloc, _
     | SwiftAlloc, _
-    | FileDescriptor, Some (FClose, _) ->
+    | FileDescriptor _, Some (FClose _, _) ->
         true
     | JavaResource _, _ | CSharpResource _, _ | HackBuilderResource _, _ | Awaitable, _ ->
         is_released
@@ -713,7 +713,7 @@ module Attribute = struct
     | ObjCAlloc
     | JavaResource _
     | CSharpResource _
-    | FileDescriptor
+    | FileDescriptor _
     | SwiftAlloc ->
         false
 
@@ -732,7 +732,7 @@ module Attribute = struct
     | ObjCAlloc
     | JavaResource _
     | CSharpResource _
-    | FileDescriptor
+    | FileDescriptor _
     | SwiftAlloc ->
         false
 
