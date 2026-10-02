@@ -11,11 +11,11 @@ namespace member_locks {
 
 class Owner {
  public:
-  // the deadlocks of the clients with this method are only found from the
-  // clients, as the paths of these locks do not go through the client classes,
-  // and are reported whether the name of the client class comes before or
-  // after this one
-  void lock_first_then_second() {
+  // the paths of these locks do not go through the client classes, but the
+  // clients are in the same file, so the deadlock of each client with this
+  // method is found from both sides and reported once, on the side whose lock
+  // class name comes last
+  void lock_first_then_second_bad() {
     std::lock_guard<std::mutex> l1(first_);
     std::lock_guard<std::mutex> l2(second_);
   }

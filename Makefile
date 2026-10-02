@@ -69,6 +69,7 @@ DIRECT_TESTS += \
   c_sil \
   c_starvation \
   c_starvation-dedup \
+  c_starvation-per-file \
   c_topl \
   cpp_bufferoverrun \
   cpp_frontend \
