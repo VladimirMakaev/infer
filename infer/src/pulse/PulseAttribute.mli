@@ -148,6 +148,8 @@ type t =
           now) *)
   | DictReadConstKeys of ConstKeys.t  (** constant string keys that are read from the dictionary *)
   | EndOfCollection
+  | GlobalInitializerCalled
+      (** set on the address of a global variable once its initializer has been executed *)
   | HackBuilder of Builder.t
   | HackConstinitCalled
   | InReportedRetainCycle
@@ -236,6 +238,8 @@ module Attributes : sig
   val remove_hack_builder : t -> t
 
   val set_hack_builder_discardable : t -> t
+
+  val is_global_initializer_called : t -> bool
 
   val is_hack_constinit_called : t -> bool
 
