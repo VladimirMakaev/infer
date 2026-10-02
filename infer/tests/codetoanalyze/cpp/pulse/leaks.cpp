@@ -179,7 +179,12 @@ FILE* fdopen_released_fd_after_pure_call_ok(const char* path) {
   if (query_fd(fd.fd_) == -1) {
     return nullptr;
   }
-  return fdopen(fd.release(), "r");
+  int raw_fd = fd.release();
+  FILE* file = fdopen(raw_fd, "r");
+  if (file == nullptr) {
+    close(raw_fd);
+  }
+  return file;
 }
 
 } // namespace leaks
