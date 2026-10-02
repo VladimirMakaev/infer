@@ -347,6 +347,8 @@ module AddressAttributes : sig
 
   val has_unknown_effect : AbstractValue.t -> t -> bool
 
+  val is_global_initializer_called : AbstractValue.t -> t -> bool
+
   val is_hack_constinit_called : AbstractValue.t -> t -> bool
 end
 
@@ -543,6 +545,9 @@ module Summary : sig
       have made. Sharing of a value that a condition makes equal to a constant is not an assumption:
       the cells are equal to the same constant, and summary creation makes the conditions on that
       value as latent as the conditions on each of the cells. *)
+
+  val reads_global : f:(Pvar.t -> bool) -> summary -> bool
+  (** whether the pre reads the contents of a global variable that satisfies [f] *)
 
   val unsafe_from_join : t -> summary
 

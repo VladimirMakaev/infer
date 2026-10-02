@@ -232,6 +232,7 @@ module Attribute = struct
     | DictContainConstKeys
     | DictReadConstKeys of (ConstKeys.t[@yojson.opaque])
     | EndOfCollection
+    | GlobalInitializerCalled
     | HackBuilder of (Builder.t[@yojson.opaque])
     | HackConstinitCalled
     | InReportedRetainCycle
@@ -294,6 +295,8 @@ module Attribute = struct
   let dict_read_const_keys_rank = Variants.dictreadconstkeys.rank
 
   let end_of_collection_rank = Variants.endofcollection.rank
+
+  let global_initializer_called_rank = Variants.globalinitializercalled.rank
 
   let hack_builder_rank = Variants.hackbuilder.rank
 
@@ -380,6 +383,8 @@ module Attribute = struct
         F.fprintf f "DictReadConstKeys(@[%a@])" ConstKeys.pp keys
     | EndOfCollection ->
         F.pp_print_string f "EndOfCollection"
+    | GlobalInitializerCalled ->
+        F.pp_print_string f "GlobalInitializerCalled"
     | HackBuilder builderstate ->
         F.fprintf f "HackBuilder(%a)" Builder.pp builderstate
     | HackConstinitCalled ->
@@ -473,6 +478,7 @@ module Attribute = struct
     | CopiedReturn _
     | DictContainConstKeys
     | EndOfCollection
+    | GlobalInitializerCalled
     | HackConstinitCalled
     | InReportedRetainCycle
     | Initialized
@@ -520,6 +526,7 @@ module Attribute = struct
     | CopiedReturn _
     | DictContainConstKeys
     | EndOfCollection
+    | GlobalInitializerCalled
     | HackConstinitCalled
     | InReportedRetainCycle
     | Initialized
@@ -574,6 +581,7 @@ module Attribute = struct
     | CSharpResourceReleased
     | AwaitedAwaitable
     | HackBuilder _
+    | GlobalInitializerCalled
     | HackConstinitCalled
     | MustBeAwaited
     | MustBeInitialized _
@@ -682,6 +690,7 @@ module Attribute = struct
       | EndOfCollection
       | AwaitedAwaitable
       | HackBuilder _
+      | GlobalInitializerCalled
       | HackConstinitCalled
       | Initialized
       | JavaResourceReleased
@@ -798,6 +807,7 @@ module Attribute = struct
       | EndOfCollection
       | AwaitedAwaitable
       | HackBuilder _
+      | GlobalInitializerCalled
       | HackConstinitCalled
       | InReportedRetainCycle
       | Initialized
@@ -988,6 +998,8 @@ module Attributes = struct
     | _ ->
         s
 
+
+  let is_global_initializer_called = mem_by_rank Attribute.global_initializer_called_rank
 
   let is_hack_constinit_called = mem_by_rank Attribute.hack_constinit_called_rank
 
