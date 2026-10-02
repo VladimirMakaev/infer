@@ -1288,6 +1288,8 @@
         {
           "pointer" : 23,
           "desugared_type" : 9
+        },
+        {
         }
       )>,
       <"PointerType" : (

@@ -3945,6 +3945,8 @@
         {
           "pointer" : 82,
           "desugared_type" : 18
+        },
+        {
         }
       )>,
       <"RecordType" : (
@@ -3984,6 +3986,8 @@
         {
           "pointer" : 39,
           "desugared_type" : 11
+        },
+        {
         }
       )>,
       <"ConstantArrayType" : (
