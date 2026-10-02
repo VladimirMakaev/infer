@@ -24,3 +24,6 @@ val is_block_type : Clang_ast_t.qual_type -> bool
 val is_reference_type : Clang_ast_t.qual_type -> bool
 
 val is_pointer_to_const : Clang_ast_t.qual_type -> bool
+
+val params_of_function_pointer_type : Clang_ast_t.qual_type -> Clang_ast_t.qual_type list option
+(** the parameter types of the prototype of the functions that the type points to *)

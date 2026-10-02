@@ -222,6 +222,7 @@ module Attribute = struct
     | AlwaysReachable
     | Closure of Procname.t
     | ConfigUsage of (ConfigUsage.t[@yojson.opaque])
+    | ContentsOverwritten of ValueHistory.t
     | CopiedInto of CopiedInto.t
     | CopiedReturn of
         { source: AbstractValue.t
@@ -279,6 +280,8 @@ module Attribute = struct
   let closure_rank = Variants.closure.rank
 
   let config_usage_rank = Variants.configusage.rank
+
+  let contents_overwritten_rank = Variants.contentsoverwritten.rank
 
   let copied_into_rank = Variants.copiedinto.rank
 
@@ -363,6 +366,8 @@ module Attribute = struct
         Procname.pp f pname
     | ConfigUsage config ->
         F.fprintf f "ConfigUsage (%a)" ConfigUsage.pp config
+    | ContentsOverwritten hist ->
+        F.fprintf f "ContentsOverwritten(@[%a@])" ValueHistory.pp hist
     | CopiedInto copied_into ->
         CopiedInto.pp f copied_into
     | CopiedReturn {source; is_const_ref; from; copied_location} ->
@@ -463,6 +468,7 @@ module Attribute = struct
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
+    | ContentsOverwritten _
     | CopiedInto _
     | CopiedReturn _
     | DictContainConstKeys
@@ -509,6 +515,7 @@ module Attribute = struct
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
+    | ContentsOverwritten _
     | CopiedInto _
     | CopiedReturn _
     | DictContainConstKeys
@@ -554,6 +561,7 @@ module Attribute = struct
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
+    | ContentsOverwritten _
     | CopiedReturn _
     | DictContainConstKeys
     | DictReadConstKeys _
@@ -598,6 +606,8 @@ module Attribute = struct
         Allocated (proc_name, add_call_to_trace trace)
     | ConfigUsage (StringParam {v; config_type}) ->
         ConfigUsage (StringParam {v= subst v; config_type})
+    | ContentsOverwritten hist ->
+        ContentsOverwritten (add_call_to_history hist)
     | CopiedReturn {source; is_const_ref; from; copied_location} ->
         CopiedReturn {source= subst source; is_const_ref; from; copied_location}
     | DictReadConstKeys const_keys ->
@@ -780,6 +790,7 @@ module Attribute = struct
       | AlwaysReachable
       | Closure _
       | ConfigUsage (ConfigName _)
+      | ContentsOverwritten _
       | CopiedInto _
       | CSharpResourceReleased
       | DictContainConstKeys
@@ -1055,6 +1066,7 @@ module Attributes = struct
     || mem_by_rank Attribute.initialized_rank attrs
     || mem_by_rank Attribute.invalid_rank attrs
     || mem_by_rank Attribute.unknown_effect_rank attrs
+    || mem_by_rank Attribute.contents_overwritten_rank attrs
     || mem_by_rank Attribute.java_resource_released_rank attrs
     || mem_by_rank Attribute.awaited_awaitable_rank attrs
     || mem_by_rank Attribute.hack_builder_rank attrs
@@ -1084,6 +1096,11 @@ module Attributes = struct
   let get_unknown_effect =
     get_by_rank Attribute.unknown_effect_rank ~dest:(function[@warning "-partial-match"]
         | UnknownEffect (call, hist) -> (call, hist) )
+
+
+  let get_contents_overwritten =
+    get_by_rank Attribute.contents_overwritten_rank ~dest:(function[@warning "-partial-match"]
+        | ContentsOverwritten hist -> hist )
 
 
   let remove_dict_contain_const_keys = remove_by_rank Attribute.dict_contain_const_keys_rank
