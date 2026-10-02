@@ -67,7 +67,9 @@ type t =
   ; globals: GlobalSet.t  (** the global variables recorded in [procdesc] by [add_global] *)
   ; vars_in_discarded_branches: Mangled.Set.t ref
         (** local variables referenced in the discarded, untranslated branch of an [if constexpr] *)
-  }
+  ; has_unmodeled_init_list: bool ref
+        (** whether the procedure brace-initializes a value of a type that is not modeled, e.g. a
+            vector *) }
 
 val get_curr_class : t -> curr_class
 
