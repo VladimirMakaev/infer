@@ -60,7 +60,8 @@ type t =
   ; temporary_names: (Clang_ast_t.pointer, Pvar.t * Typ.t) Hashtbl.t
   ; temporaries_constructor_markers: (Pvar.t * Typ.t) Pvar.Map.t
   ; globals: GlobalSet.t
-  ; vars_in_discarded_branches: Mangled.Set.t ref }
+  ; vars_in_discarded_branches: Mangled.Set.t ref
+  ; has_unmodeled_init_list: bool ref }
 
 let create_context translation_unit_context tenv cfg procdesc immediate_curr_class return_param_typ
     outer_context =
@@ -77,7 +78,8 @@ let create_context translation_unit_context tenv cfg procdesc immediate_curr_cla
   ; temporary_names= Hashtbl.create 0
   ; temporaries_constructor_markers= Pvar.Map.empty
   ; globals= GlobalSet.create 0
-  ; vars_in_discarded_branches= ref Mangled.Set.empty }
+  ; vars_in_discarded_branches= ref Mangled.Set.empty
+  ; has_unmodeled_init_list= ref false }
 
 
 let rec is_objc_method context =
