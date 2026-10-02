@@ -493,6 +493,7 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   DECLARE_VISITOR(AvailabilityAttr)
   DECLARE_VISITOR(CleanupAttr)
   DECLARE_VISITOR(GuardedByAttr)
+  DECLARE_VISITOR(NonNullAttr)
   DECLARE_VISITOR(RequiresCapabilityAttr)
   DECLARE_VISITOR(SentinelAttr)
   DECLARE_VISITOR(VisibilityAttr)
@@ -5581,6 +5582,30 @@ void ASTExporter<ATDWriter>::VisitRequiresCapabilityAttr(
   ArrayScope Scope(OF, A->args_size());
   for (const Expr *E : A->args()) {
     dumpCapabilityArg(E);
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::NonNullAttrTupleSize() {
+  return AttrTupleSize() + 1;
+}
+//@atd #define non_null_attr_tuple attr_tuple * non_null_attr_info
+//@atd type non_null_attr_info = {
+//@atd   ~args : int list;
+//@atd } <ocaml field_prefix="nnai_">
+// [args] are zero-based indices of the parameters, not counting an implicit
+// object parameter. No [args] means every pointer parameter.
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitNonNullAttr(const NonNullAttr *A) {
+  VisitAttr(A);
+  bool HasArgs = A->args_size() > 0;
+  ObjectScope Scope(OF, HasArgs);
+  if (HasArgs) {
+    OF.emitTag("args");
+    ArrayScope ArgsScope(OF, A->args_size());
+    for (const ParamIdx &Idx : A->args()) {
+      OF.emitInteger(Idx.getASTIndex());
+    }
   }
 }
 
