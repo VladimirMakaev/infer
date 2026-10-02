@@ -526,7 +526,14 @@ module OwnershipDomain = struct
 end
 
 module Attribute = struct
-  type t = Nothing | Functional | OnMainThread | LockHeld | GuardLockHeld | Synchronized
+  type t =
+    | Nothing
+    | Functional
+    | OnMainThread
+    | LockHeld
+    | LockHeldIfZero
+    | GuardLockHeld
+    | Synchronized
   [@@deriving equal]
 
   let pp fmt t =
@@ -539,6 +546,8 @@ module Attribute = struct
           "OnMainThread"
       | LockHeld ->
           "LockHeld"
+      | LockHeldIfZero ->
+          "LockHeldIfZero"
       | GuardLockHeld ->
           "GuardLockHeld"
       | Synchronized ->
@@ -581,7 +590,7 @@ module AttributeMapDomain = struct
         match attribute with
         | GuardLockHeld ->
             false
-        | LockHeld ->
+        | LockHeld | LockHeldIfZero ->
             keep_lock_held
         | Nothing | Functional | OnMainThread | Synchronized ->
             true )
@@ -843,8 +852,13 @@ let release_lock ~only_acquired (astate : t) =
   {astate with locks; threads= ThreadsDomain.update_for_lock_use astate.threads; attribute_map}
 
 
-let lock_if_true ~guard ret_access_exp (astate : t) =
-  let attribute = if guard then Attribute.GuardLockHeld else Attribute.LockHeld in
+let add_lock_attribute attribute ret_access_exp (astate : t) =
   { astate with
     attribute_map= AttributeMapDomain.add ret_access_exp attribute astate.attribute_map
   ; threads= ThreadsDomain.update_for_lock_use astate.threads }
+
+
+let lock_if_true ~guard =
+  add_lock_attribute (if guard then Attribute.GuardLockHeld else Attribute.LockHeld)
+
+let lock_if_zero = add_lock_attribute Attribute.LockHeldIfZero
