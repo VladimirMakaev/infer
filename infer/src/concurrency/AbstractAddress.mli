@@ -59,6 +59,9 @@ val get_path_classes : Tenv.t -> t -> Typ.name list
     accesses, ie the classes whose methods may access the same object through [this]; may contain
     duplicates *)
 
+val get_pointee_typ : Typ.t -> Typ.t option
+(** the type pointed to by a pointer or by a [std::unique_ptr] or [std::shared_ptr] *)
+
 val get_typ : Tenv.t -> t -> Typ.t option
 
 val make : FormalMap.t -> HilExp.t -> t option
