@@ -3050,6 +3050,8 @@
         {
           "pointer" : 31,
           "desugared_type" : 8
+        },
+        {
         }
       ]],
       ["FunctionProtoType" , [
