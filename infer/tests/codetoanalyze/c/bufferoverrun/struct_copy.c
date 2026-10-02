@@ -205,3 +205,24 @@ void array_of_structs_field_copy_Ok() {
   y.s[1].a[0] = 10;
   a[x.s[1].a[0]] = 0;
 }
+
+struct with_array {
+  char buf[4];
+};
+
+void array_field_param_copy_Bad(struct with_array* p) {
+  struct with_array c = *p;
+  c.buf[4] = 0;
+}
+
+void array_field_assign_Bad(struct with_array* p) {
+  struct with_array c;
+  c = *p;
+  c.buf[4] = 0;
+}
+
+void array_field_local_copy_Bad() {
+  struct with_array a = {{0}};
+  struct with_array c = a;
+  c.buf[4] = 0;
+}
