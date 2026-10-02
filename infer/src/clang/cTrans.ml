@@ -263,8 +263,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
            , Sil.Load {id; e= Exp.Lvar pvar; typ; loc= sil_loc} :: forwarded_init_exps ) )
 
 
-  let create_call_instr trans_state (return_type : Typ.t) function_sil params_sil sil_loc call_flags
-      ~is_inherited_ctor =
+  let create_call_instr ?(callee_typ = Typ.mk (Typ.Tfun None)) trans_state (return_type : Typ.t)
+      function_sil params_sil sil_loc call_flags ~is_inherited_ctor =
     let ret_id_typ = (Ident.create_fresh Ident.knormal, return_type) in
     let call_flags =
       {call_flags with CallFlags.cf_is_objc_getter_setter= trans_state.is_objc_getter_setter_call}
@@ -319,7 +319,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let call_instr =
       match function_sil with
       | Exp.Var _ ->
-          let closure_param = (function_sil, Typ.mk (Typ.Tfun None)) in
+          let closure_param = (function_sil, callee_typ) in
           let builtin =
             if call_flags.CallFlags.cf_is_objc_block then BuiltinDecl.__call_objc_block
             else BuiltinDecl.__call_c_function_ptr
@@ -1700,8 +1700,20 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         let act_params = collect_returns result_trans_params in
         let ret_type_no_ref = CType_decl.get_type_from_expr_info expr_info context.CContext.tenv in
         let ret_type = add_reference_if_glvalue ret_type_no_ref expr_info in
+        let callee_typ =
+          let open IOption.Let_syntax in
+          let* _, _, fun_exp_info =
+            match sil_fe with Exp.Var _ -> Clang_ast_proj.get_expr_tuple fun_exp_stmt | _ -> None
+          in
+          let+ params =
+            CType.params_of_function_pointer_type fun_exp_info.Clang_ast_t.ei_qual_type
+          in
+          let params_type = List.map params ~f:(CType_decl.qual_type_to_sil_type context.tenv) in
+          Typ.mk (Tfun (Some {params_type; return_type= ret_type}))
+        in
         let res_trans_call =
-          create_call_instr trans_state ret_type sil_fe act_params sil_loc ~is_inherited_ctor:false
+          create_call_instr ?callee_typ trans_state ret_type sil_fe act_params sil_loc
+            ~is_inherited_ctor:false
             {CallFlags.default with cf_is_objc_block= objc_exp_of_type_block fun_exp_stmt}
         in
         let node_name = Procdesc.Node.Call (Exp.to_string sil_fe) in
