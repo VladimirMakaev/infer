@@ -799,7 +799,13 @@ module Internal = struct
         | None ->
             let addr_dst = CanonValue.mk_fresh () in
             let pre_heap, post_hist =
-              if BaseMemory.mem addr_src (astate.pre :> base_domain).heap then
+              if
+                BaseMemory.mem addr_src (astate.pre :> base_domain).heap
+                (* the contents of an overwritten object are unrelated to the ones in the pre *)
+                && not
+                     (BaseAddressAttributes.has_contents_overwritten addr_src
+                        (astate.post :> base_domain).attrs )
+              then
                 let cell_id = ValueHistory.CellId.next () in
                 (* HACK: do not record the history of values in the pre as they are unused, except
                    for their cell id to be able to track where the pre values end up in the post
@@ -2176,6 +2182,31 @@ let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) hist x astate =
     |> snd
   in
   {astate with post= PostDomain.update ~attrs ~heap astate.post}
+
+
+let overwrite_contents ?(havoc_filter = fun _ -> true) hist x astate =
+  let rec visit ((visited, astate) as acc) addr =
+    if CanonValue.Set.mem addr visited then acc
+    else
+      let astate =
+        SafeAttributes.map_post_attrs astate ~f:(fun attrs ->
+            BaseAddressAttributes.add_one addr (ContentsOverwritten hist) attrs
+            |> BaseAddressAttributes.initialize addr )
+      in
+      SafeMemory.fold_edges `Post addr astate
+        ~init:(CanonValue.Set.add addr visited, astate)
+        ~f:(fun ((visited, astate) as acc) (access, (dest, _)) ->
+          match (access : BaseMemory.Access.t) with
+          | Dereference ->
+              if havoc_filter (downcast addr) then
+                ( visited
+                , SafeMemory.map_post_heap astate
+                    ~f:(BaseMemory.add_edge addr access (AbstractValue.mk_fresh (), hist)) )
+              else acc
+          | FieldAccess _ | ArrayAccess _ ->
+              visit acc dest )
+  in
+  visit (CanonValue.Set.empty, astate) (CanonValue.canon' astate x) |> snd
 
 
 let add_need_dynamic_type_specialization receiver_addr astate =
