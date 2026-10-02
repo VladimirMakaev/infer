@@ -137,11 +137,17 @@ module Lock = struct
     let rec strip_pointers (typ : Typ.t) =
       match typ.desc with Tptr (typ, _) -> strip_pointers typ | _ -> typ
     in
+    (* eg the lock [&g] on a global [std::mutex g] has type [std::mutex&*] *)
+    let typ =
+      get_typ tenv lock
+      |> Option.map ~f:(fun typ ->
+          let typ = strip_pointers typ in
+          AbstractAddress.get_pointee_typ typ |> Option.value_map ~default:typ ~f:strip_pointers )
+    in
     (* two acquisitions may take distinct locks, eg elements of an array with lock striping *)
     may_denote_distinct_objects lock
     ||
-    (* eg the lock [&g] on a global [std::mutex g] has type [std::mutex&*] *)
-    match get_typ tenv lock |> Option.map ~f:strip_pointers with
+    match typ with
     | Some {Typ.desc= Tstruct name} ->
         ConcurrencyModels.is_recursive_lock_type name
         || RecursiveMutexInit.is_recursive tenv ~caller:procname name lock
@@ -1033,7 +1039,8 @@ type t =
   ; var_state: VarDomain.t
   ; field_aliases: FieldAliases.t
   ; null_locs: NullLocs.t
-  ; lazily_initalized: LazilyInitialized.t }
+  ; lazily_initalized: LazilyInitialized.t
+  ; return_alias: ReturnAliasDomain.t }
 [@@deriving abstract_domain]
 
 let initial =
@@ -1047,7 +1054,8 @@ let initial =
   ; var_state= VarDomain.top
   ; field_aliases= FieldAliases.top
   ; null_locs= NullLocs.empty
-  ; lazily_initalized= LazilyInitialized.empty }
+  ; lazily_initalized= LazilyInitialized.empty
+  ; return_alias= ReturnAliasDomain.bottom }
 
 
 let pp fmt astate =
@@ -1062,11 +1070,13 @@ let pp fmt astate =
      field_aliases= %a;@;\
      null_locs= %a\n\
      lazily_initialized= %a\n\
+     return_alias= %a\n\
     \     @]}"
     GuardToLockMap.pp astate.guard_map LockState.pp astate.lock_state NullLocsCriticalPairs.pp
     astate.critical_pairs AttributeDomain.pp astate.attributes ThreadDomain.pp astate.thread
     ScheduledWorkDomain.pp astate.scheduled_work VarDomain.pp astate.var_state FieldAliases.pp
     astate.field_aliases NullLocs.pp astate.null_locs LazilyInitialized.pp astate.lazily_initalized
+    ReturnAliasDomain.pp astate.return_alias
 
 
 let add_critical_pair ~tenv_opt lock_state null_locs event ~loc acc =
@@ -1227,7 +1237,8 @@ type summary =
   ; scheduled_work: ScheduledWorkDomain.t
   ; lock_state: LockState.t
   ; attributes: AttributeDomain.t
-  ; return_attribute: Attribute.t }
+  ; return_attribute: Attribute.t
+  ; return_alias: HilExp.AccessExpression.t option }
 
 let empty_summary : summary =
   { critical_pairs= CriticalPairs.bottom
@@ -1235,19 +1246,21 @@ let empty_summary : summary =
   ; scheduled_work= ScheduledWorkDomain.bottom
   ; lock_state= LockState.top
   ; attributes= AttributeDomain.top
-  ; return_attribute= Attribute.top }
+  ; return_attribute= Attribute.top
+  ; return_alias= None }
 
 
 let pp_summary fmt (summary : summary) =
   F.fprintf fmt
-    "{@[<v>thread= %a; return_attributes= %a;@;\
+    "{@[<v>thread= %a; return_attributes= %a; return_alias= %a;@;\
      critical_pairs=%a;@;\
      scheduled_work= %a;@;\
      lock_state= %a;@;\
      attributes= %a@]}"
-    ThreadDomain.pp summary.thread Attribute.pp summary.return_attribute CriticalPairs.pp
-    summary.critical_pairs ScheduledWorkDomain.pp summary.scheduled_work LockState.pp
-    summary.lock_state AttributeDomain.pp summary.attributes
+    ThreadDomain.pp summary.thread Attribute.pp summary.return_attribute
+    (Pp.option HilExp.AccessExpression.pp)
+    summary.return_alias CriticalPairs.pp summary.critical_pairs ScheduledWorkDomain.pp
+    summary.scheduled_work LockState.pp summary.lock_state AttributeDomain.pp summary.attributes
 
 
 let is_heap_loc formals acc_exp =
@@ -1285,6 +1298,25 @@ let integrate_summary ?(release_held_locks = false) ~tenv ~procname ~lhs ~subst 
   in
   (* optimistically assume non-null return values, for lazy-init detection purposes *)
   set_non_null formals lhs astate
+
+
+let bind_return_alias ~callee ~lhs actuals (summary : summary) (astate : t) =
+  match (summary.return_alias, summary.return_attribute) with
+  | Some alias, Nothing ->
+      (* resolving [lhs] to the alias would hide any other return attribute attached to [lhs] *)
+      ReturnAliasDomain.subst ~callee actuals alias
+      |> Option.value_map ~default:astate ~f:(fun access_expr ->
+          let ret_var, _ = HilExp.AccessExpression.get_base lhs in
+          let var_state =
+            VarDomain.set ret_var (AccessExpressionOrConst.AE access_expr) astate.var_state
+          in
+          {astate with var_state} )
+  | _ ->
+      astate
+
+
+let assign_return formals ~lhs ~rhs (astate : t) =
+  {astate with return_alias= ReturnAliasDomain.assign formals ~lhs ~rhs astate.return_alias}
 
 
 let summary_of_astate : Procdesc.t -> t -> summary =
@@ -1327,7 +1359,8 @@ let summary_of_astate : Procdesc.t -> t -> summary =
   ; scheduled_work= astate.scheduled_work
   ; lock_state= astate_without_guard.lock_state
   ; attributes
-  ; return_attribute }
+  ; return_attribute
+  ; return_alias= ReturnAliasDomain.to_summary proc_desc astate.return_alias }
 
 
 let remove_dead_vars (astate : t) deadvars =
