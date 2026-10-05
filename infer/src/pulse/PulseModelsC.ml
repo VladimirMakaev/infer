@@ -250,6 +250,39 @@ include struct
     remaining max_cells_written_one_by_one typ >= 0
 
 
+  (** write zero into each scalar and pointer cell of a new object of type [typ] at [addr],
+      recursing into struct fields but skipping arrays, unions and struct fields at offset 0: Pulse
+      does not relate the cells written through another member of a union, or through a pointer to
+      the object cast to the type of its first field, to the ones of the object *)
+  let rec zero_cells addr (typ : Typ.t) : unit DSL.model_monad =
+    let* {analysis_data= {tenv}} = get_data in
+    match typ.desc with
+    | Tint _ | Tfloat _ | Tptr _ ->
+        store ~ref:addr @= null
+    | Tstruct name when Typ.Name.is_union name ->
+        ret ()
+    | Tstruct name -> (
+      match Tenv.lookup tenv name with
+      | None ->
+          ret ()
+      | Some {fields} ->
+          let fields =
+            match fields with
+            | ({typ= {Typ.desc= Tstruct _}} : Struct.field) :: fields_after_first ->
+                fields_after_first
+            | _ ->
+                fields
+          in
+          list_iter fields ~f:(fun {Struct.name= field; typ= field_typ} ->
+              if Fieldname.is_internal field || Fieldname.is_capture_field_in_closure field then
+                ret ()
+              else
+                let* field_addr = access NoAccess addr (FieldAccess field) in
+                zero_cells field_addr field_typ ) )
+    | Tarray _ | Tvoid | Tfun _ | TVar _ ->
+        ret ()
+
+
   (** the object at [dest] gets unknown contents: the cells of the object already in the heap get
       fresh values, and so do the other cells when they are read later or seen by callers *)
   let overwrite_contents dest : unit DSL.model_monad =
@@ -419,7 +452,22 @@ include struct
     start_model
     @@ fun () ->
     let total_size_exp = Exp.BinOp (Mult None, nmemb, size) in
-    alloc_common_dsl ~null_case:(not x) ~initialize:true CMalloc (Some total_size_exp)
+    let alloc =
+      let* block =
+        lift_to_monad_and_get_result
+          ( start_model
+          @@ fun () -> Basic.return_alloc_not_null CMalloc ~initialize:true (Some total_size_exp) )
+      in
+      (* Pulse relates neither [p[0]] to [*p] nor [p[i].f] to [p->f], so zeros written in an array
+         would survive writes through indices: only zero the cells of a single object, as [memset]
+         does. *)
+      let* {analysis_data= {tenv}} = get_data in
+      option_iter
+        (single_object_type total_size_exp |> Option.filter ~f:(has_few_cells tenv))
+        ~f:(zero_cells block)
+      @@> assign_ret block
+    in
+    if x then alloc else disj [alloc; return_null_dsl]
 
 
   let close_fd fd =
