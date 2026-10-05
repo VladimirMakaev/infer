@@ -14,9 +14,7 @@ module Collection = PulseModelsGenericArrayBackedCollection
 module GenericMapCollection = PulseModelsCpp.GenericMapCollection
 
 (* Models of [std::deque] and of the node-based containers ([std::list], [std::map], [std::set],
-   [std::unordered_map], ...), and of their libc++ iterators. On libstdc++, whose iterators are not
-   modelled, [begin()], [end()], [find()] and [erase()] are not modelled either; the other models
-   apply.
+   [std::unordered_map], ...) of libc++ and libstdc++, and of their iterators.
 
    The elements of a container are the cells of its backing array so that [clear()] can invalidate
    all the elements known to the analysis. An iterator stores the address of its element, or the
@@ -323,7 +321,7 @@ let mapped_value_reference ~inserts ~desc this : model_no_non_disj =
   astate
 
 
-(* the user-facing iterator classes of the modelled libc++ containers *)
+(* the user-facing iterator classes of the modelled containers of libc++ and libstdc++, in [std] *)
 let iterators =
   [ "__deque_iterator"
   ; "__hash_const_iterator"
@@ -333,8 +331,16 @@ let iterators =
   ; "__list_iterator"
   ; "__map_const_iterator"
   ; "__map_iterator"
-  ; "__tree_const_iterator" ]
+  ; "__tree_const_iterator"
+  ; "_Deque_iterator"
+  ; "_List_const_iterator"
+  ; "_List_iterator"
+  ; "_Rb_tree_const_iterator"
+  ; "_Rb_tree_iterator" ]
 
+
+(* the iterator classes of the unordered containers of libstdc++, in [std::__detail] *)
+let detail_iterators = ["_Node_const_iterator"; "_Node_iterator"]
 
 let containers : (string * Invalidation.std_container) list =
   [ ("deque", Deque)
@@ -353,7 +359,10 @@ let containers : (string * Invalidation.std_container) list =
    appends to some names *)
 let strip_template_args name = String.lsplit2 name ~on:'<' |> Option.value_map ~f:fst ~default:name
 
-let is_iterator name = List.mem iterators (strip_template_args name) ~equal:String.equal
+let is_iterator name =
+  let name = strip_template_args name in
+  List.mem iterators name ~equal:String.equal || List.mem detail_iterators name ~equal:String.equal
+
 
 let container_of_name name =
   List.Assoc.find containers ~equal:String.equal (strip_template_args name)
@@ -475,7 +484,7 @@ let on_iterator model : model_no_non_disj =
  fun ({callee_procname} as model_data) astate ->
   let iterator = callee_class_name callee_procname |> Option.value ~default:"" in
   model
-    ~has_token:(String.equal iterator "__deque_iterator")
+    ~has_token:(List.mem ["__deque_iterator"; "_Deque_iterator"] iterator ~equal:String.equal)
     ~desc:(callee_desc callee_procname iterator)
     model_data astate
 
@@ -493,12 +502,17 @@ let on_container model : model_no_non_disj =
 
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
-  let iterator_typs () = List.map iterators ~f:(fun iterator -> -"std" &:: iterator) in
+  let detail () = -"std" &:: "__detail" in
+  let iterator_typs () =
+    List.map iterators ~f:(fun iterator -> -"std" &:: iterator)
+    @ List.map detail_iterators ~f:(fun iterator -> detail () &:: iterator)
+  in
   let is_iterator _ name = is_iterator name in
   let is_container ?(f = fun _ -> true) _ name = Option.exists (container_of_name name) ~f in
-  let iterator_method name = -"std" &::+ is_iterator &:: name in
-  let iterator_matchers =
-    [ ( -"std" &::+ is_iterator &::+ is_iterator $ capt_arg_payload
+  let iterator_matchers ~in_detail =
+    let namespace () = if in_detail then detail () else -"std" in
+    let iterator_method name = namespace () &::+ is_iterator &:: name in
+    [ ( namespace () &::+ is_iterator &::+ is_iterator $ capt_arg_payload
       $+ capt_arg_payload_of_typ_exists (iterator_typs ())
       $--> fun this other -> on_iterator (Iterator.constructor this other) )
     ; ( iterator_method "operator=" <>$ capt_arg_payload $+ capt_arg_payload
@@ -518,15 +532,20 @@ let matchers : matcher list =
       $--> fun iter ret_iter ->
       on_iterator (Iterator.operator_step_postfix `MinusMinus iter ret_iter) ) ]
   in
+  (* the iterators of the unordered containers of libstdc++ are compared as their base class *)
   let comparison_matchers =
-    [ -"std" &:: "operator=="
-      $ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $+ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $--> Iterator.operator_compare `Equal ~desc:"iterator operator=="
-    ; -"std" &:: "operator!="
-      $ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $+ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $--> Iterator.operator_compare `NotEqual ~desc:"iterator operator!=" ]
+    let compared_typs () = (detail () &:: "_Node_iterator_base") :: iterator_typs () in
+    List.concat_map
+      [-"std"; detail ()]
+      ~f:(fun namespace ->
+        [ namespace &:: "operator=="
+          $ capt_arg_payload_of_typ_exists (compared_typs ())
+          $+ capt_arg_payload_of_typ_exists (compared_typs ())
+          $--> Iterator.operator_compare `Equal ~desc:"iterator operator=="
+        ; namespace &:: "operator!="
+          $ capt_arg_payload_of_typ_exists (compared_typs ())
+          $+ capt_arg_payload_of_typ_exists (compared_typs ())
+          $--> Iterator.operator_compare `NotEqual ~desc:"iterator operator!=" ] )
   in
   let container_method ?f name = -"std" &::+ is_container ?f &:: name in
   let returns_iterator name model =
@@ -623,7 +642,8 @@ let matchers : matcher list =
     ; -"std" &:: "deque" &:: "emplace" $ capt_arg_payload
       $++$--> deque_insertion Emplace ~ret:`Iterator ~desc:(deque_desc "emplace") ]
   in
-  iterator_matchers @ comparison_matchers @ container_matchers @ lookup_matchers
+  iterator_matchers ~in_detail:false
+  @ iterator_matchers ~in_detail:true @ comparison_matchers @ container_matchers @ lookup_matchers
   @ front_back_matchers @ map_matchers @ deque_matchers
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
