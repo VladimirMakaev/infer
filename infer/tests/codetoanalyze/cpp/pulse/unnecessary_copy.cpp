@@ -1056,3 +1056,21 @@ NoMoveCtor return_local_without_move_ctor_in_mixed_conditional_ok(bool c) {
   fill_no_move_ctor(&local);
   return c ? local : make_no_move_ctor();
 }
+
+namespace std {
+// like the algorithms of the library, reaches the elements through the raw
+// pointers of the iterators
+template <class It>
+void zero_range_for_test(It first, It last) {
+  for (auto p = first.base(); p != last.base(); ++p) {
+    *p = 0;
+  }
+}
+} // namespace std
+
+int copy_modified_by_std_function_through_iterators_ok(
+    const std::vector<int>& v) {
+  std::vector<int> c = v;
+  std::zero_range_for_test(c.begin(), c.end());
+  return c[0];
+}

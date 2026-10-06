@@ -485,6 +485,32 @@ let iterator_function_matchers =
   ]
 
 
+let modelled_iterators =
+  QualifiedCppName.Match.of_fuzzy_qual_names ["std::__wrap_iter"; "__gnu_cxx::__normal_iterator"]
+
+
+(* The translated bodies of the standard algorithms reach the elements through the actual fields of
+   the iterators, which the models above do not set, so their writes would be lost: calls to them
+   are unknown calls, as when their bodies are not translated. [std::move] and [std::forward] may
+   take an iterator by value but only cast it. *)
+let is_std_function_on_modelled_iterators (_tenv, (proc_name : Procname.t)) _ =
+  match proc_name with
+  | C {c_name; c_template_args= Template {args}} -> (
+    match QualifiedCppName.to_rev_list c_name with
+    | fname :: (_ :: _ as rev_namespaces)
+      when String.equal (List.last_exn rev_namespaces) "std"
+           && not (List.mem ["move"; "forward"] fname ~equal:String.equal) ->
+        List.exists args ~f:(function
+          | Typ.TType {desc= Tstruct name} ->
+              QualifiedCppName.Match.match_qualifiers modelled_iterators (Typ.Name.qual_name name)
+          | _ ->
+              false )
+    | _ ->
+        false )
+  | _ ->
+      false
+
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   [ -"std" &:: "__wrap_iter" &:: "__wrap_iter" $ capt_arg_payload $+ capt_arg_payload
@@ -531,5 +557,7 @@ let matchers : matcher list =
   @ arithmetic_matchers "std" "__wrap_iter"
   @ arithmetic_matchers "__gnu_cxx" "__normal_iterator"
   @ iterator_function_matchers @ algorithm_matchers
+  @ [ +is_std_function_on_modelled_iterators
+      &::.*++> Basic.unknown_call "standard library function on modelled iterators" ]
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
