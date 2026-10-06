@@ -467,3 +467,52 @@ int std_function_converted_const_pointer_arg_ok(
   }
   return 0;
 }
+
+int identity(int x) { return x; }
+
+bool unknown_condition();
+
+void std_function_assign_maybe_null_function_pointer_ok(
+    std::function<int(int)>& f) {
+  f = unknown_condition() ? identity : nullptr;
+}
+
+std::function<int(int)> std_function_from_maybe_null_function_pointer_ok() {
+  int (*fp)(int) = unknown_condition() ? identity : nullptr;
+  return std::function<int(int)>(fp);
+}
+
+struct FunctionHolder {
+  std::function<int(int)> f;
+};
+
+FunctionHolder std_function_copy_maybe_null_function_pointer_ok() {
+  FunctionHolder holder;
+  holder.f = unknown_condition() ? identity : nullptr;
+  return holder;
+}
+
+int* return_null() { return nullptr; }
+
+int global_int;
+
+int* return_global() { return &global_int; }
+
+int std_function_from_function_pointer_null_bad() {
+  std::function<int*()> f = return_null;
+  return *f();
+}
+
+int std_function_from_function_pointer_nonnull_ok() {
+  std::function<int*()> f = return_global;
+  return *f();
+}
+
+// the null dereference is reported in the version of the callee specialized for
+// the default argument
+int call_default_function_null_bad(
+    const std::function<int*()>& f = return_null) {
+  return *f();
+}
+
+int call_default_function() { return call_default_function_null_bad(); }
