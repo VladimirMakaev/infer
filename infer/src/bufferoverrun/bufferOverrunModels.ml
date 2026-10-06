@@ -180,7 +180,7 @@ let memcpy dest_exp src_exp size_exp =
   let exec _ ~ret:_ mem =
     let dest_loc = Sem.eval_arg_locs dest_exp mem in
     let v = Dom.Mem.find_set (Sem.eval_arg_locs src_exp mem) mem in
-    Dom.Mem.update_mem dest_loc v mem
+    Dom.Mem.update_mem dest_loc v mem |> BoUtils.Exec.forget_c_strlen dest_loc
   and check {location; integer_type_widths} mem cond_set =
     BoUtils.Check.lindex_byte integer_type_widths ~array_exp:dest_exp ~byte_index_exp:size_exp
       ~last_included:true mem location cond_set
@@ -191,7 +191,7 @@ let memcpy dest_exp src_exp size_exp =
 
 
 let memset arr_exp size_exp =
-  let exec _ ~ret:_ mem = mem
+  let exec _ ~ret:_ mem = BoUtils.Exec.forget_c_strlen (Sem.eval_arg_locs arr_exp mem) mem
   and check {location; integer_type_widths} mem cond_set =
     BoUtils.Check.lindex_byte integer_type_widths ~array_exp:arr_exp ~byte_index_exp:size_exp
       ~last_included:true mem location cond_set
@@ -231,13 +231,45 @@ let strcpy dest_exp src_exp =
 
 
 let strncpy dest_exp src_exp size_exp =
-  let {exec= memcpy_exec; check= memcpy_check} = memcpy dest_exp src_exp size_exp in
+  let {exec= memcpy_exec} = memcpy dest_exp src_exp size_exp in
   let exec model_env ~ret mem =
     let dest_strlen_loc = PowLoc.of_c_strlen (Sem.eval_arg_locs dest_exp mem) in
     let strlen = Dom.Mem.find_set (PowLoc.of_c_strlen (Sem.eval_arg_locs src_exp mem)) mem in
     mem |> memcpy_exec model_env ~ret |> Dom.Mem.update_mem dest_strlen_loc strlen
+  and check {location; integer_type_widths} mem cond_set =
+    let check_src_read read_size cond_set =
+      BoUtils.Check.array_access_byte
+        ~arr:(Sem.eval_arr integer_type_widths src_exp mem)
+        ~idx:read_size ~is_plus:true ~last_included:true
+        ~latest_prune:(Dom.Mem.get_latest_prune mem) location cond_set
+    in
+    let size = Sem.eval integer_type_widths size_exp mem in
+    let cond_set =
+      BoUtils.Check.lindex_byte integer_type_widths ~array_exp:dest_exp ~byte_index_exp:size_exp
+        ~last_included:true mem location cond_set
+    in
+    let src_strlen = Dom.Mem.get_c_strlen (Sem.eval_arg_locs src_exp mem) mem in
+    match Dom.Val.get_itv src_strlen with
+    | NonBottom strlen when Itv.Bound.is_pinf (Itv.ItvPure.ub strlen) ->
+        (* raw bytes written to the source may not be terminated *)
+        check_src_read size cond_set
+    | NonBottom strlen as strlen_itv
+      when not
+             (Symb.SymbolSet.exists
+                (fun s -> Symb.SymbolPath.is_field_of_var (Symb.Symbol.path s))
+                (Itv.ItvPure.get_symbols strlen) ) ->
+        (* strncpy stops reading the source at its null character *)
+        let read_size =
+          Itv.min_sem ~use_minmax_bound:true (Itv.incr strlen_itv) (Dom.Val.get_itv size)
+        in
+        let traces = Trace.Set.join (Dom.Val.get_traces size) (Dom.Val.get_traces src_strlen) in
+        check_src_read (Dom.Val.of_itv ~traces read_size) cond_set
+    | _ ->
+        (* the string length is unknown, e.g. no string operation wrote a local array and callers
+           do not substitute the symbol of its length: assume that the source is terminated *)
+        cond_set
   in
-  {exec; check= memcpy_check}
+  {exec; check}
 
 
 let strcat dest_exp src_exp =

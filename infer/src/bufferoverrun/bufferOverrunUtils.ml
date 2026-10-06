@@ -325,6 +325,13 @@ module Exec = struct
           copy_value () )
     | _ ->
         copy_value ()
+
+
+  let forget_c_strlen locs mem =
+    (* the string length of the unknown location is that location, whose value must stay unknown *)
+    let locs = PowLoc.remove_unknown locs in
+    if PowLoc.is_bot locs then mem
+    else Dom.Mem.update_mem (PowLoc.of_c_strlen locs) Dom.Val.Itv.nat mem
 end
 
 module Check = struct
