@@ -251,7 +251,23 @@ module Implementation : DBWriterS.S = struct
     in
     let attribute_replace_statement_adb = do_attribute_replace_statement AnalysisDatabase in
     let attribute_replace_statement_cdb = do_attribute_replace_statement CaptureDatabase in
-    fun ~proc_uid ~proc_attributes ~cfg ~callees ~analysis ->
+    let select_definition_statement db =
+      Database.register_statement db
+        "SELECT proc_attributes FROM procedures WHERE proc_uid = :k AND cfg IS NOT NULL"
+    in
+    let select_definition_statement_adb = select_definition_statement AnalysisDatabase in
+    let select_definition_statement_cdb = select_definition_statement CaptureDatabase in
+    fun ~check_stored_definition ~proc_uid ~proc_attributes ~cfg ~callees ~analysis ->
+      Option.iter check_stored_definition ~f:(fun check ->
+          let stmt =
+            if analysis then select_definition_statement_adb else select_definition_statement_cdb
+          in
+          Database.with_registered_statement stmt ~f:(fun db select_stmt ->
+              Sqlite3.bind select_stmt 1 (Sqlite3.Data.TEXT proc_uid)
+              |> SqliteUtils.check_result_code db ~log:"select definition bind proc_uid" ;
+              SqliteUtils.result_single_column_option ~finalize:false ~log:"select definition" db
+                select_stmt )
+          |> Option.iter ~f:check ) ;
       let run_query stmt =
         Database.with_registered_statement stmt ~f:(fun db replace_stmt ->
             Sqlite3.bind replace_stmt 1 (* :proc_uid *) (Sqlite3.Data.TEXT proc_uid)
@@ -468,7 +484,8 @@ type t =
       ; proc_attributes: Sqlite3.Data.t
       ; cfg: Sqlite3.Data.t
       ; callees: Sqlite3.Data.t
-      ; analysis: bool }
+      ; analysis: bool
+      ; check_stored_definition: (Sqlite3.Data.t -> unit) option }
   | ShrinkAnalysisDB
   | Start
   | StoreIssueLog of {checker: string; source_file: Sqlite3.Data.t; issue_log: Sqlite3.Data.t}
@@ -542,8 +559,10 @@ let perform = function
       Implementation.merge_captures ~root ~infer_deps_file
   | MergeSummaries {infer_outs} ->
       Implementation.merge_summaries ~infer_outs
-  | ReplaceAttributes {proc_uid; proc_attributes; cfg; callees; analysis} ->
-      Implementation.replace_attributes ~proc_uid ~proc_attributes ~cfg ~callees ~analysis
+  | ReplaceAttributes {proc_uid; proc_attributes; cfg; callees; analysis; check_stored_definition}
+    ->
+      Implementation.replace_attributes ~check_stored_definition ~proc_uid ~proc_attributes ~cfg
+        ~callees ~analysis
   | ShrinkAnalysisDB ->
       Implementation.shrink_analysis_db ()
   | Start ->

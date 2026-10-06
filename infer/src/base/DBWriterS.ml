@@ -35,12 +35,15 @@ module type S = sig
   val merge_summaries : infer_outs:string list -> unit
 
   val replace_attributes :
-       proc_uid:string
+       check_stored_definition:(Sqlite3.Data.t -> unit) option
+    -> proc_uid:string
     -> proc_attributes:Sqlite3.Data.t
     -> cfg:Sqlite3.Data.t
     -> callees:Sqlite3.Data.t
     -> analysis:bool
     -> unit
+  (** [check_stored_definition] receives the attributes of the procedure already stored with a CFG
+      under [proc_uid], if any, before the row is replaced *)
 
   val shrink_analysis_db : unit -> unit
   (** Delete all analysis summaries (by overwriting with [NULL]) and [VACUUM]ing. *)
