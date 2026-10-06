@@ -164,6 +164,9 @@ type t =
   | StaticType of Typ.Name.t
       (** type gotten or inferred from types in SIL instructions (only for Hack frontend)*)
   | StdMoved
+  | StdVectorErased of Trace.t
+      (** some elements of this internal array of a [std::vector] were erased; the callers
+          invalidate all the elements that they know of *)
   | StdVectorReserve
   | Tainted of TaintedSet.t
   | TaintSanitized of TaintSanitizedSet.t
@@ -271,6 +274,8 @@ module Attributes : sig
   val is_std_moved : t -> bool
 
   val is_std_vector_reserved : t -> bool
+
+  val get_std_vector_erased : t -> Trace.t option
 
   val get_last_lookup : t -> AbstractValue.t option
 
