@@ -502,6 +502,22 @@ int FN_map_find_absent_key_bad() {
   return map.find(1)->second;
 }
 
+static int map_value;
+
+int* map_lookup_or_null(std::map<int, int*>& map, int key) {
+  auto it = map.find(key);
+  if (it == map.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+// nor is a key that was just inserted, so looking it up can still fail
+int FP_lookup_after_insert_ok(std::map<int, int*>& map) {
+  map.emplace(1, &map_value);
+  return *map_lookup_or_null(map, 1);
+}
+
 void clear_map(std::map<int, int>& map) { map.clear(); }
 
 // clear() in a callee does not know the elements that the caller has seen, so

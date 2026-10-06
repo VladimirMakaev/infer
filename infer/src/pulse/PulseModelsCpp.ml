@@ -1056,25 +1056,70 @@ module Vector = struct
             vector vector_f location astate
 
 
-  let push_back_common vector ~vector_f ~desc : model_no_non_disj =
-   fun {path; location; ret= ret_id, _} astate ->
+  let is_scalar typ = Typ.is_int typ || Typ.is_pointer typ
+
+  (* The pushed value can be an element of the vector itself, so it is read before the vector
+     reallocates. Elements of class type would need their constructor. *)
+  let read_pushed_value path location callee_procname (value : _ FuncArg.t option) astate =
+    match (Procname.get_class_type_name callee_procname, value) with
+    | ( Some (CppClass {template_spec_info= Template {args= TType elem_typ :: _}})
+      , Some
+          { arg_payload
+          ; typ= {Typ.desc= Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))} } )
+      when is_scalar elem_typ && is_scalar value_typ ->
+        let+ astate, v =
+          PulseOperations.eval_access path Read location arg_payload Dereference astate
+        in
+        (astate, Some v)
+    | _ ->
+        Ok (astate, None)
+
+
+  (* what the pushed value owns stays reachable from the vector *)
+  let write_last_element path location vector pushed astate =
+    match pushed with
+    | None ->
+        Sat (Ok astate)
+    | Some v ->
+        let** astate, last = last_index path location vector astate in
+        Sat
+          (let* astate, elem =
+             GenericArrayBackedCollection.element path location vector last astate
+           in
+           PulseOperations.write_deref path location ~ref:elem ~obj:v astate )
+
+
+  let push_back_common ?value vector ~vector_f ~desc : model_no_non_disj =
+   fun {path; location; callee_procname; ret= ret_id, _} astate ->
+    let<*> astate, pushed = read_pushed_value path location callee_procname value astate in
     let<**> astate = GenericArrayBackedCollection.increase_size path location vector ~desc astate in
-    let<+> astate = reallocate_unless_reserved path location vector vector_f ~desc astate in
+    let<*> astate = reallocate_unless_reserved path location vector vector_f ~desc astate in
+    let<++> astate = write_last_element path location vector pushed astate in
     PulseOperations.write_id ret_id
       (fst vector, Hist.add_call path location desc (snd vector))
       astate
 
 
-  let push_back_cpp vector ~vector_f ~desc = push_back_common vector ~vector_f:(Some vector_f) ~desc
+  let push_back_cpp vector value ~vector_f ~desc =
+    push_back_common ~value vector ~vector_f:(Some vector_f) ~desc
+
 
   let push_back vector ~desc = push_back_common vector ~vector_f:None ~desc
 
-  let emplace_back vector ~desc : model_no_non_disj =
-   fun {path; location; ret= ret_id, _} astate ->
+  let emplace_back vector args ~desc : model_no_non_disj =
+   fun {path; location; callee_procname; ret= ret_id, _} astate ->
+    let<*> astate, pushed =
+      match args with
+      | [value] ->
+          read_pushed_value path location callee_procname (Some value) astate
+      | _ ->
+          Ok (astate, None)
+    in
     let<**> astate = GenericArrayBackedCollection.increase_size path location vector ~desc astate in
     let<*> astate =
       reallocate_unless_reserved path location vector (Some EmplaceBack) ~desc astate
     in
+    let<**> astate = write_last_element path location vector pushed astate in
     (* since C++17 the new element is returned by reference *)
     let<**> astate, last = last_index path location vector astate in
     let<+> astate, (elem, _) =
@@ -1877,7 +1922,7 @@ let simple_matchers =
       $+...$--> Vector.invalidate_references_one_more Emplace
       |> with_non_disj
     ; -"std" &:: "vector" &:: "emplace_back" $ capt_arg_payload
-      $+...$--> Vector.emplace_back ~desc:"std::vector::emplace_back()"
+      $++$--> Vector.emplace_back ~desc:"std::vector::emplace_back()"
       |> with_non_disj
     ; (* the returned iterator is passed as the last argument *)
       -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
@@ -1908,8 +1953,8 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "shrink_to_fit" <>$ capt_arg_payload
       $--> Vector.invalidate_references ShrinkToFit
       |> with_non_disj
-    ; -"std" &:: "vector" &:: "push_back" <>$ capt_arg_payload
-      $+...$--> Vector.push_back_cpp ~vector_f:PushBack ~desc:"std::vector::push_back()"
+    ; -"std" &:: "vector" &:: "push_back" <>$ capt_arg_payload $+ capt_arg
+      $--> Vector.push_back_cpp ~vector_f:PushBack ~desc:"std::vector::push_back()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "pop_back" <>$ capt_arg_payload
       $+...$--> Vector.pop_back ~desc:"std::vector::pop_back()"
