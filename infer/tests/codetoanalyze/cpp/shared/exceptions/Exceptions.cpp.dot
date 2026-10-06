@@ -279,32 +279,32 @@ digraph cfg {
 	
 
 	 "deref_null#11536394632240553702.ea4eed042da22ab7_7" -> "deref_null#11536394632240553702.ea4eed042da22ab7_2" ;
-"main.fad58de7366495db_1" [label="1: Start main\nFormals: \nLocals:  \n  " color=yellow style=filled]
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_1" [label="1: Start main\nFormals: \nLocals:  \n  " color=yellow style=filled]
 	
 
-	 "main.fad58de7366495db_1" -> "main.fad58de7366495db_6" ;
-"main.fad58de7366495db_2" [label="2: Exit main \n  " color=yellow style=filled]
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_1" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_6" ;
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_2" [label="2: Exit main \n  " color=yellow style=filled]
 	
 
-"main.fad58de7366495db_4" [label="4:  Return Stmt \n   n$0=_fun_deref(null:int*) [line 74, column 12]\n " shape="box"]
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_4" [label="4:  Return Stmt \n   n$0=_fun_deref(null:int*) [line 74, column 12]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_4" -> "main.fad58de7366495db_5" ;
-"main.fad58de7366495db_5" [label="5:  Return Stmt \n   *&return:int=n$0 [line 74, column 5]\n " shape="box"]
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_4" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_5" ;
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_5" [label="5:  Return Stmt \n   *&return:int=n$0 [line 74, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_2" ;
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_8" [color="red" ];
-"main.fad58de7366495db_6" [label="6:  CXXTry \n   TRY_ENTRY; [line 73, column 3]\n " shape="box"]
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_5" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_2" ;
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_5" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_8" [color="red" ];
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_6" [label="6:  CXXTry \n   TRY_ENTRY; [line 73, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_6" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_7" [label="7:  Return Stmt \n   *&return:int=-1 [line 76, column 5]\n " shape="box"]
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_6" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_4" ;
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_7" [label="7:  Return Stmt \n   *&return:int=-1 [line 76, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_7" -> "main.fad58de7366495db_2" ;
-"main.fad58de7366495db_8" [label="8:  CXXTry \n   CATCH_ENTRY; [line 73, column 3]\n " shape="box"]
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_7" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_2" ;
+"main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_8" [label="8:  CXXTry \n   CATCH_ENTRY; [line 73, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_8" -> "main.fad58de7366495db_7" ;
+	 "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_8" -> "main#ce6a5b44e396518ae7bd28149c5d.8d4639db1ebd023e_7" ;
 }

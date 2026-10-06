@@ -5,7 +5,7 @@ digraph callgraph {
   N0 [ label = "c\nflag=true" ];
   N0 -> N1 ;
 
-  N4 [ label = "main\nflag=true" ];
+  N4 [ label = "main{803c5170888b8642f2a97e5e9423d399}\nflag=true" ];
 
   N2 [ label = "d\nflag=false" ];
 
