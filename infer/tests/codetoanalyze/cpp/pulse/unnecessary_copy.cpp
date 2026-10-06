@@ -1123,3 +1123,25 @@ void variable_passed_once_bad(int x) {
   std::shared_ptr<int> v = std::make_shared<int>(x);
   take_one_ptr(v);
 }
+
+struct InfoWithId {
+  std::string id;
+};
+
+InfoWithId* get_info_with_id();
+
+// the object behind `g` is not owned by the procedure: moving from it could
+// break its owner
+void copy_assign_from_unowned_pointee_ok(InfoWithId& out) {
+  InfoWithId* g = get_info_with_id();
+  if (g != nullptr) {
+    out.id = g->id;
+  }
+}
+
+void copy_assign_from_pointee_of_local_bad(InfoWithId& out) {
+  InfoWithId local;
+  local.id = "a";
+  InfoWithId* p = &local;
+  out.id = p->id;
+}
