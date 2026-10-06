@@ -1355,11 +1355,16 @@ module PulseTransferFunctions = struct
       | _, Lvar pvar when is_global_func_pointer pvar ->
           Some pvar
       | `Use, Lvar pvar when is_global_constant pvar ->
-          Some pvar
-      | _ ->
           (* the cells written by an initializer are copied into the summaries of all the callers:
-             only inline small constants when their fields are accessed, when they are written to,
-             or when their address is stored *)
+             only inline small constants. Only globals of array or struct type are recorded, the
+             others are scalars. *)
+          let declared_typ =
+            List.Assoc.find (Procdesc.get_globals proc_desc) ~equal:Pvar.equal pvar
+          in
+          Option.some_if (Option.for_all declared_typ ~f:(is_inlinable_on_access tenv)) pvar
+      | _ ->
+          (* same as above, for the fields of constants, constants that are written to, and
+             constants whose address is stored *)
           let typ =
             match (access, typ.Typ.desc) with
             | `AddressStored, Tptr (pointee, _) ->
@@ -1967,14 +1972,30 @@ let initial tenv proc_attrs specialization location =
   [(ContinueProgram initial_astate, path)]
 
 
-let should_analyze proc_desc =
+(* the compiler evaluates constexpr initializers, and the summary of the initializer of a global
+   too big to be inlined is not used *)
+let is_non_inlinable_constexpr_initializer tenv proc_desc =
+  let proc_name = Procdesc.get_proc_name proc_desc in
+  (Procdesc.get_attributes proc_desc).is_ret_constexpr
+  && Option.is_some (Procname.get_global_name_of_initializer proc_name)
+  && Procdesc.find_map_instrs proc_desc ~f:(function
+       | Sil.Metadata (VariableLifetimeBegins {pvar; typ})
+         when Option.exists (Pvar.get_initializer_pname pvar) ~f:(Procname.equal proc_name) ->
+           Some typ
+       | _ ->
+           None )
+     |> Option.exists ~f:(fun typ -> not (PulseTransferFunctions.is_inlinable_on_access tenv typ))
+
+
+let should_analyze tenv proc_desc =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let matches regex =
     Str.string_match regex (Procname.to_unique_id proc_name) 0
     || Str.string_match regex (Procname.to_string proc_name) 0
   in
   (not (Option.exists Config.pulse_skip_procedures ~f:matches))
-  && not (Procdesc.is_too_big Pulse ~max_cfg_size:Config.pulse_max_cfg_size proc_desc)
+  && (not (Procdesc.is_too_big Pulse ~max_cfg_size:Config.pulse_max_cfg_size proc_desc))
+  && not (is_non_inlinable_constexpr_initializer tenv proc_desc)
 
 
 let exit_function limit analysis_data location posts non_disj_astate =
@@ -2223,9 +2244,9 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
       report_on_and_return_summaries exit_esink_summaries )
 
 
-let checker ?specialization ({InterproceduralAnalysis.proc_desc} as analysis_data) =
+let checker ?specialization ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) =
   let open IOption.Let_syntax in
-  if should_analyze proc_desc then (
+  if should_analyze tenv proc_desc then (
     DLS.set current_specialization specialization ;
     try
       match specialization with
