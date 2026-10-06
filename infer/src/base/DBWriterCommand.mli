@@ -30,7 +30,8 @@ type t =
       ; proc_attributes: Sqlite3.Data.t
       ; cfg: Sqlite3.Data.t
       ; callees: Sqlite3.Data.t
-      ; analysis: bool }
+      ; analysis: bool
+      ; check_stored_definition: (Sqlite3.Data.t -> unit) option }
   | ShrinkAnalysisDB
   | Start
   | StoreIssueLog of {checker: string; source_file: Sqlite3.Data.t; issue_log: Sqlite3.Data.t}
