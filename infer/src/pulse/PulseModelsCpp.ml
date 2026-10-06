@@ -779,35 +779,21 @@ module Vector = struct
     PulseOperations.write_id ret_id (arr_addr, Hist.add_event event arr_hist) astate
 
 
-  (** make [iter] point to the element at [index] in the backing array of [vector] *)
-  let write_iterator path location event vector iter index astate =
-    let pointer_hist = Hist.add_event event (snd iter) in
-    let pointer_val = (AbstractValue.mk_fresh (), pointer_hist) in
-    let* astate, (arr_addr, _arr_hist) =
-      GenericArrayBackedCollection.eval path Read location vector astate
-    in
-    let* astate, elem =
-      GenericArrayBackedCollection.eval_element path location (arr_addr, pointer_hist) index astate
-    in
-    PulseOperations.write_deref_field path location ~ref:iter GenericArrayBackedCollection.field
-      ~obj:(arr_addr, pointer_hist) astate
-    >>= PulseOperations.write_field path location ~ref:iter
-          GenericArrayBackedCollection.Iterator.internal_pointer ~obj:pointer_val
-    >>= PulseOperations.write_deref path location ~ref:pointer_val ~obj:elem
-
-
-  let vector_begin vector iter : model_no_non_disj =
+  let vector_begin ~desc vector iter : model_no_non_disj =
    fun {path; location} astate ->
-    let event = Hist.call_event path location "std::vector::begin()" in
+    let event = Hist.call_event path location desc in
     let index_zero = AbstractValue.mk_fresh () in
     let<**> astate = PulseArithmetic.and_eq_int index_zero IntLit.zero astate in
-    let<+> astate = write_iterator path location event vector iter index_zero astate in
+    let<+> astate =
+      GenericArrayBackedCollection.Iterator.point_into path location event ~collection:vector ~iter
+        ~index:index_zero astate
+    in
     astate
 
 
-  let vector_end vector iter : model_no_non_disj =
+  let vector_end ~desc vector iter : model_no_non_disj =
    fun {path; location} astate ->
-    let event = Hist.call_event path location "std::vector::end()" in
+    let event = Hist.call_event path location desc in
     let<*> astate, (arr_addr, _) =
       GenericArrayBackedCollection.eval path Read location vector astate
     in
@@ -910,22 +896,85 @@ module Vector = struct
     astate
 
 
-  let erase ~range vector iter : model_no_non_disj =
-   fun {path; location} astate ->
+  (* Iterators store the position of [begin()] as the element at index 0 (see [vector_begin]) plus
+     an offset, whereas [operator[]] uses the index itself, and an element edge of the internal
+     array does not say which of the two it uses, so try both. *)
+  let is_before_position astate array_edges index position =
+    let provably_lt astate lhs =
+      PulseArithmetic.prune_binop ~negated:false Ge (AbstractValueOperand lhs)
+        (AbstractValueOperand position) astate
+      |> SatUnsat.sat |> Option.is_none
+    in
+    provably_lt astate index
+    || List.exists array_edges ~f:(fun (access, (first, _)) ->
+        match (access : Access.t) with
+        | ArrayAccess (_, zero) when PulseArithmetic.is_known_zero astate zero -> (
+          match
+            PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) (PlusA None)
+              (AbstractValueOperand first) (AbstractValueOperand index) astate
+          with
+          | Sat (Ok (astate, offset_from_first)) ->
+              provably_lt astate offset_from_first
+          | Sat (Recoverable _ | FatalError _) | Unsat _ ->
+              false )
+        | _ ->
+            false )
+
+
+  (** [erase] does not reallocate: the elements before [position] stay where they are and the others
+      are invalidated; a fresh internal array keeps the old and new iterators apart *)
+  let erase_from path location event vector position astate =
+    let* astate, old_array =
+      GenericArrayBackedCollection.eval path NoAccess location vector astate
+    in
+    let* astate = PulseOperations.check_addr_access path NoAccess location old_array astate in
+    let* astate =
+      PulseOperations.havoc_deref_field path location vector GenericArrayBackedCollection.field
+        (Hist.single_event event) astate
+    in
+    let+ astate, new_array =
+      GenericArrayBackedCollection.eval path NoAccess location vector astate
+    in
+    let array_edges = Memory.fold_edges (fst old_array) astate ~init:[] ~f:(Fn.flip List.cons) in
+    List.fold array_edges ~init:astate ~f:(fun astate (access, elem) ->
+        match (access : Access.t) with
+        | ArrayAccess (_, index) when is_before_position astate array_edges index position ->
+            Memory.add_edge path new_array access elem location astate
+        | ArrayAccess _ ->
+            PulseOperations.invalidate path
+              (MemoryAccess {pointer= old_array; access; hist_obj_default= snd elem})
+              location (StdVector Erase) elem astate
+        | _ ->
+            astate )
+
+
+  let erase ~range vector first iter : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
     let desc = "std::vector::erase()" in
     let event = Hist.call_event path location desc in
     let<**> astate =
       if range then SatUnsat.Sat (havoc_size path location vector ~desc astate)
       else GenericArrayBackedCollection.decrease_size path location vector ~desc astate
     in
-    let<*> astate =
-      reallocate_internal_array path (Hist.single_event event) vector Erase location astate
+    let<*> astate, pointer =
+      GenericArrayBackedCollection.Iterator.to_internal_pointer path Read location first astate
     in
-    (* the returned iterator points to an unknown position in the vector *)
-    let<+> astate =
-      write_iterator path location event vector iter (AbstractValue.mk_fresh ()) astate
+    let<*> astate, (position, _) =
+      PulseOperations.eval_access path Read location pointer Dereference astate
     in
-    astate
+    let<*> astate = erase_from path location event vector position astate in
+    (* the returned iterator is at the erased position, unless that position is the one of
+       [begin()] and was invalidated above as the element at index 0 *)
+    if
+      AddressAttributes.find_opt `Post position astate
+      |> Option.exists ~f:(fun attrs -> Attributes.get_invalid attrs |> Option.is_some)
+    then vector_begin ~desc vector iter model_data astate
+    else
+      let<+> astate =
+        GenericArrayBackedCollection.Iterator.point_at path location event ~collection:vector ~iter
+          ~position astate
+      in
+      astate
 end
 
 module GenericMapCollection = struct
@@ -1574,8 +1623,16 @@ let simple_matchers =
       $--> Vector.back ~desc:"std::vector::back()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
-      $--> Vector.vector_begin |> with_non_disj
-    ; -"std" &:: "vector" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload $--> Vector.vector_end
+      $--> Vector.vector_begin ~desc:"std::vector::begin()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "cbegin" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.vector_begin ~desc:"std::vector::cbegin()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.vector_end ~desc:"std::vector::end()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.vector_end ~desc:"std::vector::cend()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload
       $--> Vector.invalidate_references Clear
@@ -1590,10 +1647,10 @@ let simple_matchers =
       $+...$--> Vector.emplace_back ~desc:"std::vector::emplace_back()"
       |> with_non_disj
     ; (* the returned iterator is passed as the last argument *)
-      -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ any_arg $+ capt_arg_payload
+      -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
       $--> Vector.erase ~range:false |> with_non_disj
-    ; -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ any_arg $+ any_arg $+ capt_arg_payload
-      $--> Vector.erase ~range:true |> with_non_disj
+    ; -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
+      $+ capt_arg_payload $--> Vector.erase ~range:true |> with_non_disj
     ; -"std" &:: "vector" &:: "front" <>$ capt_arg_payload
       $--> Vector.front ~desc:"std::vector::front()"
       |> with_non_disj
