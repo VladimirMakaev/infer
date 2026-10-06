@@ -1074,3 +1074,28 @@ int copy_modified_by_std_function_through_iterators_ok(
   std::zero_range_for_test(c.begin(), c.end());
   return c[0];
 }
+
+struct Lists {
+  std::vector<std::vector<int>> lists;
+
+  void clear_list(int i) { lists[i].clear(); }
+
+  int source_modified_by_callee_ok(int i) {
+    const std::vector<int> c = lists[i];
+    clear_list(i);
+    int s = 0;
+    for (int x : c) {
+      s += x;
+    }
+    return s;
+  }
+
+  int source_not_modified_bad(int i) {
+    const std::vector<int> c = lists[i];
+    int s = 0;
+    for (int x : c) {
+      s += x;
+    }
+    return s;
+  }
+};
