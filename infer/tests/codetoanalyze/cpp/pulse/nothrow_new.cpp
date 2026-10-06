@@ -197,7 +197,7 @@ struct FatalOnDestruction {
 };
 
 // The checks below call functions that never return without being declared
-// noreturn. They are still reported with the default --pulse-force-continue.
+// noreturn.
 int abort_helper_checked_ok() {
   WithCtor* p = new (std::nothrow) WithCtor(1);
   if (p == nullptr) {
