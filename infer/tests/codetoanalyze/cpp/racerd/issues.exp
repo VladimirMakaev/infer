@@ -39,6 +39,7 @@ codetoanalyze/cpp/racerd/lambdas.cpp, Functor_bad::operator(), 44, LOCK_CONSISTE
 codetoanalyze/cpp/racerd/lambdas.cpp, lambda_functor_bad::operator(), 60, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->h`,<Write trace>,access to `this->h`]
 codetoanalyze/cpp/racerd/lambdas.cpp, TemplateCallOperator_bad::operator()<int>, 77, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->h`,<Write trace>,access to `this->h`]
 codetoanalyze/cpp/racerd/lambdas.cpp, FunctorTemplate_bad<int>::operator(), 96, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->h`,<Write trace>,access to `this->h`]
+codetoanalyze/cpp/racerd/lock_guard_init_statement.cpp, init_statement::LockGuardInSwitchInit::read_after_switch_bad, 33, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->read_after_switch`,<Write trace>,access to `this->read_after_switch`]
 codetoanalyze/cpp/racerd/lock_guard_with_scope.cpp, basics::LockGuardWithScope::suspiciously_read_bad, 38, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->suspiciously_read`,<Write trace>,access to `this->suspiciously_read`]
 codetoanalyze/cpp/racerd/noreturn.cpp, Noreturn::get_y_without_lock, 46, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->y`,<Write trace>,access to `this->y`]
 codetoanalyze/cpp/racerd/scoped_lock.cpp, ScopedLock::get_y_bad, 29, LOCK_CONSISTENCY_VIOLATION, no_bucket, WARNING, [<Read trace>,access to `this->y`,<Write trace>,access to `this->y`]
