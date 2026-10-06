@@ -1,43 +1,43 @@
 /* @generated */
 digraph cfg {
-"main.fad58de7366495db_1" [label="1: Start main\nFormals: \nLocals:  b:int a:int \n  " color=yellow style=filled]
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_1" [label="1: Start main\nFormals: \nLocals:  b:int a:int \n  " color=yellow style=filled]
 	
 
-	 "main.fad58de7366495db_1" -> "main.fad58de7366495db_10" ;
-"main.fad58de7366495db_2" [label="2: Exit main \n  " color=yellow style=filled]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_1" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_10" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_2" [label="2: Exit main \n  " color=yellow style=filled]
 	
 
-"main.fad58de7366495db_3" [label="3:  Return Stmt \n   *&return:int=0 [line 15, column 3]\n " shape="box"]
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_3" [label="3:  Return Stmt \n   *&return:int=0 [line 15, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_3" -> "main.fad58de7366495db_2" ;
-"main.fad58de7366495db_4" [label="4: + \n  " ]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_3" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_2" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_4" [label="4: + \n  " ]
 	
 
-	 "main.fad58de7366495db_4" -> "main.fad58de7366495db_8" ;
-"main.fad58de7366495db_5" [label="5:  BinaryOperatorStmt: LT \n   n$0=*&b:int [line 13, column 12]\n " shape="box"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_4" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_8" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_5" [label="5:  BinaryOperatorStmt: LT \n   n$0=*&b:int [line 13, column 12]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_6" ;
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_7" ;
-"main.fad58de7366495db_6" [label="6: Prune (true branch, do while) \n   PRUNE((n$0 < 20), true); [line 13, column 12]\n " shape="invhouse"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_5" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_6" ;
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_5" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_7" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_6" [label="6: Prune (true branch, do while) \n   PRUNE((n$0 < 20), true); [line 13, column 12]\n " shape="invhouse"]
 	
 
-	 "main.fad58de7366495db_6" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_7" [label="7: Prune (false branch, do while) \n   PRUNE(!(n$0 < 20), false); [line 13, column 12]\n " shape="invhouse"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_6" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_4" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_7" [label="7: Prune (false branch, do while) \n   PRUNE(!(n$0 < 20), false); [line 13, column 12]\n " shape="invhouse"]
 	
 
-	 "main.fad58de7366495db_7" -> "main.fad58de7366495db_3" ;
-"main.fad58de7366495db_8" [label="8:  BinaryOperatorStmt: Assign \n   *&a:int=1 [line 12, column 5]\n " shape="box"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_7" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_3" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_8" [label="8:  BinaryOperatorStmt: Assign \n   *&a:int=1 [line 12, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_8" -> "main.fad58de7366495db_5" ;
-"main.fad58de7366495db_9" [label="9:  DeclStmt \n   VARIABLE_DECLARED(b:int); [line 10, column 3]\n  *&b:int=0 [line 10, column 3]\n " shape="box"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_8" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_5" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_9" [label="9:  DeclStmt \n   VARIABLE_DECLARED(b:int); [line 10, column 3]\n  *&b:int=0 [line 10, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_9" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(a:int); [line 9, column 3]\n  *&a:int=10 [line 9, column 3]\n " shape="box"]
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_9" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_4" ;
+"main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(a:int); [line 9, column 3]\n  *&a:int=10 [line 9, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_10" -> "main.fad58de7366495db_9" ;
+	 "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_10" -> "main#667fe7283ba4c2c6d38b88546b01.673482a19a558262_9" ;
 }
