@@ -4,6 +4,8 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <string.h>
+
 static constexpr int ConstantGlobal[] = {5};
 
 void access_constant_global_Bad() {
@@ -73,4 +75,20 @@ void store_namespace_global_array_Good() {
 int read_static_local_array_Bad() {
   static int cache[2];
   return cache[2];
+}
+
+struct ClassWithStaticName {
+  static constexpr char name[] = "abc";
+};
+
+void strncpy_static_member_name_Good(char* dst) {
+  strncpy(dst, ClassWithStaticName::name, 15);
+}
+
+struct ClassWithStaticChars {
+  static constexpr char chars[3] = {'a', 'b', 'c'};
+};
+
+void strncpy_static_member_chars_Bad(char* dst) {
+  strncpy(dst, ClassWithStaticChars::chars, 15);
 }
