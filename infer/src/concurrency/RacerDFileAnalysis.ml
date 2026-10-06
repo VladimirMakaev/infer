@@ -693,20 +693,122 @@ let should_report_on_proc proc_name =
           false )
 
 
+let is_protected_cpp_method proc_name =
+  match (proc_name : Procname.t) with
+  | ObjC_Cpp {kind= CPPMethod _} ->
+      Attributes.load proc_name
+      |> Option.exists ~f:(fun attrs -> ProcAttributes.(equal_access (get_access attrs) Protected))
+  | _ ->
+      false
+
+
+let iter_captured_cpp_methods ~f =
+  SourceFiles.get_all ~filter:(fun _ -> true) ()
+  |> List.concat_map ~f:SourceFiles.proc_names_of_source
+  |> Procname.Set.of_list
+  |> Procname.Set.iter (fun procname ->
+      match procname with
+      | Procname.ObjC_Cpp {kind= CPPMethod _} ->
+          Attributes.load procname
+          |> Option.iter ~f:(fun attrs -> if attrs.ProcAttributes.is_defined then f procname)
+      | _ ->
+          () )
+
+
+(** The protected C++ methods of the class that are called by other methods of the class, and only
+    with a lock held. The accesses that a method inlines from a callee start with the call to the
+    callee in their traces. *)
+let protected_methods_with_locked_callers ~analyze summaries =
+  let open RacerDDomain in
+  let protected_methods =
+    List.filter_map summaries ~f:(fun (procname, _) ->
+        Option.some_if (is_protected_cpp_method procname) procname )
+    |> Procname.Set.of_list
+  in
+  if Procname.Set.is_empty protected_methods then Procname.Set.empty
+  else
+    let add_call_site caller ({elem; trace} : AccessSnapshot.t) callees_locked =
+      match trace with
+      | call_site :: _
+        when Procname.Set.mem (CallSite.pname call_site) protected_methods
+             && not (Procname.equal (CallSite.pname call_site) caller) ->
+          let is_locked = LockDomain.is_locked elem.lock in
+          Procname.Map.update (CallSite.pname call_site)
+            (fun locked -> Some (is_locked && Option.value locked ~default:true))
+            callees_locked
+      | _ ->
+          callees_locked
+    in
+    let callees_locked =
+      List.fold summaries ~init:Procname.Map.empty ~f:(fun acc (caller, {accesses}) ->
+          AccessDomain.fold (add_call_site caller) accesses acc )
+    in
+    let locked_methods =
+      Procname.Map.fold
+        (fun callee locked acc -> if locked then Procname.Set.add callee acc else acc)
+        callees_locked Procname.Set.empty
+    in
+    if Procname.Set.is_empty locked_methods then locked_methods
+    else
+      (* A derived class can call a protected helper on the same receiver without the base
+         class's lock. Its accesses are aggregated separately, and the derived class need not
+         have any concurrent method of its own. Check captured derived callers, including those
+         defined in another translation unit, before dropping the base helper's accesses. *)
+      let locked_methods = ref locked_methods in
+      iter_captured_cpp_methods ~f:(fun caller ->
+          match Procname.get_class_type_name caller with
+          | None ->
+              ()
+          | Some caller_class -> (
+              let derived_methods =
+                Procname.Set.filter
+                  (fun callee ->
+                    Procname.get_class_type_name callee
+                    |> Option.exists ~f:(fun callee_class ->
+                        (not (Typ.Name.equal caller_class callee_class))
+                        && PatternMatch.is_subtype (Exe_env.get_proc_tenv caller) caller_class
+                             callee_class ) )
+                  !locked_methods
+              in
+              if (not (Procname.Set.is_empty derived_methods)) && should_report_on_proc caller then
+                match analyze caller |> AnalysisResult.to_option with
+                | None ->
+                    (* A missing caller summary cannot establish the lock precondition. *)
+                    locked_methods := Procname.Set.diff !locked_methods derived_methods
+                | Some {RacerDDomain.accesses} ->
+                    let locks_held_on_entry = RacerDModels.num_required_capabilities caller in
+                    AccessDomain.iter
+                      (fun snapshot ->
+                        let snapshot =
+                          AccessSnapshot.with_locks_held_on_entry locks_held_on_entry snapshot
+                        in
+                        if AccessSnapshot.is_unprotected snapshot then
+                          List.iter snapshot.trace ~f:(fun call_site ->
+                              let callee = CallSite.pname call_site in
+                              if Procname.Set.mem callee derived_methods then
+                                locked_methods := Procname.Set.remove callee !locked_methods ) )
+                      accesses ) ) ;
+      !locked_methods
+
+
 (* create a map from [abstraction of a memory loc] -> accesses that
    may touch that memory loc. the abstraction of a location is an access
    path like x.f.g whose concretization is the set of memory cells
    that x.f.g may point to during execution *)
-let make_results_table summaries =
+let make_results_table ~analyze summaries =
   let open RacerDDomain in
+  let locked_protected_methods = protected_methods_with_locked_callers ~analyze summaries in
   let aggregate_post tenv procname acc {threads; accesses} =
     (* report on the procedure as if its callers held the locks it requires, but leave its summary
        alone so that callers that do not hold them are reported *)
     let locks_held_on_entry = RacerDModels.num_required_capabilities procname in
+    (* like a private method, since its callers carry its accesses with their lock held *)
+    let drop_unprotected = Procname.Set.mem procname locked_protected_methods in
     AccessDomain.fold
       (fun snapshot acc ->
         let snapshot = AccessSnapshot.with_locks_held_on_entry locks_held_on_entry snapshot in
-        ReportMap.add {threads; snapshot; tenv; procname} acc )
+        if drop_unprotected && AccessSnapshot.is_unprotected snapshot then acc
+        else ReportMap.add {threads; snapshot; tenv; procname} acc )
       accesses acc
   in
   List.fold summaries ~init:ReportMap.empty ~f:(fun acc (procname, summary) ->
@@ -838,7 +940,7 @@ let analyze ({InterproceduralAnalysis.analyze_file_dependency} as file_t) =
   let class_map = aggregate_by_class file_t in
   Typ.Name.Map.fold
     (fun classname methods issue_log ->
-      make_results_table methods
+      make_results_table ~analyze:analyze_file_dependency methods
       |> synchronized_container_filter classname
       |> report_unsafe_accesses ~issue_log classname )
     class_map IssueLog.empty
