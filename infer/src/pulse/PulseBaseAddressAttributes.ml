@@ -209,6 +209,12 @@ let remove_propagate_taint_from = remove_attribute Attributes.remove_propagate_t
 
 let remove_all_must_not_be_tainted ?kinds = Graph.map (Attributes.remove_must_not_be_tainted ?kinds)
 
+let remove_all_must_be_initialized =
+  Graph.filter_map (fun _ attrs ->
+      let attrs = Attributes.remove_must_be_initialized attrs in
+      if AttributesNoRank.is_empty attrs then None else Some attrs )
+
+
 let remove_taint_attrs address memory =
   remove_tainted address memory |> remove_taint_sanitizer address
   |> remove_propagate_taint_from address
@@ -240,6 +246,11 @@ let remove_all_taint_related_attrs = map_attributes ~f:Attributes.remove_all_tai
 
 let initialize address memory =
   add_one address Initialized memory |> remove_attribute Attributes.remove_uninitialized address
+
+
+let uninitialize address typ memory =
+  remove_attribute Attributes.remove_initialized address memory
+  |> add_one address (Uninitialized typ)
 
 
 let get_allocation = get_attribute Attributes.get_allocation
@@ -533,11 +544,15 @@ module type S = sig
 
   val remove_all_must_not_be_tainted : ?kinds:TaintConfig.Kind.Set.t -> t -> t
 
+  val remove_all_must_be_initialized : t -> t
+
   val finalize_all_hack_builders : t -> t
 
   val remove_must_be_valid_attr : key -> t -> t
 
   val initialize : key -> t -> t
+
+  val uninitialize : key -> Attribute.UninitializedTyp.t -> t -> t
 
   val get_address_of_stack_variable : key -> t -> (Var.t * Location.t * ValueHistory.t) option
 
