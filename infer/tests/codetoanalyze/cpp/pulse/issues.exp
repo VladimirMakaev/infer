@@ -533,7 +533,6 @@ codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::do_while_temporary_b
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::for_temporary_bad, 6, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::while_temporary_bad, 7, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::call_push_if_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
-codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::FP_copy_modified_before_long_loop_ok, 6, PULSE_UNNECESSARY_COPY, no_bucket, ERROR, [copied here (with type `sub_statements::Arr&`)]
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::if_nodeless_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::else_nodeless_bad, 6, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/sub_statements.cpp, sub_statements::label_nodeless_bad, 6, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
