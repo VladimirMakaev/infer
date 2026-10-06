@@ -29,6 +29,11 @@ val pp : F.formatter -> t -> unit
 
 val pp_source_expr : F.formatter -> source_expr -> unit
 
+val pp_source_expr_as_object : F.formatter -> source_expr -> unit
+(** like [pp_source_expr] but prints a bare program variable [x] as [x] rather than its address
+    [&x], for expressions that denote the object stored in the variable, such as the source of a
+    copy *)
+
 val includes_captured_variable : t -> bool
 
 val includes_block : t -> bool
