@@ -494,6 +494,10 @@ module Internal = struct
       map_post_attrs astate ~f:(fun attrs -> BaseAddressAttributes.initialize address attrs)
 
 
+    let uninitialize address typ astate =
+      map_post_attrs astate ~f:(BaseAddressAttributes.uninitialize address typ)
+
+
     let find_opt pre_or_post address astate =
       BaseAddressAttributes.find_opt address
         ( match pre_or_post with
@@ -647,6 +651,10 @@ module Internal = struct
         map_post_attrs astate ~f:(BaseAddressAttributes.remove_all_must_not_be_tainted ?kinds)
       in
       map_pre_attrs astate ~f:(BaseAddressAttributes.remove_all_must_not_be_tainted ?kinds)
+
+
+    let remove_all_must_be_initialized astate =
+      map_pre_attrs astate ~f:BaseAddressAttributes.remove_all_must_be_initialized
 
 
     let finalize_all_hack_builders astate =
@@ -2351,6 +2359,8 @@ module Summary = struct
 
   let remove_all_must_not_be_tainted = SafeAttributes.remove_all_must_not_be_tainted
 
+  let remove_all_must_be_initialized = SafeAttributes.remove_all_must_be_initialized
+
   let of_post_ (proc_attrs : ProcAttributes.t) location astate0 =
     let open SatUnsat.Import in
     let astate = astate0 in
@@ -2804,6 +2814,10 @@ module AddressAttributes = struct
 
 
   let initialize v astate = SafeAttributes.initialize (CanonValue.canon' astate v) astate
+
+  let uninitialize v typ astate =
+    SafeAttributes.uninitialize (CanonValue.canon' astate v) typ astate
+
 
   let set_uninitialized tenv {PathContext.timestamp} src typ location astate =
     if Language.curr_language_is Clang then

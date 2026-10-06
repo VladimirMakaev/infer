@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <utility>
 
 void get_closure(std::function<int()> closure);
 
@@ -246,4 +247,94 @@ class UninitDefault {
 int uninit_default_ok() {
   UninitDefault a{}; // a.x is initialized by the value-initialization rule.
   return a.x;
+}
+
+struct PartialStruct {
+  int a;
+  float b;
+  int c;
+};
+
+void take_struct_by_value(PartialStruct s);
+
+// copying a partially initialized struct is not a read of its fields
+void pass_partially_initialized_by_value_ok() {
+  PartialStruct s;
+  s.b = 1.0f;
+  take_struct_by_value(s);
+}
+
+void assign_partially_initialized_ok(PartialStruct& out) {
+  PartialStruct s;
+  s.c = 2;
+  out = s;
+}
+
+int read_uninitialized_field_of_copy_bad() {
+  PartialStruct s;
+  s.b = 1.0f;
+  PartialStruct t = s;
+  return t.a;
+}
+
+float read_initialized_field_of_copy_ok() {
+  PartialStruct s;
+  s.b = 1.0f;
+  PartialStruct t = s;
+  return t.b;
+}
+
+int read_uninitialized_field_after_move_bad() {
+  PartialStruct s;
+  s.b = 1.0f;
+  PartialStruct t = std::move(s);
+  return t.c;
+}
+
+int read_uninitialized_field_after_assign_bad() {
+  PartialStruct t{1, 2.0f, 3};
+  assign_partially_initialized_ok(t);
+  return t.a;
+}
+
+int read_initialized_field_after_assign_ok() {
+  PartialStruct t;
+  assign_partially_initialized_ok(t);
+  return t.c;
+}
+
+struct PartialBase {
+  int x;
+  int y;
+};
+
+struct PartialDerived : PartialBase {
+  PartialStruct inner;
+  int z;
+};
+
+int read_uninitialized_nested_field_of_copy_bad() {
+  PartialDerived d;
+  d.inner.b = 1.0f;
+  PartialDerived e = d;
+  return e.inner.a;
+}
+
+int read_uninitialized_base_field_of_copy_bad() {
+  PartialDerived d;
+  d.x = 1;
+  PartialDerived e;
+  e = d;
+  return e.y;
+}
+
+PartialStruct copy_struct(const PartialStruct& s) { return s; }
+
+// the copy made by the callee does not tell the caller which fields it left
+// uninitialized
+int FN_read_uninitialized_field_of_copy_in_callee_bad() {
+  PartialStruct s;
+  s.b = 1.0f;
+  PartialStruct t = copy_struct(s);
+  return t.a;
 }
