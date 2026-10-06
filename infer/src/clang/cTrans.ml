@@ -1307,10 +1307,45 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let handle_unimplemented builtin =
       call_function_with_args node_name builtin trans_state stmt_info ret_typ stmt_list
     in
+    let unexpected_shape () =
+      CFrontend_errors.unimplemented __POS__ stmt_info.Clang_ast_t.si_source_range
+        "AtomicExpr %s with %d operands"
+        (Clang_ast_j.string_of_atomic_expr_kind atomic_expr_info.Clang_ast_t.aei_kind)
+        (List.length stmt_list)
+    in
     match atomic_expr_info.Clang_ast_t.aei_kind with
+    | `AO__atomic_test_and_set | `AO__atomic_clear ->
+        let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info in
+        let trans_state' = {trans_state_pri with succ_nodes= []; var_exp_typ= None} in
+        let ptr, mem_controls =
+          match stmt_list with
+          | [ptr; memorder] ->
+              let res_trans_memorder = instruction trans_state' memorder in
+              (ptr, [res_trans_memorder.control])
+          | _ ->
+              unexpected_shape ()
+        in
+        let res_trans_ptr = instruction trans_state' ptr in
+        let ptr_exp, _ = res_trans_ptr.return in
+        (* both builtins operate on the byte at [ptr] whatever its pointee type *)
+        let byte_typ = Typ.mk (Tint IUChar) in
+        let instrs, return =
+          match atomic_expr_info.Clang_ast_t.aei_kind with
+          | `AO__atomic_test_and_set ->
+              let id = Ident.create_fresh Ident.knormal in
+              ( [ Sil.Load {id; e= ptr_exp; typ= byte_typ; loc= sil_loc}
+                ; Sil.Store {e1= ptr_exp; e2= Exp.one; typ= byte_typ; loc= sil_loc} ]
+              , (Exp.BinOp (Binop.Ne, Exp.Var id, Exp.zero), ret_typ) )
+          | _ ->
+              ( [Sil.Store {e1= ptr_exp; e2= Exp.zero; typ= byte_typ; loc= sil_loc}]
+              , mk_fresh_void_exp_typ () )
+        in
+        let all_control = mem_controls @ [res_trans_ptr.control; {empty_control with instrs}] in
+        PriorityNode.compute_controls_to_parent trans_state_pri sil_loc node_name stmt_info
+          all_control
+        |> mk_trans_result return
     | `AO__atomic_add_fetch
     | `AO__atomic_and_fetch
-    | `AO__atomic_clear
     | `AO__atomic_fetch_add
     | `AO__atomic_fetch_and
     | `AO__atomic_fetch_or
@@ -1318,7 +1353,6 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `AO__atomic_fetch_xor
     | `AO__atomic_or_fetch
     | `AO__atomic_sub_fetch
-    | `AO__atomic_test_and_set
     | `AO__atomic_xor_fetch
     | `AO__c11_atomic_fetch_add
     | `AO__c11_atomic_fetch_and
@@ -1326,18 +1360,11 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `AO__c11_atomic_fetch_or
     | `AO__c11_atomic_fetch_sub
     | `AO__c11_atomic_fetch_xor
-    | `AO__hip_atomic_compare_exchange_strong
-    | `AO__hip_atomic_compare_exchange_weak
-    | `AO__hip_atomic_exchange
     | `AO__hip_atomic_fetch_add
     | `AO__hip_atomic_fetch_and
-    | `AO__hip_atomic_fetch_max
-    | `AO__hip_atomic_fetch_min
     | `AO__hip_atomic_fetch_or
     | `AO__hip_atomic_fetch_sub
     | `AO__hip_atomic_fetch_xor
-    | `AO__hip_atomic_load
-    | `AO__hip_atomic_store
     | `AO__opencl_atomic_fetch_add
     | `AO__opencl_atomic_fetch_and
     | `AO__opencl_atomic_fetch_or
@@ -1365,15 +1392,21 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memscope = instruction trans_state' memscope in
               (s1, s2, [res_trans_memorder.control; res_trans_memscope.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_s1 = instruction trans_state' s1 in
         let sil_e1, _ = res_trans_s1.return in
         let res_trans_s2 = instruction trans_state' s2 in
         let sil_e2, _ = res_trans_s2.return in
         let exp_op, instr_op =
-          CArithmetic_trans.atomic_operation_instruction atomic_expr_info sil_e1 sil_e2 ret_typ
-            sil_loc
+          match
+            CArithmetic_trans.atomic_operation_instruction atomic_expr_info sil_e1 sil_e2 ret_typ
+              sil_loc
+          with
+          | Some op ->
+              op
+          | None ->
+              unexpected_shape ()
         in
         let atomic_op_control = {empty_control with instrs= instr_op} in
         let all_control =
@@ -1384,6 +1417,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         |> mk_trans_result (exp_op, ret_typ)
     | `AO__atomic_load_n
     | `AO__c11_atomic_load
+    | `AO__hip_atomic_load
     | `AO__opencl_atomic_load
     | `AO__scoped_atomic_load_n ->
         let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info in
@@ -1398,7 +1432,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memscope = instruction trans_state' memscope in
               (ptr, [res_trans_memorder.control; res_trans_memscope.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let e, _ = res_trans_ptr.return in
@@ -1418,7 +1452,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memorder = instruction trans_state' memorder in
               (ptr, ret, [res_trans_memorder.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ret = instruction trans_state' ret in
         let ret_exp, ret_typ = res_trans_ret.return in
@@ -1438,6 +1472,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         |> mk_trans_result (mk_fresh_void_exp_typ ())
     | `AO__atomic_store_n
     | `AO__c11_atomic_store
+    | `AO__hip_atomic_store
     | `AO__opencl_atomic_store
     | `AO__scoped_atomic_store_n
     | `AO__c11_atomic_init
@@ -1456,7 +1491,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memscope = instruction trans_state' memscope in
               (ptr, value, [res_trans_memorder.control; res_trans_memscope.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let ptr_exp, _ = res_trans_ptr.return in
@@ -1479,7 +1514,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memorder = instruction trans_state' memorder in
               (ptr, value, [res_trans_memorder.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let ptr_exp, _ = res_trans_ptr.return in
@@ -1500,6 +1535,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         |> mk_trans_result (mk_fresh_void_exp_typ ())
     | `AO__atomic_exchange_n
     | `AO__c11_atomic_exchange
+    | `AO__hip_atomic_exchange
     | `AO__opencl_atomic_exchange
     | `AO__scoped_atomic_exchange_n ->
         let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info in
@@ -1514,7 +1550,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memscope = instruction trans_state' memscope in
               (ptr, value, [res_trans_memorder.control; res_trans_memscope.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let ptr_exp, _ = res_trans_ptr.return in
@@ -1541,7 +1577,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               let res_trans_memorder = instruction trans_state' memorder in
               (ptr, value, ret, [res_trans_memorder.control])
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let ptr_exp, _ = res_trans_ptr.return in
@@ -1570,6 +1606,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `AO__atomic_compare_exchange_n
     | `AO__c11_atomic_compare_exchange_strong
     | `AO__c11_atomic_compare_exchange_weak
+    | `AO__hip_atomic_compare_exchange_strong
+    | `AO__hip_atomic_compare_exchange_weak
     | `AO__opencl_atomic_compare_exchange_strong
     | `AO__opencl_atomic_compare_exchange_weak
     | `AO__scoped_atomic_compare_exchange
@@ -1596,7 +1634,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               , desired
               , [res_trans_success_memorder.control; res_trans_failure_memorder.control] )
           | _ ->
-              assert false
+              unexpected_shape ()
         in
         let res_trans_ptr = instruction trans_state' ptr in
         let ptr_exp, _ = res_trans_ptr.return in
@@ -1698,9 +1736,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           control.leaf_nodes ;
         mk_trans_result return
           {control with instrs; initd_exps= [exp_to_init]; leaf_nodes= [join_node]}
-    | `AO__atomic_fetch_max | `AO__scoped_atomic_fetch_max ->
+    | `AO__atomic_fetch_max | `AO__scoped_atomic_fetch_max | `AO__hip_atomic_fetch_max ->
         handle_unimplemented BuiltinDecl.__atomic_fetch_max
-    | `AO__atomic_fetch_min | `AO__scoped_atomic_fetch_min ->
+    | `AO__atomic_fetch_min | `AO__scoped_atomic_fetch_min | `AO__hip_atomic_fetch_min ->
         handle_unimplemented BuiltinDecl.__atomic_fetch_min
     | `AO__atomic_fetch_nand | `AO__scoped_atomic_fetch_nand ->
         handle_unimplemented BuiltinDecl.__atomic_fetch_nand

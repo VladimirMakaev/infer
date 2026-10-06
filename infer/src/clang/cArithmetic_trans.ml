@@ -178,49 +178,66 @@ let unary_operation_instruction translation_unit_context uoi e typ loc =
 
 
 let atomic_operation_instruction aei e1 e2 typ loc =
-  let atomic_binop bop ~fetch_first =
+  let atomic_op mk_new ~fetch_first =
     let id = Ident.create_fresh Ident.knormal in
     let instr1 = Sil.Load {id; e= e1; typ; loc} in
-    let e1_op_e2 = Exp.BinOp (bop, Exp.Var id, e2) in
-    if fetch_first then (Exp.Var id, [instr1; Sil.Store {e1; typ; e2= e1_op_e2; loc}])
+    let store = Sil.Store {e1; typ; e2= mk_new (Exp.Var id); loc} in
+    if fetch_first then Some (Exp.Var id, [instr1; store])
     else
       let fetch_id = Ident.create_fresh Ident.knormal in
       let fetch_instr = Sil.Load {id= fetch_id; e= e1; typ; loc} in
-      (Exp.Var fetch_id, [instr1; Sil.Store {e1; typ; e2= e1_op_e2; loc}; fetch_instr])
+      Some (Exp.Var fetch_id, [instr1; store; fetch_instr])
+  in
+  let atomic_binop bop = atomic_op (fun old -> Exp.BinOp (bop, old, e2)) in
+  let plus_or_minus ~pointer_arith ~plus =
+    if pointer_arith && Typ.is_pointer typ then if plus then Binop.PlusPI else Binop.MinusPI
+    else if plus then Binop.PlusA (Typ.get_ikind_opt typ)
+    else Binop.MinusA (Typ.get_ikind_opt typ)
   in
   match aei.Clang_ast_t.aei_kind with
   (* GNU builtins do arithmetic operations even with pointers *)
-  | `AO__atomic_fetch_add ->
-      atomic_binop (Binop.PlusA (Typ.get_ikind_opt typ)) ~fetch_first:true
-  | `AO__c11_atomic_fetch_add | `AO__opencl_atomic_fetch_add ->
-      atomic_binop
-        (if Typ.is_pointer typ then Binop.PlusPI else Binop.PlusA (Typ.get_ikind_opt typ))
-        ~fetch_first:true
-  | `AO__atomic_add_fetch ->
-      atomic_binop (Binop.PlusA (Typ.get_ikind_opt typ)) ~fetch_first:false
-  | `AO__atomic_fetch_sub ->
-      atomic_binop (Binop.MinusA (Typ.get_ikind_opt typ)) ~fetch_first:true
-  | `AO__c11_atomic_fetch_sub | `AO__opencl_atomic_fetch_sub ->
-      atomic_binop
-        (if Typ.is_pointer typ then Binop.MinusPI else Binop.MinusA (Typ.get_ikind_opt typ))
-        ~fetch_first:true
-  | `AO__atomic_sub_fetch ->
-      atomic_binop (Binop.MinusA (Typ.get_ikind_opt typ)) ~fetch_first:false
-  | `AO__atomic_fetch_or | `AO__c11_atomic_fetch_or | `AO__opencl_atomic_fetch_or ->
+  | `AO__atomic_fetch_add | `AO__scoped_atomic_fetch_add ->
+      atomic_binop (plus_or_minus ~pointer_arith:false ~plus:true) ~fetch_first:true
+  | `AO__c11_atomic_fetch_add | `AO__opencl_atomic_fetch_add | `AO__hip_atomic_fetch_add ->
+      atomic_binop (plus_or_minus ~pointer_arith:true ~plus:true) ~fetch_first:true
+  | `AO__atomic_add_fetch | `AO__scoped_atomic_add_fetch ->
+      atomic_binop (plus_or_minus ~pointer_arith:false ~plus:true) ~fetch_first:false
+  | `AO__atomic_fetch_sub | `AO__scoped_atomic_fetch_sub ->
+      atomic_binop (plus_or_minus ~pointer_arith:false ~plus:false) ~fetch_first:true
+  | `AO__c11_atomic_fetch_sub | `AO__opencl_atomic_fetch_sub | `AO__hip_atomic_fetch_sub ->
+      atomic_binop (plus_or_minus ~pointer_arith:true ~plus:false) ~fetch_first:true
+  | `AO__atomic_sub_fetch | `AO__scoped_atomic_sub_fetch ->
+      atomic_binop (plus_or_minus ~pointer_arith:false ~plus:false) ~fetch_first:false
+  | `AO__atomic_fetch_or
+  | `AO__c11_atomic_fetch_or
+  | `AO__opencl_atomic_fetch_or
+  | `AO__hip_atomic_fetch_or
+  | `AO__scoped_atomic_fetch_or ->
       atomic_binop Binop.BOr ~fetch_first:true
-  | `AO__atomic_or_fetch ->
+  | `AO__atomic_or_fetch | `AO__scoped_atomic_or_fetch ->
       atomic_binop Binop.BOr ~fetch_first:false
-  | `AO__atomic_fetch_xor | `AO__c11_atomic_fetch_xor | `AO__opencl_atomic_fetch_xor ->
+  | `AO__atomic_fetch_xor
+  | `AO__c11_atomic_fetch_xor
+  | `AO__opencl_atomic_fetch_xor
+  | `AO__hip_atomic_fetch_xor
+  | `AO__scoped_atomic_fetch_xor ->
       atomic_binop Binop.BXor ~fetch_first:true
-  | `AO__atomic_xor_fetch ->
+  | `AO__atomic_xor_fetch | `AO__scoped_atomic_xor_fetch ->
       atomic_binop Binop.BXor ~fetch_first:false
-  | `AO__atomic_fetch_and | `AO__c11_atomic_fetch_and | `AO__opencl_atomic_fetch_and ->
+  | `AO__atomic_fetch_and
+  | `AO__c11_atomic_fetch_and
+  | `AO__opencl_atomic_fetch_and
+  | `AO__hip_atomic_fetch_and
+  | `AO__scoped_atomic_fetch_and ->
       atomic_binop Binop.BAnd ~fetch_first:true
-  | `AO__atomic_and_fetch ->
+  | `AO__atomic_and_fetch | `AO__scoped_atomic_and_fetch ->
       atomic_binop Binop.BAnd ~fetch_first:false
+  | `AO__c11_atomic_fetch_nand ->
+      atomic_op
+        (fun old -> Exp.UnOp (Unop.BNot, Exp.BinOp (Binop.BAnd, old, e2), Some typ))
+        ~fetch_first:true
   | _ ->
-      (* We only call this function if it's been implemented. *)
-      assert false
+      None
 
 
 let bin_op_to_string boi =
