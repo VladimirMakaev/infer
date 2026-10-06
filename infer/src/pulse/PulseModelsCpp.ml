@@ -548,7 +548,7 @@ end
 
 module Function = struct
   let operator_call ~deref_lambda_ptr FuncArg.{arg_payload= lambda_ptr_hist; typ} actuals : model =
-   fun {path; analysis_data; location; ret= (ret_id, _) as ret} astate non_disj ->
+   fun {path; analysis_data; location; callee_procname; ret= (ret_id, _) as ret} astate non_disj ->
     let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
     let<*> astate, (lambda, _) =
       (if deref_lambda_ptr then PulseOperations.eval_deref_access else PulseOperations.eval_access)
@@ -586,9 +586,19 @@ module Function = struct
         let astate = PulseOperations.havoc_id ret_id hist astate in
         let astate = AbductiveDomain.add_need_dynamic_type_specialization lambda astate in
         let astate =
-          let unknown_effect = Attribute.UnknownEffect (Model desc, hist) in
-          List.fold actuals ~init:astate ~f:(fun acc FuncArg.{arg_payload= actual, _} ->
-              AddressAttributes.add_one actual unknown_effect acc )
+          (* the types of the actuals lose the qualifiers that implicit conversions add *)
+          let formal_types =
+            match IRAttributes.load_formal_types callee_procname with
+            | _this :: formal_types when Int.equal (List.length formal_types) (List.length actuals)
+              ->
+                formal_types
+            | _ ->
+                List.map actuals ~f:(fun {FuncArg.typ} -> typ)
+          in
+          PulseModelsC.apply_unknown_callee_effect_on_actuals ~desc hist
+            (List.map2_exn actuals formal_types ~f:(fun FuncArg.{arg_payload= actual, _} typ ->
+                 (actual, typ) ) )
+            astate
         in
         ([Ok (ContinueProgram astate)], non_disj)
 
