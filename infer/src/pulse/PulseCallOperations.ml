@@ -1050,6 +1050,15 @@ let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_l
         ()
 
 
+let call_as_unknown ?disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
+    ~formals_opt call_kind call_flags astate non_disj_caller =
+  let res, (non_disj, contradiction) =
+    call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
+      ~formals_opt call_kind call_flags astate non_disj_caller
+  in
+  (res, non_disj, contradiction, `UnknownCall)
+
+
 let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analysis_data) path
     call_loc ?unresolved_reason ?(tb_arg_exps : Exp.t list = []) callee_pname ~ret ~actuals
     ~formals_opt call_kind call_flags (astate : AbductiveDomain.t) non_disj_caller =
