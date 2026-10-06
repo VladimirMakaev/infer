@@ -547,6 +547,19 @@ module BasicStringView = struct
 end
 
 module Function = struct
+  let call_operator_of_closure tenv lambda astate =
+    match PulseArithmetic.get_dynamic_type lambda astate with
+    | Some {typ= {desc= Typ.Tstruct name}} -> (
+      match Tenv.lookup tenv name with
+      | Some tstruct ->
+          List.find_map tstruct.Struct.methods ~f:(fun ({name} : Struct.tenv_method) ->
+              Option.some_if (Procname.is_cpp_call_operator name) name )
+      | None ->
+          None )
+    | _ ->
+        None
+
+
   let operator_call ~deref_lambda_ptr FuncArg.{arg_payload= lambda_ptr_hist; typ} actuals : model =
    fun { path
        ; analysis_data
@@ -564,17 +577,9 @@ module Function = struct
       match PulseArithmetic.get_dynamic_type lambda astate with
       | Some {typ= {desc= Typ.Tstruct (CFunction csig)}} ->
           Some (`CFunction (Procname.C csig))
-      | Some {typ= {desc= Typ.Tstruct name}} -> (
-        match Tenv.lookup analysis_data.tenv name with
-        | Some tstruct ->
-            List.find
-              ~f:(fun (m : Struct.tenv_method) -> Procname.is_cpp_call_operator m.name)
-              tstruct.Struct.methods
-            |> Option.map ~f:(fun {Struct.name} -> `CallOperator name)
-        | None ->
-            None )
       | _ ->
-          None
+          call_operator_of_closure analysis_data.tenv lambda astate
+          |> Option.map ~f:(fun name -> `CallOperator name)
     in
     match callee_proc_name_opt with
     | Some (`CFunction callee_proc_name) ->
@@ -613,6 +618,45 @@ module Function = struct
             astate
         in
         ([Ok (ContinueProgram astate)], non_disj)
+
+
+  (* As for [pthread_once], the callable is assumed to run: if it does not run now then it ran
+     during an earlier call with the same flag. *)
+  let call_once flag (FuncArg.{arg_payload= callable; typ} as callable_arg) : model =
+   fun ({path; analysis_data; location; ret} as model_data) astate non_disj ->
+    let call callee_proc_name actuals astate =
+      let astate, non_disj, _, _ =
+        PulseCallOperations.call analysis_data path location callee_proc_name ~ret ~actuals
+          ~formals_opt:None ResolvedCall CallFlags.default astate non_disj
+      in
+      (astate, non_disj)
+    in
+    let c_function v astate =
+      match PulseArithmetic.get_dynamic_type v astate with
+      | Some {typ= {desc= Tstruct (CFunction csig)}} ->
+          Some (Procname.C csig)
+      | _ ->
+          None
+    in
+    match c_function (fst callable) astate with
+    | Some callee_proc_name ->
+        call callee_proc_name [] astate
+    | None -> (
+        let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+        let<*> astate, (callee, _) =
+          PulseOperations.eval_access path Read location callable Dereference astate
+        in
+        (* a function pointer is passed by reference *)
+        match c_function callee astate with
+        | Some callee_proc_name ->
+            call callee_proc_name [] astate
+        | None -> (
+          match call_operator_of_closure analysis_data.tenv callee astate with
+          | Some callee_proc_name ->
+              call callee_proc_name [(callable, typ)] astate
+          | None ->
+              lift_model (Basic.skipped_known_call [flag; callable_arg]) model_data astate non_disj
+          ) )
 
 
   let assign dest FuncArg.{arg_payload= src; typ= src_typ} ~desc : model_no_non_disj =
@@ -1846,6 +1890,7 @@ let simple_matchers =
     ; -"folly" &:: "Function" &:: "~Function" &--> Basic.skip |> with_non_disj
     ; -"std" &:: "function" &:: "operator()" $ capt_arg
       $++$--> Function.operator_call ~deref_lambda_ptr:false
+    ; -"std" &:: "call_once" $ capt_arg $+ capt_arg $--> Function.call_once
     ; -"folly" &:: "detail" &:: "function" &:: "FunctionTraits" &:: "operator()" $ capt_arg
       $++$--> Function.operator_call ~deref_lambda_ptr:true
     ; -"std" &:: "function" &:: "operator=" $ capt_arg_payload $+ capt_arg

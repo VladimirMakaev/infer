@@ -1374,6 +1374,9 @@ let matchers : matcher list =
   ; -"pthread_create" <>$ capt_arg $+ capt_arg $+ capt_arg $+ capt_arg $--> pthread_create
   ; -"pthread_exit" <>$ capt_arg $--> thread_exit ~desc:"pthread_exit"
   ; -"pthread_once" <>$ any_arg $+ capt_arg $--> pthread_once
+  ; (* the libc++ runtime function behind [std::call_once], which calls [fn(arg)] *)
+    ( -"std" &:: "__call_once" <>$ any_arg $+ capt_arg $+ capt_arg
+    $--> fun arg fn -> call_c_function_ptr fn [arg] )
   ; -"putc" <>$ capt_arg_payload $+ capt_arg_payload $--> putc
   ; -"puts" <>$ capt_arg_payload $--> compose1 valid_arg (ignore_arg non_det_ret)
   ; ( -"pwrite" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg $+ capt_arg $+ capt_arg
