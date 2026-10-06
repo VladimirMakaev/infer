@@ -751,10 +751,21 @@ let mk_symbol_seq ?(default = []) ~symbols ~eq ?(deprecated = []) ~long ?short ?
     ~mk_spec:(fun set -> String set)
 
 
-let mk_json ?(deprecated = []) ~long ?short ?parse_mode ?in_help ?(meta = "json") doc =
+let mk_json ?(bare_string_as_list = false) ?(deprecated = []) ~long ?short ?parse_mode ?in_help
+    ?(meta = "json") doc =
+  let parse s =
+    match Yojson.Safe.from_string s with
+    | json ->
+        json
+    | exception (Yojson.Json_error _ as exn) ->
+        let looks_like_json =
+          List.exists ["["; "{"; "\""] ~f:(fun prefix -> String.is_prefix (String.lstrip s) ~prefix)
+        in
+        if bare_string_as_list && not looks_like_json then `List [`String s] else raise exn
+  in
   mk ~deprecated ~long ?short ?parse_mode ?in_help ~meta doc ~default:(`List [])
     ~default_to_string:Yojson.Safe.to_string
-    ~mk_setter:(fun var json -> var := Yojson.Safe.from_string json)
+    ~mk_setter:(fun var json -> var := parse json)
     ~decode_json:(fun ~inferconfig_dir:_ json -> [dashdash long; Yojson.Safe.to_string json])
     ~mk_spec:(fun set -> String set)
 
