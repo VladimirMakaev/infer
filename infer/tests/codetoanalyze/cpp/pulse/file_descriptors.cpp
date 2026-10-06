@@ -6,6 +6,8 @@
  */
 
 #include <array>
+#include <fcntl.h>
+#include <functional>
 #include <unistd.h>
 #include <vector>
 
@@ -34,4 +36,13 @@ int pipe_vector_data_ok() {
 int FN_pipe_array_data_not_closed_bad() {
   std::array<int, 2> fds;
   return pipe(fds.data());
+}
+
+void std_function_takes_fd_ok(const std::function<void(int)>& f,
+                              const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return;
+  }
+  f(fd);
 }
