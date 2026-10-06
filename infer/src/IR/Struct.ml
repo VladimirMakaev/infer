@@ -30,7 +30,7 @@ type hack_class_kind = Class | AbstractClass | Interface | Trait | Alias
 module ClassInfo = struct
   type t =
     | NoInfo
-    | CppClassInfo of {is_trivially_copyable: bool}
+    | CppClassInfo of {is_trivially_copyable: bool; has_no_move_operations: bool}
     | JavaClassInfo of
         { kind: java_class_kind  (** class kind in Java *)
         ; loc: Location.t option
