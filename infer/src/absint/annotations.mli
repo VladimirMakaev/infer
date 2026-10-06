@@ -44,6 +44,18 @@ val guarded_by : string
 val requires_capability : string
 (** annotation of a clang function with a [requires_capability] attribute *)
 
+val acquire_capability : string
+(** annotation of a clang function with an [acquire_capability] attribute *)
+
+val release_capability : string
+(** annotation of a clang function with a [release_capability] attribute *)
+
+val try_acquire_capability : string
+(** annotation of a clang function with a [try_acquire_capability] attribute *)
+
+val fails_on_true : string
+(** parameter of [try_acquire_capability] when the function returns [false] on success *)
+
 val suppress_lint : string
 
 val thread_safe : string
