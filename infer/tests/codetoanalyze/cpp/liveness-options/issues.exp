@@ -1,0 +1,2 @@
+codetoanalyze/cpp/liveness-options/class_names.cpp, liveness_options::not_scope_guard_bad, 0, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `liveness_options::NotAGuard*`)]
+codetoanalyze/cpp/liveness-options/class_names.cpp, liveness_options::dangerous_class_bad, 0, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `liveness_options::Dangerous*`)]

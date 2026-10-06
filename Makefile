@@ -79,6 +79,7 @@ DIRECT_TESTS += \
   cpp_impurity \
   cpp_liveness \
   cpp_liveness-20 \
+  cpp_liveness-options \
   cpp_performance \
   cpp_performance-11 \
   cpp_pulse \

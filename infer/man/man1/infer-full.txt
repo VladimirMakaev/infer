@@ -508,7 +508,10 @@ OPTIONS
 
        --cxx-scope-guards json
            Specify scope guard classes that can be read only by destructors
-           without being reported as dead stores.
+           without being reported as dead stores, as a JSON list of class
+           names, e.g. --cxx-scope-guards '["ns::Guard"]'. A single class
+           name, e.g. --cxx-scope-guards ns::Guard, is read as a one-element
+           list.
            See also infer-analyze(1).
 
        --debug,-g
@@ -1218,7 +1221,10 @@ OPTIONS
            computing liveness. In other words, assignement to variables of
            these types (or common wrappers around these types such as
            unique_ptr<type>) will count as dead stores when the variables are
-           not read explicitly by the program.
+           not read explicitly by the program. The classes are given as a
+           JSON list, e.g. --liveness-dangerous-classes '["ns::Lock"]'; a
+           single class name, e.g. --liveness-dangerous-classes ns::Lock, is
+           read as a one-element list.
            See also infer-analyze(1).
 
        --liveness-ignored-constant +string
