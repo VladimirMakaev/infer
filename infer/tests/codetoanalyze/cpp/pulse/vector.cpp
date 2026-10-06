@@ -869,3 +869,30 @@ struct VectorRegistry {
     return a;
   }
 };
+
+void push_back_new_ptr_ok(std::vector<int*>& vec) { vec.push_back(new int(0)); }
+
+int push_back_null_then_back_deref_bad() {
+  std::vector<int*> vec;
+  vec.push_back(nullptr);
+  return *vec.back();
+}
+
+int emplace_back_null_then_back_deref_bad() {
+  std::vector<int*> vec;
+  int* p = nullptr;
+  vec.emplace_back(p);
+  return *vec.back();
+}
+
+struct PtrWrapper {
+  int* p;
+  PtrWrapper(int* q) : p(q) {}
+};
+
+// the element is constructed by the constructor of its class, which is not
+// called
+void FP_emplace_back_new_ptr_into_object_ok(std::vector<PtrWrapper>& vec) {
+  int* p = new int(0);
+  vec.emplace_back(p);
+}
