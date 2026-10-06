@@ -136,6 +136,21 @@ let formal_types_of_function_ptr (function_ptr_typ : Typ.t) actuals =
   List.mapi actuals ~f:(fun i {FuncArg.typ} -> List.nth params_type i |> Option.value ~default:typ)
 
 
+let apply_unknown_callee_effect_on_actuals ~desc hist actuals astate =
+  let unknown_effect = Attribute.UnknownEffect (Model desc, hist) in
+  let astate =
+    List.fold actuals ~init:astate ~f:(fun acc (actual, typ) ->
+        let acc =
+          if Config.pulse_havoc_arguments && Typ.is_pointer typ && not (Typ.is_ptr_to_const typ)
+          then AbductiveDomain.apply_unknown_effect hist actual acc
+          else acc
+        in
+        AddressAttributes.add_one actual unknown_effect acc )
+  in
+  (* callbacks commonly take ownership of the descriptors they are given *)
+  PulseOperations.forget_file_descriptors_passed_by_value actuals astate
+
+
 let call_c_function_ptr {FuncArg.arg_payload= function_ptr; typ= function_ptr_typ} actuals : model =
  fun {path; analysis_data; location; ret= (ret_id, _) as ret; dispatch_call_eval_args} astate
      non_disj ->
@@ -159,24 +174,9 @@ let call_c_function_ptr {FuncArg.arg_payload= function_ptr; typ= function_ptr_ty
           AbductiveDomain.add_need_dynamic_type_specialization (ValueOrigin.value function_ptr)
             astate
         in
-        let astate =
-          let unknown_effect = Attribute.UnknownEffect (Model desc, hist) in
-          List.fold2_exn actuals (formal_types_of_function_ptr function_ptr_typ actuals)
-            ~init:astate ~f:(fun acc FuncArg.{arg_payload= actual} typ ->
-              let actual = ValueOrigin.value actual in
-              let acc =
-                if
-                  Config.pulse_havoc_arguments && Typ.is_pointer typ
-                  && not (Typ.is_ptr_to_const typ)
-                then AbductiveDomain.apply_unknown_effect hist actual acc
-                else acc
-              in
-              AddressAttributes.add_one actual unknown_effect acc )
-        in
-        (* callbacks commonly take ownership of the descriptors they are given *)
-        PulseOperations.forget_file_descriptors_passed_by_value
-          (List.map actuals ~f:(fun FuncArg.{arg_payload; typ} ->
-               (ValueOrigin.value arg_payload, typ) ) )
+        apply_unknown_callee_effect_on_actuals ~desc hist
+          (List.map2_exn actuals (formal_types_of_function_ptr function_ptr_typ actuals)
+             ~f:(fun FuncArg.{arg_payload} typ -> (ValueOrigin.value arg_payload, typ) ) )
           astate
       in
       (res, non_disj)
