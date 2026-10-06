@@ -72,6 +72,9 @@ module Exec : sig
   (** [copy_array_contents tenv elt_typ ~strong ~dst ~src mem] copies the elements of type [elt_typ]
       of the arrays [src], and their C string length, to the arrays [dst]. With [strong], all the
       arrays that [dst] represents are overwritten, so a single [dst] array is updated strongly. *)
+
+  val forget_c_strlen : PowLoc.t -> Dom.Mem.t -> Dom.Mem.t
+  (** Forget the length of the C strings at the given locations, e.g. after a write of raw bytes *)
 end
 
 module Check : sig
@@ -91,6 +94,16 @@ module Check : sig
     -> index_exp:Exp.t
     -> last_included:bool
     -> Dom.Mem.t
+    -> Location.t
+    -> PO.ConditionSet.checked_t
+    -> PO.ConditionSet.checked_t
+
+  val array_access_byte :
+       arr:Dom.Val.t
+    -> idx:Dom.Val.t
+    -> is_plus:bool
+    -> last_included:bool
+    -> latest_prune:Dom.LatestPrune.t
     -> Location.t
     -> PO.ConditionSet.checked_t
     -> PO.ConditionSet.checked_t

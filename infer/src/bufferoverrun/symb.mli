@@ -80,6 +80,10 @@ module SymbolPath : sig
 
   val is_global_partial : partial -> bool
 
+  val is_field_of_var : t -> bool
+  (** Whether it is a field of a variable, e.g. the length of the C string in a local array, rather
+      than of an object reached through a pointer. Callers cannot substitute such a symbol. *)
+
   val is_length : t -> bool
 end
 
