@@ -246,6 +246,9 @@ module AddressAttributes : sig
   val initialize : AbstractValue.t -> t -> t
   (** Remove "Uninitialized" attribute of the given address *)
 
+  val uninitialize : AbstractValue.t -> Attribute.UninitializedTyp.t -> t -> t
+  (** the value at the given address becomes uninitialized *)
+
   val set_uninitialized :
        Tenv.t
     -> PathContext.t
@@ -554,6 +557,8 @@ module Summary : sig
     -> (Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option) option
 
   val remove_all_must_not_be_tainted : ?kinds:TaintConfig.Kind.Set.t -> summary -> summary
+
+  val remove_all_must_be_initialized : summary -> summary
 
   val pre_heap_has_assumptions : summary -> bool
   (** whether the pre heap encodes some assumptions about values: either a value is restricted (>=
