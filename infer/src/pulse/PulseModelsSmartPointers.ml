@@ -86,10 +86,51 @@ let swap this other ~desc : model_no_non_disj =
   astate
 
 
-let operator_bool this ~desc : model_no_non_disj =
+(** [this] compared to null: on the null branch, the managed pointer is marked as compared to null
+    as in the prune of a raw pointer. [result] gives the value returned on each branch. *)
+let check_null this ~(result : is_null:bool -> AbstractValue.t -> AbductiveDomain.t -> _) ~desc :
+    model_no_non_disj =
  fun {path; location; ret= ret_id, _} astate ->
-  let<+> astate, (value_addr, _) = to_internal_value_deref path Write location this astate in
-  PulseOperations.write_id ret_id (value_addr, Hist.single_call path location desc) astate
+  let<*> astate, pointer = to_internal_value path Read location this astate in
+  let<*> astate, (value_addr, value_hist) =
+    PulseOperations.eval_access path Write location pointer Dereference astate
+  in
+  let return ~is_null astate =
+    let astate, ret_addr = result ~is_null value_addr astate in
+    PulseOperations.write_id ret_id (ret_addr, Hist.single_call path location desc) astate
+    |> Basic.ok_continue
+  in
+  let null =
+    let compared_to_null = Invalidation.ComparedToNullInThisProcedure location in
+    let event = ValueHistory.Invalidated (compared_to_null, location, path.PathContext.timestamp) in
+    (* checking the pointer does not modify it *)
+    let astate =
+      AbductiveDomain.add_event_to_value_origin ~written:false path location event
+        (ValueOrigin.InMemory {src= pointer; access= Dereference; dest= (value_addr, value_hist)})
+        astate
+      |> AddressAttributes.invalidate
+           (value_addr, ValueHistory.sequence event value_hist)
+           compared_to_null location
+    in
+    let<**> astate = PulseArithmetic.prune_eq_zero value_addr astate in
+    return ~is_null:true astate
+  in
+  let non_null =
+    let<**> astate = PulseArithmetic.prune_positive value_addr astate in
+    return ~is_null:false astate
+  in
+  null @ non_null
+
+
+let operator_bool this ~desc : model_no_non_disj =
+  check_null this ~desc ~result:(fun ~is_null:_ value_addr astate -> (astate, value_addr))
+
+
+(** [operator==] and [operator!=] between a smart pointer and [nullptr], in either order *)
+let compare_with_nullptr ~equal this ~desc : model_no_non_disj =
+  check_null this ~desc ~result:(fun ~is_null _ astate ->
+      PulseArithmetic.absval_of_int astate
+        (if Bool.equal is_null equal then IntLit.one else IntLit.zero) )
 
 
 let find_element_type_common matchers tenv typ =
@@ -1244,3 +1285,28 @@ let matchers : matcher list =
         $--> WeakPtr.lock ~desc:"std::weak_ptr::lock()" ]
       |> List.map ~f:with_non_disj )
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
+
+
+(* the type of [nullptr] is translated as [int] *)
+let nullptr_comparison_matchers =
+  let open ProcnameDispatcher.Call in
+  let nullptr_arg () = any_arg_of_prim_typ (Typ.mk (Tint IInt)) in
+  List.concat_map
+    [ ((fun () -> -"std" &:: "unique_ptr"), "std::unique_ptr")
+    ; ((fun () -> -"std" &::+ SharedPtr.is_shared_ptr), "std::shared_ptr") ]
+    ~f:(fun (smart_ptr, smart_ptr_name) ->
+      List.concat_map
+        [("operator==", true); ("operator!=", false)]
+        ~f:(fun (operator, equal) ->
+          let desc = Printf.sprintf "std::%s(%s, nullptr_t)" operator smart_ptr_name in
+          [ -"std" &:: operator
+            $ capt_arg_payload_of_typ (smart_ptr ())
+            $+ nullptr_arg () $--> compare_with_nullptr ~equal ~desc
+          ; -"std" &:: operator $ nullptr_arg ()
+            $+ capt_arg_payload_of_typ (smart_ptr ())
+            $--> compare_with_nullptr ~equal ~desc ] ) )
+  |> List.map ~f:with_non_disj
+  |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
+
+
+let matchers = matchers @ nullptr_comparison_matchers

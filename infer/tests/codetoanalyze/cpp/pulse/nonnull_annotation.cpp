@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <memory>
+
 namespace nonnull_annotation {
 
 using nonnull_string = const char* _Nonnull;
@@ -83,5 +85,21 @@ int null_to_template_function_bad() {
 }
 
 int non_null_to_method_ok(Parser& p) { return p.parse("x"); }
+
+int null_in_null_branch_of_pointer_check_bad(const int* p) {
+  const char* s = "x";
+  if (p == nullptr) {
+    s = nullptr;
+  }
+  return free_function(s);
+}
+
+int null_in_null_branch_of_smart_pointer_check_bad(const std::unique_ptr<int>& p) {
+  const char* s = "x";
+  if (!p) {
+    s = nullptr;
+  }
+  return free_function(s);
+}
 
 } // namespace nonnull_annotation

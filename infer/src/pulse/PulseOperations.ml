@@ -14,11 +14,42 @@ open PulseOperationResult.Import
 
 type t = AbductiveDomain.t
 
+(* All the null values of a path share one address, whose [Invalid] attribute comes from the first
+   null constant or comparison to null on the path, possibly about another pointer: the history of
+   the pointer tells which applies. Comparisons made in callees do not count, as for the
+   [ComparedToNullInThisProcedure] attribute. *)
+let null_invalidation_of_history history (invalidation : Invalidation.t) =
+  match invalidation with
+  | ConstantDereference i when not (IntLit.iszero i) ->
+      invalidation
+  | ConstantDereference _ | ComparedToNullInThisProcedure _ ->
+      let has_null_constant = ref false in
+      let compared_to_null = ref None in
+      let depth = ref 0 in
+      ValueHistory.rev_iter history ~f:(function
+        | ReturnFromCall _ ->
+            incr depth
+        | EnterCall _ ->
+            decr depth
+        | Event (Invalidated (ConstantDereference i, _, _)) when IntLit.iszero i ->
+            has_null_constant := true
+        | Event (Invalidated ((ComparedToNullInThisProcedure _ as invalidation), _, _))
+          when Int.equal !depth 0 && Option.is_none !compared_to_null ->
+            compared_to_null := Some invalidation
+        | Event _ ->
+            () ) ;
+      if !has_null_constant then Invalidation.ConstantDereference IntLit.zero
+      else Option.value !compared_to_null ~default:invalidation
+  | _ ->
+      invalidation
+
+
 let check_addr_access path ?must_be_valid_reason access_mode location (address, history) astate =
   let access_trace = Trace.Immediate {location; history} in
   let* astate =
     AddressAttributes.check_valid path ?must_be_valid_reason access_trace address astate
     |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
+        let invalidation = null_invalidation_of_history history invalidation in
         let astate =
           match (invalidation : Invalidation.t) with
           | (ComparedToNullInThisProcedure _ | ConstantDereference _)
@@ -80,6 +111,7 @@ let check_non_null path location callee position (address, history) astate =
   let access_trace = Trace.Immediate {location; history} in
   AddressAttributes.check_non_null path access_trace callee position address astate
   |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
+      let invalidation = null_invalidation_of_history history invalidation in
       ReportableError
         { diagnostic=
             Diagnostic.AccessToInvalidAddress
