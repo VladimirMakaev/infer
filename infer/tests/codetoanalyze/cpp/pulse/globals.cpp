@@ -226,3 +226,53 @@ void FN_call_dynamic_init_const_field_bad() {
   kDynamicOps.release(o);
   delete o;
 }
+
+// constants of more than 64 scalars and pointers are not inlined when they are
+// used either, to keep summaries small
+
+struct SmallTable {
+  int cells[4];
+};
+
+struct LargeTable {
+  int cells[100];
+};
+
+constexpr SmallTable kSmallTable{{1, 2, 3, 4}};
+
+constexpr LargeTable kLargeTable{{1, 2, 3, 4}};
+
+static const LargeTable kConstLargeTable{{1, 2, 3, 4}};
+
+template <typename T>
+int first_cell(const T& table) {
+  return table.cells[0];
+}
+
+void pass_small_constexpr_table_ok() {
+  if (first_cell(kSmallTable) != 1) {
+    int* p = nullptr;
+    *p = 42;
+  }
+}
+
+void pass_small_constexpr_table_bad() {
+  if (first_cell(kSmallTable) == 1) {
+    int* p = nullptr;
+    *p = 42;
+  }
+}
+
+void FP_pass_large_constexpr_table_ok() {
+  if (first_cell(kLargeTable) != 1) {
+    int* p = nullptr;
+    *p = 42;
+  }
+}
+
+void FP_pass_large_const_table_ok() {
+  if (first_cell(kConstLargeTable) != 1) {
+    int* p = nullptr;
+    *p = 42;
+  }
+}
