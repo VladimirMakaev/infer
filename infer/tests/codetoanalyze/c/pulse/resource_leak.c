@@ -590,3 +590,105 @@ void pclose_twice_bad(const char* command) {
 }
 
 void tmpfile_not_closed_bad() { FILE* f = tmpfile(); }
+
+void register_object(void* obj);
+
+struct fd_holder {
+  int fd;
+};
+
+void store_fd_and_register(struct fd_holder* h, int fd) {
+  h->fd = fd;
+  register_object(h);
+}
+
+void store_fd_in_object_then_register_in_callee_ok(struct fd_holder* h) {
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  store_fd_and_register(h, fd);
+}
+
+void store_fd_and_register_indirect(struct fd_holder* h, int fd) {
+  store_fd_and_register(h, fd);
+}
+
+void store_fd_then_register_in_nested_callee_ok(struct fd_holder* h) {
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  store_fd_and_register_indirect(h, fd);
+}
+
+struct fd_holder_holder {
+  struct fd_holder* inner;
+};
+
+void store_fd_in_inner_and_register(struct fd_holder_holder* h, int fd) {
+  h->inner->fd = fd;
+  register_object(h);
+}
+
+void store_fd_in_inner_object_then_register_in_callee_ok(
+    struct fd_holder_holder* h) {
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  store_fd_in_inner_and_register(h, fd);
+}
+
+int read_fd_and_register(struct fd_holder* h) {
+  int fd = h->fd;
+  register_object(h);
+  return fd;
+}
+
+void store_fd_then_callee_reads_and_registers_ok() {
+  struct fd_holder local;
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  local.fd = fd;
+  read_fd_and_register(&local);
+}
+
+void store_fd_and_register_other(struct fd_holder* h,
+                                 struct fd_holder* other,
+                                 int fd) {
+  h->fd = fd;
+  register_object(other);
+}
+
+void callee_registers_other_object_leak_bad(struct fd_holder* other) {
+  struct fd_holder local;
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  store_fd_and_register_other(&local, other, fd);
+}
+
+void close_twice_after_register_in_callee_bad(struct fd_holder* h) {
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  store_fd_and_register(h, fd);
+  close(fd);
+  close(fd);
+}
+
+int read_after_close_after_register_in_callee_bad(struct fd_holder* h) {
+  char buf[4];
+  int fd = open("hi.txt", O_RDONLY);
+  if (fd == -1) {
+    return -1;
+  }
+  store_fd_and_register(h, fd);
+  close(fd);
+  return read(fd, buf, sizeof(buf));
+}
