@@ -1031,7 +1031,10 @@ PULSE CHECKER OPTIONS
            part of a retain cycle.
 
        --pulse-skip-procedures regex
-           Regex of procedures that should not be analyzed by Pulse.
+           Regex of procedures that should not be analyzed by Pulse. A
+           procedure is skipped when the regex matches the start of its
+           qualified name (e.g. ns::Class::method) or of its unique
+           identifier.
 
        --pulse-specialization-iteration-limit int
            Maximum number of iterative summary specialization at each call
