@@ -31,6 +31,25 @@ val call :
 (** perform an interprocedural call: apply the summary for the call proc name passed as argument if
     it exists *)
 
+val call_as_unknown :
+     ?disjunct_limit:int
+  -> PulseSummary.t InterproceduralAnalysis.t
+  -> PathContext.t
+  -> Location.t
+  -> Procname.t
+  -> ret:Ident.t * Typ.t
+  -> actuals:((AbstractValue.t * ValueHistory.t) * Typ.t) list
+  -> formals_opt:(Pvar.t * Typ.t) list option
+  -> PulseOperations.call_kind
+  -> CallFlags.t
+  -> AbductiveDomain.t
+  -> NonDisjDomain.t
+  -> ExecutionDomain.t AccessResult.t list
+     * NonDisjDomain.t
+     * PulseInterproc.contradiction option
+     * [`KnownCall | `UnknownCall]
+(** like [call] but ignores the summary of the callee, as if it had none *)
+
 val unknown_call :
      Tenv.t
   -> PathContext.t

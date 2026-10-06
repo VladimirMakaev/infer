@@ -204,7 +204,8 @@ module PulseTransferFunctions = struct
 
 
   let interprocedural_call disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) path ret
-      ~unresolved_reason callee_pname call_exp func_args call_loc call_flags astate non_disj =
+      ~unresolved_reason ~call_as_unknown callee_pname call_exp func_args call_loc call_flags astate
+      non_disj =
     let actuals =
       List.map func_args ~f:(fun FuncArg.{arg_payload; typ} ->
           (ValueOrigin.addr_hist arg_payload, typ) )
@@ -221,8 +222,12 @@ module PulseTransferFunctions = struct
     let eval_args_and_call ?tb_arg_exps callee_pname call_exp astate non_disj =
       let formals_opt = get_pvar_formals callee_pname in
       let call_kind = call_kind_of call_exp in
-      PulseCallOperations.call ~disjunct_limit analysis_data path call_loc ?unresolved_reason
-        ?tb_arg_exps callee_pname ~ret ~actuals ~formals_opt call_kind call_flags astate non_disj
+      if call_as_unknown then
+        PulseCallOperations.call_as_unknown ~disjunct_limit analysis_data path call_loc callee_pname
+          ~ret ~actuals ~formals_opt call_kind call_flags astate non_disj
+      else
+        PulseCallOperations.call ~disjunct_limit analysis_data path call_loc ?unresolved_reason
+          ?tb_arg_exps callee_pname ~ret ~actuals ~formals_opt call_kind call_flags astate non_disj
     in
     match callee_pname with
     | Some callee_pname when not Config.pulse_intraprocedural_only ->
@@ -416,6 +421,119 @@ module PulseTransferFunctions = struct
 
   let need_dynamic_type_specialization astate receiver_addr =
     AbductiveDomain.add_need_dynamic_type_specialization receiver_addr astate
+
+
+  type overrides =
+    { overridden_methods: unit Procname.Hash.t  (** the C++ methods that some subclass overrides *)
+    ; classes_with_overridden_methods: unit Typ.Name.Hash.t
+          (** the classes that have or inherit such a method with a body *) }
+
+  (** the overrides of C++ methods in [tenv], the type environment of a file *)
+  let cpp_overrides =
+    let cache =
+      let cache = SourceFile.Cache.create ~name:"cpp_overrides" in
+      SourceFile.Cache.set_lru_mode cache ~lru_limit:(Some 16) ;
+      cache
+    in
+    let compute tenv =
+      let supers = Typ.Name.Hash.create 64 in
+      let cpp_methods =
+        Tenv.fold tenv ~init:[] ~f:(fun class_name {Struct.methods; supers= direct_supers} acc ->
+            Typ.Name.Hash.replace supers class_name direct_supers ;
+            List.fold methods ~init:acc ~f:(fun acc method_ ->
+                let proc_name = Struct.name_of_tenv_method method_ in
+                if Procname.is_cpp_method proc_name then (class_name, proc_name) :: acc else acc ) )
+      in
+      let get_supers class_name =
+        Typ.Name.Hash.find_opt supers class_name |> Option.value ~default:[]
+      in
+      let overridden_methods = Procname.Hash.create 64 in
+      let rec add_to_supers visited proc_name class_name =
+        get_supers class_name
+        |> List.fold ~init:visited ~f:(fun visited super ->
+            if Typ.Name.Set.mem super visited then visited
+            else (
+              Procname.Hash.replace overridden_methods (Procname.replace_class proc_name super) () ;
+              add_to_supers (Typ.Name.Set.add super visited) proc_name super ) )
+      in
+      List.iter cpp_methods ~f:(fun (class_name, proc_name) ->
+          add_to_supers (Typ.Name.Set.singleton class_name) proc_name class_name |> ignore ) ;
+      let has_overridden_method = Typ.Name.Hash.create 64 in
+      List.iter cpp_methods ~f:(fun (class_name, proc_name) ->
+          if
+            Procname.Hash.mem overridden_methods proc_name
+            && IRAttributes.load proc_name
+               |> Option.exists ~f:(fun {ProcAttributes.is_defined} -> is_defined)
+          then Typ.Name.Hash.replace has_overridden_method class_name true ) ;
+      let rec inherits_overridden_method visited class_name =
+        match Typ.Name.Hash.find_opt has_overridden_method class_name with
+        | Some result ->
+            result
+        | None when Typ.Name.Set.mem class_name visited ->
+            false
+        | None ->
+            let result =
+              List.exists (get_supers class_name)
+                ~f:(inherits_overridden_method (Typ.Name.Set.add class_name visited))
+            in
+            Typ.Name.Hash.replace has_overridden_method class_name result ;
+            result
+      in
+      let classes_with_overridden_methods = Typ.Name.Hash.create 64 in
+      Typ.Name.Hash.iter
+        (fun class_name _ ->
+          if inherits_overridden_method Typ.Name.Set.empty class_name then
+            Typ.Name.Hash.replace classes_with_overridden_methods class_name () )
+        supers ;
+      {overridden_methods; classes_with_overridden_methods}
+    in
+    fun tenv source_file ->
+      match SourceFile.Cache.lookup cache source_file with
+      | Some overrides ->
+          overrides
+      | None ->
+          let overrides = compute tenv in
+          SourceFile.Cache.add cache source_file overrides ;
+          overrides
+
+
+  (** whether a subclass of the static type of the receiver overrides [proc_name] *)
+  let is_overridden_cpp_method tenv source_file ~receiver_typ proc_name =
+    Procname.is_cpp_method proc_name
+    &&
+    let proc_name =
+      match receiver_typ with
+      | {Typ.desc= Tptr ({desc= Tstruct (CppClass _ as receiver_class)}, _)} ->
+          Procname.replace_class proc_name receiver_class
+      | _ ->
+          proc_name
+    in
+    Procname.Hash.mem (cpp_overrides tenv source_file).overridden_methods proc_name
+
+
+  (** whether the object at [receiver], the value of [receiver_exp], has exactly its static type *)
+  let receiver_has_exact_static_type proc_desc astate receiver_exp receiver =
+    match (receiver_exp : Exp.t) with
+    | Lvar _ | Lfield _ ->
+        true
+    | Lindex (Var _, _) ->
+        (* subscript of a pointer *)
+        false
+    | Lindex _ ->
+        true
+    | Var _ ->
+        (* the frontend passes class parameters by value as references *)
+        Procdesc.get_passed_by_value_formals proc_desc
+        |> List.exists ~f:(fun (pvar, typ) ->
+            Typ.is_reference typ
+            && Option.exists
+                 (Stack.find_opt (Var.of_pvar pvar) astate)
+                 ~f:(fun formal ->
+                   Option.exists
+                     (Memory.find_edge_opt (ValueOrigin.value formal) Dereference astate)
+                     ~f:(fun (obj, _) -> AbstractValue.equal obj receiver) ) )
+    | _ ->
+        false
 
 
   (* Hack static methods can be overriden so we need class hierarchy walkup *)
@@ -657,8 +775,8 @@ module PulseTransferFunctions = struct
     match get_receiver callee_pname func_args with
     | None ->
         L.internal_error "No receiver on virtual call@\n" ;
-        (None, default_info, astate)
-    | Some {FuncArg.arg_payload= receiver} -> (
+        (None, default_info, astate, false)
+    | Some {FuncArg.arg_payload= receiver; exp= receiver_exp; typ= receiver_typ} -> (
       match
         improve_receiver_static_type astate (ValueOrigin.value receiver) callee_pname
         |> resolve_virtual_call tenv astate (ValueOrigin.value receiver)
@@ -675,27 +793,41 @@ module PulseTransferFunctions = struct
             record_call_resolution_if_closure ResolvedUsingDynamicType astate
             |> AbductiveDomain.add_missed_captures missed_captures
           in
-          (Option.first_some unresolved_reason1 unresolved_reason2, Some info, astate)
+          (Option.first_some unresolved_reason1 unresolved_reason2, Some info, astate, false)
       | Some (info, ExactDevirtualization, {missed_captures; unresolved_reason}) ->
           L.d_printfln "virtual call is fully resolved" ;
           let astate =
             record_call_resolution_if_closure ResolvedUsingDynamicType astate
             |> AbductiveDomain.add_missed_captures missed_captures
           in
-          (unresolved_reason, Some info, astate)
+          (unresolved_reason, Some info, astate, false)
       | Some (info, ApproxDevirtualization, {missed_captures; unresolved_reason}) ->
           L.d_printfln "virtual call is approximately resolved" ;
           let astate =
             record_call_resolution_if_closure Unresolved astate
             |> AbductiveDomain.add_missed_captures missed_captures
           in
-          ( unresolved_reason
-          , Some info
-          , need_dynamic_type_specialization astate (ValueOrigin.value receiver) )
+          let proc_name = Tenv.MethodInfo.get_proc_name info in
+          let call_as_unknown =
+            is_overridden_cpp_method tenv (Procdesc.get_attributes proc_desc).translation_unit
+              ~receiver_typ proc_name
+            && not
+                 (receiver_has_exact_static_type proc_desc astate receiver_exp
+                    (ValueOrigin.value receiver) )
+          in
+          if call_as_unknown then
+            L.d_printfln "the method is overridden, treating the call as unknown" ;
+          let astate =
+            if Procname.is_cpp_method proc_name && not call_as_unknown then
+              (* no dynamic type known to this file resolves the call to another method *)
+              astate
+            else need_dynamic_type_specialization astate (ValueOrigin.value receiver)
+          in
+          (unresolved_reason, Some info, astate, call_as_unknown)
       | None ->
           L.d_printfln "virtual call is unresolved" ;
           let astate = record_call_resolution_if_closure Unresolved astate in
-          (None, None, astate) )
+          (None, None, astate, false) )
 
 
   let rec load_is_hack_variadic_attribute callee_procname =
@@ -753,18 +885,46 @@ module PulseTransferFunctions = struct
     |> Option.value ~default:(astate, callee_procname, func_args)
 
 
+  (** like [new], record the dynamic type of a local object when its constructor runs, if its class
+      has a method with a body that a subclass overrides *)
+  let record_dynamic_type_of_constructed_local tenv proc_desc callee_pname func_args call_loc astate
+      =
+    match (callee_pname, func_args) with
+    | ( Some callee_pname
+      , { FuncArg.exp= Lvar pvar
+        ; typ= {desc= Tptr ({desc= Tstruct (CppClass _ as class_name)}, _)}
+        ; arg_payload }
+        :: _ )
+      when Procname.is_constructor callee_pname
+           && Pvar.is_local pvar
+           && Typ.Name.Hash.mem
+                (cpp_overrides tenv (Procdesc.get_attributes proc_desc).translation_unit)
+                  .classes_with_overridden_methods class_name ->
+        let addr = ValueOrigin.value arg_payload in
+        if Option.is_some (PulseArithmetic.get_dynamic_type addr astate) then astate
+        else
+          (* without qualifiers, which would make the type differ from the one of a specialization
+             on it, e.g. for a const temporary *)
+          PulseArithmetic.and_dynamic_type_is_unsafe addr (Typ.mk_struct class_name) call_loc astate
+    | _ ->
+        astate
+
+
   let rec dispatch_call_eval_args disjunct_limit
       ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data) path ret call_exp func_args
       call_loc call_flags astate non_disj callee_pname =
     let actuals = List.map func_args ~f:(fun {FuncArg.exp; typ} -> (exp, typ)) in
-    let unresolved_reason, method_info, ret, actuals, func_args, astate =
+    let astate =
+      record_dynamic_type_of_constructed_local tenv proc_desc callee_pname func_args call_loc astate
+    in
+    let unresolved_reason, method_info, ret, actuals, func_args, astate, call_as_unknown =
       let default_info = Option.map ~f:Tenv.MethodInfo.mk_class callee_pname in
       if call_flags.CallFlags.cf_virtual then
-        let unresolved_reason, method_info, astate =
+        let unresolved_reason, method_info, astate, call_as_unknown =
           lookup_virtual_method_info analysis_data path func_args call_loc astate callee_pname
             default_info
         in
-        (unresolved_reason, method_info, ret, actuals, func_args, astate)
+        (unresolved_reason, method_info, ret, actuals, func_args, astate, call_as_unknown)
       else if Language.curr_language_is Hack then
         (* In Hack, a static method can be inherited. *)
         let proc_name = Procdesc.get_proc_name proc_desc in
@@ -773,8 +933,14 @@ module PulseTransferFunctions = struct
         in
         (* Don't drop the initial [callee_pname]: even though we couldn't refine it, we can still
            use it to match against taint configs and such. *)
-        (unresolved_reason, Option.first_some info default_info, ret, actuals, func_args, astate)
-      else (None, default_info, ret, actuals, func_args, astate)
+        ( unresolved_reason
+        , Option.first_some info default_info
+        , ret
+        , actuals
+        , func_args
+        , astate
+        , false )
+      else (None, default_info, ret, actuals, func_args, astate, false)
     in
     let callee_pname = Option.map ~f:Tenv.MethodInfo.get_proc_name method_info in
     let astate =
@@ -911,7 +1077,7 @@ module PulseTransferFunctions = struct
           PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse interproc call" ())) ;
           let r =
             interprocedural_call disjunct_limit analysis_data path ret ~unresolved_reason
-              callee_pname call_exp func_args call_loc call_flags astate non_disj
+              ~call_as_unknown callee_pname call_exp func_args call_loc call_flags astate non_disj
           in
           PerfEvent.(log (fun logger -> log_end_event logger ())) ;
           r
