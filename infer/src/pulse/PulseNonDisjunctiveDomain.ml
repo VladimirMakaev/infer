@@ -766,6 +766,11 @@ let is_top ({intra; inter; has_dropped_disjuncts; astate} [@warning "missing-rec
   && OverApproxDomain.is_top astate
 
 
+let top_keeping_dropped_disjuncts ({has_dropped_disjuncts} [@warning "missing-record-field-pattern"])
+    =
+  {top with has_dropped_disjuncts}
+
+
 (* faster? *)
 let join lhs rhs = if is_bottom lhs then rhs else if is_bottom rhs then lhs else join lhs rhs
 
