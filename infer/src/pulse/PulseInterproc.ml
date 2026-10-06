@@ -443,6 +443,14 @@ let fold_globals_of_callee_stack {PathContext.timestamp} call_loc stack call_sta
 
 let and_aliasing_arith ~addr_callee ~addr_caller0 call_state =
   match to_caller_value call_state addr_callee with
+  | Some (addr_caller', _)
+    when AbductiveDomain.cannot_be_equal_to_local_address call_state.astate addr_caller'
+           addr_caller0 ->
+      let reason () =
+        F.asprintf "%a and %a cannot alias: one is the address of a local variable" AbstractValue.pp
+          addr_caller' AbstractValue.pp addr_caller0
+      in
+      raise_notrace (Contradiction (PathCondition {SatUnsat.reason; source= __POS__}))
   | Some (addr_caller', _) when not (AbstractValue.equal addr_caller' addr_caller0) ->
       let path_condition, new_eqs =
         Formula.and_equal_vars addr_caller0 addr_caller'
