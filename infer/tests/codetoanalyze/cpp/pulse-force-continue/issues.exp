@@ -1,0 +1,5 @@
+codetoanalyze/cpp/pulse-force-continue/noreturn.cpp, call_exit_unless_dropped_value_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/cpp/pulse-force-continue/noreturn.cpp, deref_null_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/cpp/pulse-force-continue/noreturn.cpp, call_deref_null_then_deref_null_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/cpp/pulse-force-continue/noreturn.cpp, deref_null_if_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/cpp/pulse-force-continue/noreturn.cpp, call_deref_null_if_then_deref_null_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

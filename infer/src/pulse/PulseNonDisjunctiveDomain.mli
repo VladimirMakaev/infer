@@ -132,6 +132,11 @@ val is_lifetime_extended : Var.t -> t -> bool
 
 val remember_dropped_disjuncts : (ExecutionDomain.t * PathContext.t) list -> t -> t
 
+val top_keeping_dropped_disjuncts : t -> t
+(** [top], but recording dropped disjuncts only if the argument does: having only exited disjuncts
+    after a call to a function that does not return is not a reason to treat that call as unknown
+    with [--pulse-force-continue] *)
+
 val add_specialized_direct_callee : Procname.t -> Specialization.Pulse.t -> Location.t -> t -> t
 
 val apply_summary :

@@ -527,7 +527,7 @@ struct
            is fine for disjunctive abstract states, it is not for non-disjunctive abstract state,
            e.g. the unnecessary copy checker since it may miss some modifications of copied values.
            To mitigate the issue, return top when all disjuncts are non-executable. *)
-        T.NonDisjDomain.top
+        T.non_disj_of_non_executable disjuncts non_disj_astates
     in
     (disjuncts, non_disjunct)
 
