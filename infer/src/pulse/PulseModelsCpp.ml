@@ -548,7 +548,12 @@ end
 
 module Function = struct
   let operator_call ~deref_lambda_ptr FuncArg.{arg_payload= lambda_ptr_hist; typ} actuals : model =
-   fun {path; analysis_data; location; callee_procname; ret= (ret_id, _) as ret} astate non_disj ->
+   fun { path
+       ; analysis_data
+       ; location
+       ; callee_procname
+       ; ret= (ret_id, _) as ret
+       ; dispatch_call_eval_args } astate non_disj ->
     let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
     let<*> astate, (lambda, _) =
       (if deref_lambda_ptr then PulseOperations.eval_deref_access else PulseOperations.eval_access)
@@ -557,19 +562,26 @@ module Function = struct
     let<*> astate = PulseOperations.Closures.check_captured_addresses path location lambda astate in
     let callee_proc_name_opt =
       match PulseArithmetic.get_dynamic_type lambda astate with
+      | Some {typ= {desc= Typ.Tstruct (CFunction csig)}} ->
+          Some (`CFunction (Procname.C csig))
       | Some {typ= {desc= Typ.Tstruct name}} -> (
         match Tenv.lookup analysis_data.tenv name with
         | Some tstruct ->
             List.find
               ~f:(fun (m : Struct.tenv_method) -> Procname.is_cpp_call_operator m.name)
               tstruct.Struct.methods
+            |> Option.map ~f:(fun {Struct.name} -> `CallOperator name)
         | None ->
             None )
       | _ ->
           None
     in
     match callee_proc_name_opt with
-    | Some {name= callee_proc_name} ->
+    | Some (`CFunction callee_proc_name) ->
+        let actuals = List.map actuals ~f:(FuncArg.map_payload ~f:ValueOrigin.unknown) in
+        dispatch_call_eval_args analysis_data path ret (Const (Cfun callee_proc_name)) actuals
+          location CallFlags.default astate non_disj (Some callee_proc_name)
+    | Some (`CallOperator callee_proc_name) ->
         let actuals =
           (lambda_ptr_hist, typ)
           :: List.map actuals ~f:(fun FuncArg.{arg_payload; typ} -> (arg_payload, typ))
@@ -606,15 +618,38 @@ module Function = struct
   let assign dest FuncArg.{arg_payload= src; typ= src_typ} ~desc : model_no_non_disj =
    fun {path; location; ret= ret_id, _} astate ->
     let event = Hist.call_event path location desc in
-    if PulseArithmetic.is_known_zero astate (fst src) then
-      let empty_target = AbstractValue.mk_fresh () in
-      let<+> astate =
-        PulseOperations.write_deref path location ~ref:dest
-          ~obj:(empty_target, Hist.single_event event)
-          astate
-      in
+    let write_target astate target =
+      let<+> astate = PulseOperations.write_deref path location ~ref:dest ~obj:target astate in
       PulseOperations.havoc_id ret_id (Hist.single_event event) astate
-    else
+    in
+    let function_ptr_src =
+      match src_typ.Typ.desc with
+      | Tptr ({desc= Tfun _}, _) ->
+          (* also a reference to a function: the address of the function *)
+          Some `Value
+      | Tptr ({desc= Tptr ({desc= Tfun _}, _)}, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+          Some `Reference
+      | _ ->
+          None
+    in
+    let write_empty_target astate =
+      write_target astate (AbstractValue.mk_fresh (), Hist.single_event event)
+    in
+    match function_ptr_src with
+    | Some function_ptr_src ->
+        (* the function pointer is not dereferenced, and keeps its dynamic type to resolve calls *)
+        let<*> astate, function_ptr =
+          match function_ptr_src with
+          | `Value ->
+              Ok (astate, src)
+          | `Reference ->
+              PulseOperations.eval_access path Read location src Dereference astate
+        in
+        if PulseArithmetic.is_known_zero astate (fst function_ptr) then write_empty_target astate
+        else write_target astate (fst function_ptr, Hist.add_event event (snd function_ptr))
+    | None when PulseArithmetic.is_known_zero astate (fst src) ->
+        write_empty_target astate
+    | None -> (
       (* with ask_specialization:true we make sure we will copy the dynamic type of the closure object *)
       (* TODO: why do we realloc a closure here? Looks useless since closure are immuable values *)
       match src_typ.Typ.desc with
@@ -622,7 +657,7 @@ module Function = struct
           Basic.shallow_copy ~ask_specialization:true path location event ret_id dest src astate
       | _ ->
           Basic.shallow_copy_value ~ask_specialization:true path location event ret_id dest src
-            astate
+            astate )
 end
 
 module ConditionVariable = struct
