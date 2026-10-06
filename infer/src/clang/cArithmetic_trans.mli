@@ -33,6 +33,12 @@ val unary_operation_instruction :
   -> Exp.t * Sil.instr list
 
 val atomic_operation_instruction :
-  Clang_ast_t.atomic_expr_info -> Exp.t -> Exp.t -> Typ.t -> Location.t -> Exp.t * Sil.instr list
+     Clang_ast_t.atomic_expr_info
+  -> Exp.t
+  -> Exp.t
+  -> Typ.t
+  -> Location.t
+  -> (Exp.t * Sil.instr list) option
+(** [None] for the read-modify-write kinds that have no translation *)
 
 val sil_const_plus_one : Exp.t -> Exp.t
