@@ -49,17 +49,17 @@ digraph cfg {
 	
 
 	 "implicit_expr_set_correctly.dcfe49f71ad24e86_5" -> "implicit_expr_set_correctly.dcfe49f71ad24e86_3" ;
-"main.fad58de7366495db_1" [label="1: Start main\nFormals: \nLocals:  p:Point \n  " color=yellow style=filled]
+"main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_1" [label="1: Start main\nFormals: \nLocals:  p:Point \n  " color=yellow style=filled]
 	
 
-	 "main.fad58de7366495db_1" -> "main.fad58de7366495db_3" ;
-"main.fad58de7366495db_2" [label="2: Exit main \n  " color=yellow style=filled]
+	 "main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_1" -> "main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_3" ;
+"main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_2" [label="2: Exit main \n  " color=yellow style=filled]
 	
 
-"main.fad58de7366495db_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(p:Point); [line 15, column 14]\n  *&p.x:int=1 [line 15, column 31]\n  n$0=_fun_foo() [line 15, column 35]\n  *&p.y:int=(n$0 + 3) [line 15, column 31]\n " shape="box"]
+"main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(p:Point); [line 15, column 14]\n  *&p.x:int=1 [line 15, column 31]\n  n$0=_fun_foo() [line 15, column 35]\n  *&p.y:int=(n$0 + 3) [line 15, column 31]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_3" -> "main.fad58de7366495db_2" ;
+	 "main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_3" -> "main#5b887e97b599570ad2415e63e346.3cab7b6fd3cb5396_2" ;
 "point_coords_set_correctly.3abf7d8dcf379339_1" [label="1: Start point_coords_set_correctly\nFormals:  p:Point*\nLocals:  0$?%__sil_tmpSIL_compound_literal__n$2:Point \n  " color=yellow style=filled]
 	
 
