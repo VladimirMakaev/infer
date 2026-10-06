@@ -129,9 +129,9 @@ struct Arr {
 };
 
 // Pulse drops the paths of a loop that needs 10 iterations, so no path reaches
-// the end of the scope of `sorted`, where Pulse checks whether it was modified.
-// The early return reaches the exit, so the copy is reported anyway.
-void FP_copy_modified_before_long_loop_ok(Vec& v, Arr& a, int c) {
+// the end of the scope of `sorted`, where Pulse checks whether it was modified,
+// and the copy must not be reported
+void copy_modified_before_long_loop_ok(Vec& v, Arr& a, int c) {
   if (!c) {
     return;
   }

@@ -742,9 +742,9 @@ let is_modified origin ~source_addr_opt address astate copy_heap copy_timestamp 
     ~copy_heap ~copy_timestamp ~source_addr_opt
 
 
-let mark_modified_address_at ~address ~source_addr_opt origin ~copied_into astate
+let mark_modified_address_at ?reached_end ~address ~source_addr_opt origin ~copied_into astate
     (astate_n : NonDisjDomain.t) : NonDisjDomain.t =
-  NonDisjDomain.mark_copy_as_modified ~copied_into ~source_addr_opt astate_n
+  NonDisjDomain.mark_copy_as_modified ?reached_end ~copied_into ~source_addr_opt astate_n
     ~is_modified:(is_modified origin ~source_addr_opt address astate)
 
 
@@ -760,7 +760,10 @@ let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
         let address = ValueOrigin.value vo in
         let source_addr_opt = AddressAttributes.get_source_origin_of_copy address astate in
         let copied_into = get_copied_into var in
-        mark_modified_address_at ~address ~source_addr_opt ~copied_into Copy astate default )
+        (* [source_addr_opt] is only known on the paths where the copy was made *)
+        let reached_end = Option.is_some source_addr_opt in
+        mark_modified_address_at ~reached_end ~address ~source_addr_opt ~copied_into Copy astate
+          default )
   in
   let mark_modified_parameter var default =
     Stack.find_opt var astate

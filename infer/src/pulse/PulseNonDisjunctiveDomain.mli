@@ -88,7 +88,8 @@ val add_parameter : Var.t -> parameter_spec_t -> t -> t
 val checked_via_destructor : Var.t -> t -> t
 
 val mark_copy_as_modified :
-     is_modified:(BaseMemory.t -> Timestamp.t -> bool)
+     ?reached_end:bool
+  -> is_modified:(BaseMemory.t -> Timestamp.t -> bool)
   -> copied_into:Attribute.CopiedInto.t
   -> source_addr_opt:AbstractValue.t option
   -> t
