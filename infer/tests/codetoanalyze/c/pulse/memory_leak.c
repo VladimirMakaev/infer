@@ -361,3 +361,55 @@ const int* FP_pure_call_returning_its_argument_ok() {
   }
   return find_through_const_pointer(p);
 }
+
+void register_object(void* obj);
+
+struct ptr_holder {
+  int* p;
+};
+
+void store_ptr_and_register(struct ptr_holder* h, int* p) {
+  h->p = p;
+  register_object(h);
+}
+
+void store_malloc_in_object_then_register_in_callee_ok(struct ptr_holder* h) {
+  int* p = malloc(sizeof(int));
+  store_ptr_and_register(h, p);
+}
+
+void store_ptr_and_register_other(struct ptr_holder* h,
+                                  struct ptr_holder* other,
+                                  int* p) {
+  h->p = p;
+  register_object(other);
+}
+
+void callee_registers_other_object_malloc_leak_bad(struct ptr_holder* other) {
+  struct ptr_holder local;
+  int* p = malloc(sizeof(int));
+  store_ptr_and_register_other(&local, other, p);
+}
+
+struct held_node {
+  int v;
+};
+
+struct held_node_holder {
+  struct held_node* n;
+};
+
+void store_node_and_register(struct held_node_holder* h, struct held_node* n) {
+  h->n = n;
+  register_object(h);
+}
+
+int use_after_free_after_register_in_callee_bad(struct held_node_holder* h) {
+  struct held_node* n = malloc(sizeof(struct held_node));
+  if (n == NULL) {
+    return 0;
+  }
+  store_node_and_register(h, n);
+  free(n);
+  return n->v;
+}
