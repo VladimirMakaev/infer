@@ -561,7 +561,8 @@ and mk_c_function ?tenv name function_decl_info_opt =
     | Some (decl_info, function_decl_info)
       when function_decl_info.Clang_ast_t.fdi_is_static
            && not (CTrans_models.is_modelled_static_function (QualifiedCppName.to_qual_string name))
-      ->
+           (* each program of a multi-program build defines its own [main] *)
+           || String.equal (QualifiedCppName.to_qual_string name) "main" ->
         let file_opt =
           (fst decl_info.Clang_ast_t.di_source_range).Clang_ast_t.sl_file
           |> Option.map ~f:SourceFile.from_abs_path

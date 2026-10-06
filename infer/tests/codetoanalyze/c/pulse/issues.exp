@@ -367,6 +367,8 @@ codetoanalyze/c/pulse/memory_leak_more.c, common_realloc_leak_bad, 3, MEMORY_LEA
 codetoanalyze/c/pulse/memory_leak_more.c, common_realloc_leak2_bad, 3, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
 codetoanalyze/c/pulse/memory_leak_more.c, leak_via_allocator_bad, 3, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,when calling `allocate` here,allocated by `malloc` here,memory becomes unreachable here]
 codetoanalyze/c/pulse/memory_leak_more.c, conditional_last_instruction_bad, 2, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
+codetoanalyze/c/pulse/multi_main_a.c, main, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse/multi_main_b.c, main, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/nonnull_annotation.c, null_to_nonnull_param_bad, 2, NULL_ARGUMENT, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/nonnull_annotation.c, getenv_to_nonnull_param_bad, 0, NULL_ARGUMENT, no_bucket, ERROR, [in call to `getenv` (modelled),is assigned to the null pointer,invalid access occurs here]
 codetoanalyze/c/pulse/nonnull_annotation.c, strchr_to_nonnull_param_bad, 3, NULL_ARGUMENT, no_bucket, ERROR, [in call to `strchr` (modelled),is assigned to the null pointer,assigned,invalid access occurs here]

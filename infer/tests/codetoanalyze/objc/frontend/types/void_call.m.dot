@@ -26,54 +26,54 @@ digraph cfg {
 	
 
 	 "foo1.299a0be4a5a79e6a_3" -> "foo1.299a0be4a5a79e6a_2" ;
-"main.fad58de7366495db_1" [label="1: Start main\nFormals: \nLocals:  o:AClass* x:int \n  " color=yellow style=filled]
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_1" [label="1: Start main\nFormals: \nLocals:  o:AClass* x:int \n  " color=yellow style=filled]
 	
 
-	 "main.fad58de7366495db_1" -> "main.fad58de7366495db_12" ;
-"main.fad58de7366495db_2" [label="2: Exit main \n  " color=yellow style=filled]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_1" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_12" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_2" [label="2: Exit main \n  " color=yellow style=filled]
 	
 
-"main.fad58de7366495db_3" [label="3:  Return Stmt \n   *&return:int=0 [line 46, column 3]\n " shape="box"]
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_3" [label="3:  Return Stmt \n   *&return:int=0 [line 46, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_3" -> "main.fad58de7366495db_2" ;
-"main.fad58de7366495db_4" [label="4: + \n  " ]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_3" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_2" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_4" [label="4: + \n  " ]
 	
 
-	 "main.fad58de7366495db_4" -> "main.fad58de7366495db_3" ;
-"main.fad58de7366495db_5" [label="5: Prune (true branch, if) \n   n$0=*&o:AClass* [line 40, column 7]\n  PRUNE(n$0, true); [line 40, column 7]\n " shape="invhouse"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_4" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_3" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_5" [label="5: Prune (true branch, if) \n   n$0=*&o:AClass* [line 40, column 7]\n  PRUNE(n$0, true); [line 40, column 7]\n " shape="invhouse"]
 	
 
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_8" ;
-"main.fad58de7366495db_6" [label="6: Prune (false branch, if) \n   n$0=*&o:AClass* [line 40, column 7]\n  PRUNE(!n$0, false); [line 40, column 7]\n " shape="invhouse"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_5" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_8" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_6" [label="6: Prune (false branch, if) \n   n$0=*&o:AClass* [line 40, column 7]\n  PRUNE(!n$0, false); [line 40, column 7]\n " shape="invhouse"]
 	
 
-	 "main.fad58de7366495db_6" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_7" [label="7:  BinaryOperatorStmt: Assign \n   n$2=*&o:AClass* [line 43, column 10]\n  n$1=*&x:int [line 43, column 16]\n  n$3=_fun_AClass.bar:(n$2:AClass*,n$1:int) virtual [line 43, column 9]\n  *&x:int=n$3 [line 43, column 5]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_6" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_4" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_7" [label="7:  BinaryOperatorStmt: Assign \n   n$2=*&o:AClass* [line 43, column 10]\n  n$1=*&x:int [line 43, column 16]\n  n$3=_fun_AClass.bar:(n$2:AClass*,n$1:int) virtual [line 43, column 9]\n  *&x:int=n$3 [line 43, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_7" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_8" [label="8:  Message Call: foo: \n   n$5=*&o:AClass* [line 42, column 6]\n  n$4=*&x:int [line 42, column 12]\n  n$6=_fun_AClass.foo:(n$5:AClass*,n$4:int) virtual [line 42, column 5]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_7" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_4" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_8" [label="8:  Message Call: foo: \n   n$5=*&o:AClass* [line 42, column 6]\n  n$4=*&x:int [line 42, column 12]\n  n$6=_fun_AClass.foo:(n$5:AClass*,n$4:int) virtual [line 42, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_8" -> "main.fad58de7366495db_7" ;
-"main.fad58de7366495db_9" [label="9:  DeclStmt \n   VARIABLE_DECLARED(o:AClass*); [line 38, column 3]\n  n$9=_fun___objc_alloc_no_fail(sizeof(t=AClass;nullable=false):unsigned long) [line 38, column 15]\n  *&o:AClass*=n$9 [line 38, column 3]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_8" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_7" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_9" [label="9:  DeclStmt \n   VARIABLE_DECLARED(o:AClass*); [line 38, column 3]\n  n$9=_fun___objc_alloc_no_fail(sizeof(t=AClass;nullable=false):unsigned long) [line 38, column 15]\n  *&o:AClass*=n$9 [line 38, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_9" -> "main.fad58de7366495db_5" ;
-	 "main.fad58de7366495db_9" -> "main.fad58de7366495db_6" ;
-"main.fad58de7366495db_10" [label="10:  BinaryOperatorStmt: Assign \n   n$10=*&x:int [line 36, column 12]\n  n$11=_fun_bar1(n$10:int) [line 36, column 7]\n  *&x:int=n$11 [line 36, column 3]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_9" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_5" ;
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_9" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_6" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_10" [label="10:  BinaryOperatorStmt: Assign \n   n$10=*&x:int [line 36, column 12]\n  n$11=_fun_bar1(n$10:int) [line 36, column 7]\n  *&x:int=n$11 [line 36, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_10" -> "main.fad58de7366495db_9" ;
-"main.fad58de7366495db_11" [label="11:  Call _fun_foo1 \n   n$12=*&x:int [line 34, column 8]\n  n$13=_fun_foo1(n$12:int) [line 34, column 3]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_10" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_9" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_11" [label="11:  Call _fun_foo1 \n   n$12=*&x:int [line 34, column 8]\n  n$13=_fun_foo1(n$12:int) [line 34, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_11" -> "main.fad58de7366495db_10" ;
-"main.fad58de7366495db_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(x:int); [line 33, column 3]\n  *&x:int=1 [line 33, column 3]\n " shape="box"]
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_11" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_10" ;
+"main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(x:int); [line 33, column 3]\n  *&x:int=1 [line 33, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_12" -> "main.fad58de7366495db_11" ;
+	 "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_12" -> "main#c1ab99e4f1df210f34287de3b09a.ec7ef0b9d702b518_11" ;
 "bar:#AClass#[instance].28e533beb66e236f_1" [label="1: Start AClass.bar:\nFormals:  self:AClass* a:int\nLocals:  \n  " color=yellow style=filled]
 	
 

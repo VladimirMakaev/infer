@@ -1,32 +1,32 @@
 /* @generated */
 digraph cfg {
-"main.fad58de7366495db_1" [label="1: Start main\nFormals: \nLocals:  X:int y:int \n  " color=yellow style=filled]
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_1" [label="1: Start main\nFormals: \nLocals:  X:int y:int \n  " color=yellow style=filled]
 	
 
-	 "main.fad58de7366495db_1" -> "main.fad58de7366495db_7" ;
-"main.fad58de7366495db_2" [label="2: Exit main \n  " color=yellow style=filled]
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_1" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_7" ;
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_2" [label="2: Exit main \n  " color=yellow style=filled]
 	
 
-"main.fad58de7366495db_3" [label="3:  Return Stmt \n   *&return:int=0 [line 15, column 3]\n " shape="box"]
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_3" [label="3:  Return Stmt \n   *&return:int=0 [line 15, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_3" -> "main.fad58de7366495db_2" ;
-"main.fad58de7366495db_4" [label="4:  Compound statement \n   n$0=*&X:int [line 13, column 5]\n " shape="box"]
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_3" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_2" ;
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_4" [label="4:  Compound statement \n   n$0=*&X:int [line 13, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_4" -> "main.fad58de7366495db_6" ;
-"main.fad58de7366495db_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(X:int); [line 12, column 5]\n  *&X:int=4 [line 12, column 5]\n " shape="box"]
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_4" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_6" ;
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(X:int); [line 12, column 5]\n  *&X:int=4 [line 12, column 5]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_5" -> "main.fad58de7366495db_4" ;
-"main.fad58de7366495db_6" [label="6:  BinaryOperatorStmt: Assign \n   *&y:int=n$0 [line 11, column 3]\n " shape="box"]
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_5" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_4" ;
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_6" [label="6:  BinaryOperatorStmt: Assign \n   *&y:int=n$0 [line 11, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_6" -> "main.fad58de7366495db_3" ;
-"main.fad58de7366495db_7" [label="7:  DeclStmt \n   VARIABLE_DECLARED(y:int); [line 9, column 3]\n  *&y:int=3 [line 9, column 3]\n " shape="box"]
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_6" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_3" ;
+"main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_7" [label="7:  DeclStmt \n   VARIABLE_DECLARED(y:int); [line 9, column 3]\n  *&y:int=3 [line 9, column 3]\n " shape="box"]
 	
 
-	 "main.fad58de7366495db_7" -> "main.fad58de7366495db_5" ;
+	 "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_7" -> "main#921359d4c9b6900b8dddccd9ff28.6d1c326d488dfd9f_5" ;
 "test.098f6bcd4621d373_1" [label="1: Start test\nFormals:  p:int*\nLocals:  y:int x:int \n  " color=yellow style=filled]
 	
 
