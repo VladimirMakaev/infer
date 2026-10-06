@@ -9,7 +9,7 @@ digraph callgraph {
   N0 [ label = "g\nflag=false" ];
   N0 -> N1 ;
 
-  N7 [ label = "main\nflag=false" ];
+  N7 [ label = "main{803c5170888b8642f2a97e5e9423d399}\nflag=false" ];
 
   N6 [ label = "e\nflag=false" ];
   N6 -> N7 ;
