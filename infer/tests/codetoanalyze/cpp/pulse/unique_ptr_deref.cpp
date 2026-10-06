@@ -368,4 +368,56 @@ using leaky_unique_ptr = std::unique_ptr<T, Deleter<T>>;
 
 void no_delete_in_leaky_unique_ptr_bad() { leaky_unique_ptr<X> p(new X()); }
 
+std::unique_ptr<X> make_unique_x();
+void on_null();
+
+int deref_after_compared_to_nullptr_bad() {
+  std::unique_ptr<X> p = make_unique_x();
+  if (p == nullptr) {
+    on_null();
+  }
+  return p->field;
+}
+
+int deref_after_nullptr_compared_bad() {
+  std::unique_ptr<X> p = make_unique_x();
+  if (nullptr == p) {
+    on_null();
+  }
+  return p->field;
+}
+
+int deref_after_negated_bad() {
+  std::unique_ptr<X> p = make_unique_x();
+  if (!p) {
+    on_null();
+  }
+  return p->field;
+}
+
+int deref_if_not_equal_to_nullptr_ok() {
+  std::unique_ptr<X> p = make_unique_x();
+  if (p != nullptr) {
+    return p->field;
+  }
+  return 0;
+}
+
+int null_pointer_in_null_branch_bad(X* x) {
+  std::unique_ptr<X> p = make_unique_x();
+  if (!p) {
+    x = nullptr;
+  }
+  return x->field;
+}
+
+int empty_unique_ptr_in_null_branch_bad() {
+  std::unique_ptr<X> p = make_unique_x();
+  if (p) {
+    return 0;
+  }
+  std::unique_ptr<X> q;
+  return q->field;
+}
+
 } // namespace unique_ptr
