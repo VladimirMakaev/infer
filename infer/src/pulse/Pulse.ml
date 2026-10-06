@@ -1969,9 +1969,11 @@ let initial tenv proc_attrs specialization location =
 
 let should_analyze proc_desc =
   let proc_name = Procdesc.get_proc_name proc_desc in
-  let proc_id = Procname.to_unique_id proc_name in
-  let f regex = not (Str.string_match regex proc_id 0) in
-  Option.value_map Config.pulse_skip_procedures ~f ~default:true
+  let matches regex =
+    Str.string_match regex (Procname.to_unique_id proc_name) 0
+    || Str.string_match regex (Procname.to_string proc_name) 0
+  in
+  (not (Option.exists Config.pulse_skip_procedures ~f:matches))
   && not (Procdesc.is_too_big Pulse ~max_cfg_size:Config.pulse_max_cfg_size proc_desc)
 
 
