@@ -79,6 +79,32 @@ let tuple_field_position name =
       None
 
 
+(* Fields that Pulse's C++ models add to library objects (smart pointers, optionals, containers,
+   iterators, strings) to stand for their contents; the object itself is printed instead. *)
+let is_model_backing_field field =
+  ( match Fieldname.get_class_name field with
+    | CStruct name ->
+        String.equal (QualifiedCppName.to_qual_string name) "__infer_pulse_model"
+    | _ ->
+        false )
+  && List.mem ~equal:String.equal
+       [ "__infer_backing_array"
+       ; "__infer_backing_pointer"
+       ; "__infer_backing_value"
+       ; "__infer_has_value"
+       ; "__infer_model_backing_string"
+       ; "__infer_weak_backing_pointer" ]
+       (Fieldname.get_field_name field)
+
+
+let is_arrow_operator (call : CallEvent.t) =
+  match call with
+  | Call procname | ModelName procname | SkippedKnownCall procname ->
+      String.equal (Procname.get_method procname) "operator->"
+  | Model _ | SkippedUnknownCall _ ->
+      false
+
+
 let rec pp_access_expr fmt access_expr =
   let pp_field_acces_expr fmt access_expr sep field =
     let pp_access_expr fmt access_expr =
@@ -93,8 +119,14 @@ let rec pp_access_expr fmt access_expr =
         (* Override the [->] arrow separator: tuple elements read more
            naturally with Swift's [.N] positional syntax. *)
         F.fprintf fmt "%a.%s" pp_access_expr access_expr n
-    | None ->
-        F.fprintf fmt "%a%s%a" pp_access_expr access_expr sep pp_field field
+    | None when is_model_backing_field field ->
+        pp_access_expr fmt access_expr
+    | None -> (
+      match access_expr with
+      | DotMethod (access_expr, call) when is_arrow_operator call ->
+          F.fprintf fmt "%a->%a" pp_access_expr access_expr pp_field field
+      | _ ->
+          F.fprintf fmt "%a%s%a" pp_access_expr access_expr sep pp_field field )
   in
   let pp_call ~with_class fmt call =
     let java_or_objc =
@@ -222,6 +254,14 @@ let rec access_expr_of_source_expr (base, rev_accesses) =
 
 
 let pp_source_expr fmt source_expr = pp_access_expr fmt (access_expr_of_source_expr source_expr)
+
+let pp_source_expr_as_object fmt source_expr =
+  match access_expr_of_source_expr source_expr with
+  | ProgramVarAddress pvar ->
+      pp_access_expr fmt (ProgramVar pvar)
+  | access_expr ->
+      pp_access_expr fmt access_expr
+
 
 type t = SourceExpr of source_expr * AbstractValue.t option | Unknown of AbstractValue.t option
 [@@deriving compare, equal, yojson_of]
