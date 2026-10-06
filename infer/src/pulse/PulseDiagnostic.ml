@@ -249,7 +249,8 @@ type t =
       ; location: Location.t
       ; copied_location: (Procname.t * Location.t) option
       ; location_instantiated: Location.t option
-      ; from: PulseAttribute.CopyOrigin.t }
+      ; from: PulseAttribute.CopyOrigin.t
+      ; has_no_move_operations: bool }
 [@@deriving compare, equal, yojson_of]
 
 let pp fmt diagnostic =
@@ -331,15 +332,21 @@ let pp fmt diagnostic =
       F.fprintf fmt "UninitMethod {@[callee:%a;@;history:%a;@;location:%a@]}" Procname.pp callee
         ValueHistory.pp history Location.pp location
   | UnnecessaryCopy
-      {copied_into; source_typ; source_opt; location; copied_location; from; location_instantiated}
-    ->
+      { copied_into
+      ; source_typ
+      ; source_opt
+      ; location
+      ; copied_location
+      ; from
+      ; location_instantiated
+      ; has_no_move_operations } ->
       F.fprintf fmt
         "UnnecessaryCopy {@[copied_into=%a;@;\
          typ=%a;@;\
          source_opt=%a;@;\
          location:%a;@;\
          copied_location:%a@;\
-         from=%a;loc_instantiated=%a@]}"
+         from=%a;loc_instantiated=%a;has_no_move_operations=%b@]}"
         PulseAttribute.CopiedInto.pp copied_into
         (Pp.option (Typ.pp_full Pp.text))
         source_typ
@@ -351,7 +358,7 @@ let pp fmt diagnostic =
           | Some (callee, location) ->
               F.fprintf fmt "%a,%a" Procname.pp callee Location.pp location )
         copied_location PulseAttribute.CopyOrigin.pp from (Pp.option Location.pp)
-        location_instantiated
+        location_instantiated has_no_move_operations
 
 
 let get_location = function
@@ -953,8 +960,14 @@ let get_message_and_suggestion diagnostic =
       , Some
           (F.asprintf "Either change the return type of `%a` or revise the function body."
              Procname.describe callee ) )
-  | UnnecessaryCopy {copied_into; source_typ; source_opt; location; copied_location= None; from}
-    -> (
+  | UnnecessaryCopy
+      { copied_into
+      ; source_typ
+      ; source_opt
+      ; location
+      ; copied_location= None
+      ; from
+      ; has_no_move_operations } -> (
       let open PulseAttribute in
       let is_from_const = is_from_const source_typ in
       let get_suggestion_msg_move copied_into source_opt =
@@ -987,6 +1000,20 @@ let get_message_and_suggestion diagnostic =
           | IntoVar _ ->
               move_suggestion
       in
+      let get_suggestion_msg_no_move ({desc} as typ : Typ.t) =
+        let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
+        let no_move =
+          F.asprintf
+            "Type `%a` has no move operations, so `std::move` would still copy it; consider adding \
+             move operations to it"
+            (Typ.pp_full Pp.text) typ
+        in
+        match (copied_into : PulseAttribute.CopiedInto.t) with
+        | IntoIntermediate _ ->
+            no_move ^ " or changing the callee's parameter type to `const &`"
+        | IntoField _ | IntoVar _ ->
+            no_move
+      in
       let suppression_msg =
         "If this copy was intentional, call `folly::copy` to make it explicit and hence suppress \
          the warning"
@@ -1001,8 +1028,13 @@ let get_message_and_suggestion diagnostic =
                     F.fprintf f " ([[%s | bad patterns]])" link ) )
         | CopyCtor, IntoVar _ ->
             "To avoid the copy, use reference `&`"
-        | _, _ ->
-            get_suggestion_msg_move copied_into source_opt
+        | _, _ -> (
+          match source_typ with
+          | Some typ
+            when has_no_move_operations && not (Option.exists ~f:is_from_std_move source_opt) ->
+              get_suggestion_msg_no_move typ
+          | _ ->
+              get_suggestion_msg_move copied_into source_opt )
       in
       match (copied_into, source_opt) with
       | IntoIntermediate _, (None | Some (Block _, _)) ->
