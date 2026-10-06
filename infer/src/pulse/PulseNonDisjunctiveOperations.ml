@@ -762,8 +762,23 @@ let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
         let copied_into = get_copied_into var in
         (* [source_addr_opt] is only known on the paths where the copy was made *)
         let reached_end = Option.is_some source_addr_opt in
-        mark_modified_address_at ~reached_end ~address ~source_addr_opt ~copied_into Copy astate
-          default )
+        let astate_n =
+          mark_modified_address_at ~reached_end ~address ~source_addr_opt ~copied_into Copy astate
+            default
+        in
+        (* a source that is not a variable, e.g. a field or a container element, is not checked
+           when it goes out of scope, so check it while the copy is alive: a reference to it would
+           see the writes done since the copy, including the ones done by callees *)
+        let is_variable_or_invalid addr =
+          Stack.exists (fun _ vo -> AbstractValue.equal (ValueOrigin.value vo) addr) astate
+          (* e.g. a temporary destroyed since the copy *)
+          || AddressAttributes.find_opt `Post addr astate
+             |> Option.exists ~f:(fun attrs -> Option.is_some (Attributes.get_invalid attrs))
+        in
+        Option.filter source_addr_opt ~f:(Fn.non is_variable_or_invalid)
+        |> Option.value_map ~default:astate_n ~f:(fun source_addr ->
+            mark_modified_address_at ~address:source_addr ~source_addr_opt ~copied_into Source
+              astate astate_n ) )
   in
   let mark_modified_parameter var default =
     Stack.find_opt var astate
