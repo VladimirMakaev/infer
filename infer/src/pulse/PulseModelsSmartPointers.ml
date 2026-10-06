@@ -506,8 +506,12 @@ module SharedPtr = struct
     let ( let<**> ) x f = bind_sat_result non_disj x f in
     let op1 = Formula.AbstractValueOperand (fst this) in
     let op2 = Formula.AbstractValueOperand (fst other) in
-    (* self-assignment *)
-    let astate_equals = PulseArithmetic.and_equal op1 op2 astate >>|| ExecutionDomain.continue in
+    let astate_equals =
+      (* self-assignment *)
+      if AbductiveDomain.cannot_be_equal_to_local_address astate (fst this) (fst other) then []
+      else
+        PulseArithmetic.and_equal op1 op2 astate >>|| ExecutionDomain.continue |> SatUnsat.to_list
+    in
     let<**> astate_not_equals = PulseArithmetic.and_not_equal op1 op2 astate in
     let astate_not_equals, non_disj = destructor arg ~desc model_data astate_not_equals non_disj in
     let astate_not_equals =
@@ -519,7 +523,7 @@ module SharedPtr = struct
           | _ ->
               [Ok exec_state] )
     in
-    (SatUnsat.to_list astate_equals @ astate_not_equals, non_disj)
+    (astate_equals @ astate_not_equals, non_disj)
 
 
   let move_assignment this other ~desc : model_no_non_disj =

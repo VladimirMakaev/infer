@@ -2586,6 +2586,19 @@ let transfer_transitive_info_to_caller callee_pname call_loc summary caller_asta
 
 let is_local = is_local
 
+let is_address_of_local astate v =
+  let v = CanonValue.canon' astate v in
+  SafeStack.exists
+    (fun var vo ->
+      Var.is_pvar var && is_local var astate && CanonValue.equal (ValueOrigin.value vo) v )
+    astate
+
+
+let cannot_be_equal_to_local_address astate v1 v2 =
+  (not (CanonValue.equal (CanonValue.canon' astate v1) (CanonValue.canon' astate v2)))
+  && (is_address_of_local astate v1 || is_address_of_local astate v2)
+
+
 let is_allocated_this_pointer proc_attrs astate address =
   let open IOption.Let_syntax in
   let address = CanonValue.canon' astate address in
