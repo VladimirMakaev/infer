@@ -623,6 +623,18 @@ let rec is_trivially_copyable tenv {Typ.desc} =
       false
 
 
+let has_no_move_operations tenv {Typ.desc} =
+  match desc with
+  | Tstruct name -> (
+    match lookup tenv name with
+    | Some {class_info= CppClassInfo {has_no_move_operations}} ->
+        has_no_move_operations
+    | _ ->
+        false )
+  | _ ->
+      false
+
+
 let get_hack_direct_used_traits_interfaces tenv class_name =
   Option.value_map (lookup tenv class_name) ~default:[] ~f:(fun {Struct.supers} ->
       List.fold supers ~init:[] ~f:(fun acc name ->

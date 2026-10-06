@@ -32,7 +32,11 @@ type hack_class_kind = Class | AbstractClass | Interface | Trait | Alias
 module ClassInfo : sig
   type t =
     | NoInfo
-    | CppClassInfo of {is_trivially_copyable: bool}  (** class kind in C++ *)
+    | CppClassInfo of
+        { is_trivially_copyable: bool
+        ; has_no_move_operations: bool
+              (** the class declares a destructor or a copy operation and no move operation, so
+                  moving an object of the class copies it *) }  (** class kind in C++ *)
     | JavaClassInfo of
         { kind: java_class_kind  (** class kind in Java *)
         ; loc: Location.t option
