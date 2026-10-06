@@ -449,6 +449,58 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
         ()
 
 
+  (* create a fake procedure that initializes the global variable so that the variable initializer
+     can be analyzed by the backend (eg, the SIOF checker) *)
+  let translate_global_initializer trans_unit_ctx tenv cfg (dec : Clang_ast_t.decl)
+      (decl_info : Clang_ast_t.decl_info) named_decl_info qt (vdi : Clang_ast_t.var_decl_info) =
+    let template_args_opt =
+      match dec with
+      | VarTemplateSpecializationDecl (template_args, _, _, _, _) ->
+          Some template_args
+      | _ ->
+          None
+    in
+    let procname =
+      (* create the corresponding global variable to get the right pname for its initializer *)
+      let global =
+        CVar_decl.mk_sil_global_var tenv trans_unit_ctx decl_info named_decl_info vdi
+          template_args_opt qt
+      in
+      (* safe use of [Option.value_exn] because it's a global *)
+      Option.value_exn (Pvar.get_initializer_pname global)
+    in
+    if CMethod_trans.should_create_procdesc cfg procname ~defined:true ~set_objc_accessor_attr:false
+    then (
+      let ms =
+        CMethodSignature.mk procname None [] (StdTyp.void, Annot.Item.empty)
+          ~is_ret_constexpr:vdi.vdi_is_constexpr [] decl_info.Clang_ast_t.di_source_range
+          ClangMethodKind.C_FUNCTION None None None `None
+      in
+      let stmt_info =
+        { Clang_ast_t.si_pointer= CAst_utils.get_fresh_pointer ()
+        ; si_source_range= decl_info.di_source_range }
+      in
+      let body = `DeclStmt (stmt_info, [], [dec]) in
+      ignore (CMethod_trans.create_local_procdesc trans_unit_ctx cfg tenv ms [body] []) ;
+      add_method trans_unit_ctx tenv cfg CContext.ContextNoCls procname body ms None None [] )
+
+
+  (* Constant globals with an integer constant initializer declared in headers that are not
+     translated, eg [npos]-style static data members of library classes, still get an initializer
+     when the translated code uses them, so that Pulse knows their value. *)
+  let translate_used_integral_constant trans_unit_ctx tenv cfg decl_trans_context
+      (dec : Clang_ast_t.decl) =
+    match (decl_trans_context, dec) with
+    | ( `Translation
+      , ( VarDecl (decl_info, named_decl_info, qt, vdi)
+        | VarTemplateSpecializationDecl (_, decl_info, named_decl_info, qt, vdi) ) )
+      when vdi.vdi_is_global && vdi.vdi_is_init_ice && Option.is_some vdi.vdi_init_expr
+           && (qt.Clang_ast_t.qt_is_const || vdi.vdi_is_constexpr) ->
+        translate_global_initializer trans_unit_ctx tenv cfg dec decl_info named_decl_info qt vdi
+    | _ ->
+        ()
+
+
   (* Translate one global declaration *)
   let rec translate_one_declaration trans_unit_ctx tenv cfg decl_trans_context dec =
     let open Clang_ast_t in
@@ -524,51 +576,12 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
                 (Clang_ast_proj.get_decl_kind_string dec)
           | None ->
               () )
-      | VarDecl
-          (decl_info, named_decl_info, qt, ({vdi_is_global; vdi_init_expr; vdi_is_constexpr} as vdi))
+      | VarDecl (decl_info, named_decl_info, qt, ({vdi_is_global; vdi_init_expr} as vdi))
       | VarTemplateSpecializationDecl
-          ( _
-          , decl_info
-          , named_decl_info
-          , qt
-          , ({vdi_is_global; vdi_init_expr; vdi_is_constexpr} as vdi) )
+          (_, decl_info, named_decl_info, qt, ({vdi_is_global; vdi_init_expr} as vdi))
         when String.is_prefix ~prefix:"__infer_" named_decl_info.ni_name
              || (vdi_is_global && Option.is_some vdi_init_expr) ->
-          let template_args_opt =
-            match[@warning "-partial-match"] dec with
-            | VarDecl _ ->
-                None
-            | VarTemplateSpecializationDecl (template_args, _, _, _, _) ->
-                Some template_args
-          in
-          (* create a fake procedure that initializes the global variable so that the variable
-             initializer can be analyzed by the backend (eg, the SIOF checker) *)
-          let procname =
-            (* create the corresponding global variable to get the right pname for its
-               initializer *)
-            let global =
-              CVar_decl.mk_sil_global_var tenv trans_unit_ctx decl_info named_decl_info vdi
-                template_args_opt qt
-            in
-            (* safe use of [Option.value_exn] because it's a global *)
-            Option.value_exn (Pvar.get_initializer_pname global)
-          in
-          if
-            CMethod_trans.should_create_procdesc cfg procname ~defined:true
-              ~set_objc_accessor_attr:false
-          then (
-            let ms =
-              CMethodSignature.mk procname None [] (StdTyp.void, Annot.Item.empty)
-                ~is_ret_constexpr:vdi_is_constexpr [] decl_info.Clang_ast_t.di_source_range
-                ClangMethodKind.C_FUNCTION None None None `None
-            in
-            let stmt_info =
-              { si_pointer= CAst_utils.get_fresh_pointer ()
-              ; si_source_range= decl_info.di_source_range }
-            in
-            let body = `DeclStmt (stmt_info, [], [dec]) in
-            ignore (CMethod_trans.create_local_procdesc trans_unit_ctx cfg tenv ms [body] []) ;
-            add_method trans_unit_ctx tenv cfg CContext.ContextNoCls procname body ms None None [] )
+          translate_global_initializer trans_unit_ctx tenv cfg dec decl_info named_decl_info qt vdi
       (* Note that C and C++ records are treated the same way
          Skip translating implicit struct declarations, unless they have
          full definition (which happens with C++ lambdas) *)
@@ -588,7 +601,9 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
           List.iter ~f:translate method_decls
       | _ ->
           ()
-    else if should_store_attributes dec then store_attributes tenv trans_unit_ctx dec ;
+    else (
+      translate_used_integral_constant trans_unit_ctx tenv cfg decl_trans_context dec ;
+      if should_store_attributes dec then store_attributes tenv trans_unit_ctx dec ) ;
     match dec with
     | EnumDecl _ ->
         ignore (CEnum_decl.enum_decl dec)
