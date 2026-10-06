@@ -173,6 +173,10 @@ val find_cpp_constructor : t -> Typ.Name.t -> Procname.t list
 
 val is_trivially_copyable : t -> Typ.t -> bool
 
+val has_no_move_operations : t -> Typ.t -> bool
+(** whether the type is a C++ class that declares a destructor or a copy operation and no move
+    operation *)
+
 val get_hack_direct_used_traits_interfaces :
   t -> Typ.Name.t -> ([`Interface | `Trait] * HackClassName.t) list
 (** [get_hack_direct_used_traits_interfaces tenv tname] returns a list of the directly used traits
