@@ -8,6 +8,6 @@ digraph callgraph {
   N2 [ label = "c\nflag=true" ];
   N2 -> N3 ;
 
-  N3 [ label = "main\nflag=true" ];
+  N3 [ label = "main{803c5170888b8642f2a97e5e9423d399}\nflag=true" ];
 
 }
