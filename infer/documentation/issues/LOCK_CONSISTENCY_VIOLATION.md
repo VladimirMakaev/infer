@@ -12,6 +12,11 @@ A method annotated with the clang thread safety attribute `requires_capability`
 if `mu` were held on entry, so its writes count as writes under a lock. Calls
 to it are checked with the locks that the caller holds.
 
+A function that is not defined in the analyzed code takes or releases the
+capabilities named by its `acquire_capability`, `release_capability` or
+`try_acquire_capability` attribute (eg `ACQUIRE(mu)`), including the constructor
+and destructor of a `scoped_lockable` guard.
+
 ### Fixing Lock Consistency Violation reports
 
 - Avoid the offending access (most often the read). Of course, this may not be
