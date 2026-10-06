@@ -445,3 +445,25 @@ void FP_update_inside_lambda_visible_outside_ok() {
     *p = 42;
   }
 }
+
+int std_function_writes_through_pointer_arg_bad(
+    const std::function<void(int*)>& f) {
+  int x = 0;
+  f(&x);
+  if (x != 0) {
+    int* p = nullptr;
+    return *p;
+  }
+  return 0;
+}
+
+int std_function_converted_const_pointer_arg_ok(
+    const std::function<void(const int*)>& f) {
+  int x = 0;
+  f(&x);
+  if (x != 0) {
+    int* p = nullptr;
+    return *p;
+  }
+  return 0;
+}
