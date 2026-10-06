@@ -142,7 +142,9 @@ val mk_symbol_seq :
     [<symbol sequence>] is a comma-separated sequence of [<symbol>]s such that [(<symbol>,_)] is an
     element of [symbols]. *)
 
-val mk_json : Yojson.Safe.t ref t
+val mk_json : ?bare_string_as_list:bool -> Yojson.Safe.t ref t
+(** with [~bare_string_as_list:true], a command-line value that is not JSON and does not start like
+    a JSON list, object or string is read as a list of that one string *)
 
 val mk_anon : unit -> string RevList.t ref
 [@@warning "-unused-value-declaration"]
