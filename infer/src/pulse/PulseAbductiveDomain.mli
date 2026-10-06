@@ -384,6 +384,11 @@ val overwrite_contents :
 
 val is_local : Var.t -> t -> bool
 
+val cannot_be_equal_to_local_address : t -> AbstractValue.t -> AbstractValue.t -> bool
+(** the two values are distinct and one of them is the address of a local variable of the current
+    function, so they cannot be equal: the values of the precondition are older than the local, and
+    the values created since then, e.g. by unknown calls, are assumed not to be its address *)
+
 val find_post_cell_opt : AbstractValue.t -> t -> BaseDomain.cell option
 
 val fold_all :
