@@ -1010,7 +1010,7 @@ let get_message_and_suggestion diagnostic =
           , Some (get_suggestion_msg source_opt) )
       | IntoIntermediate _, Some ((PVar _, _) as source_expr) ->
           ( F.asprintf "variable `%a` is %a into an intermediate and is never modified."
-              DecompilerExpr.pp_source_expr source_expr CopyOrigin.pp from
+              DecompilerExpr.pp_source_expr_as_object source_expr CopyOrigin.pp from
           , Some (get_suggestion_msg source_opt) )
       | IntoIntermediate _, Some ((ReturnValue _, _) as source_expr) ->
           ( F.asprintf "The return value from %a is %a unnecessarily  on %a."
@@ -1022,8 +1022,8 @@ let get_message_and_suggestion diagnostic =
           , Some (F.asprintf "%s. %s." (get_suggestion_msg source_opt) suppression_msg) )
       | IntoVar _, Some source_expr ->
           ( F.asprintf "%a variable `%a` is not modified after it is copied from `%a` on %a."
-              CopyOrigin.pp from CopiedInto.pp copied_into DecompilerExpr.pp_source_expr source_expr
-              Location.pp_line location
+              CopyOrigin.pp from CopiedInto.pp copied_into DecompilerExpr.pp_source_expr_as_object
+              source_expr Location.pp_line location
           , Some (F.asprintf "%s. %s." (get_suggestion_msg source_opt) suppression_msg) )
       | IntoField {field}, None ->
           ( F.asprintf "Field `%a` is %a into from an rvalue-ref but is not modified afterwards."
@@ -1031,7 +1031,8 @@ let get_message_and_suggestion diagnostic =
           , Some (get_suggestion_msg source_opt) )
       | IntoField {field}, Some source_expr ->
           ( F.asprintf "`%a` is %a into field `%a` but is not modified afterwards."
-              DecompilerExpr.pp_source_expr source_expr CopyOrigin.pp from Fieldname.pp field
+              DecompilerExpr.pp_source_expr_as_object source_expr CopyOrigin.pp from Fieldname.pp
+              field
           , Some (get_suggestion_msg source_opt) ) )
 
 

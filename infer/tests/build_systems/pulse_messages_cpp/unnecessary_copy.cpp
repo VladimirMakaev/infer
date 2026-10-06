@@ -151,3 +151,12 @@ class Vec {
 };
 
 void call_get_const_ref_bad(const Vec& v) { auto x = v.get_const_ref(); }
+
+int read_a(const A& a);
+
+void copy_from_local_bad() {
+  A x;
+  x.vec.push_back(1);
+  A y = x;
+  read_a(y);
+}
