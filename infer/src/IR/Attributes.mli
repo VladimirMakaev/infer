@@ -9,8 +9,14 @@
 
 open! IStd
 
-val store : proc_desc:Procdesc.t option -> ProcAttributes.t -> analysis:bool -> unit
-(** Save .attr file for the procedure into the attributes database. *)
+val store :
+     ?check_stored_definition:(ProcAttributes.t -> unit)
+  -> proc_desc:Procdesc.t option
+  -> ProcAttributes.t
+  -> analysis:bool
+  -> unit
+(** Save .attr file for the procedure into the attributes database. [check_stored_definition]
+    receives the attributes of the procedure already stored with a CFG under the same name. *)
 
 val load : Procname.t -> ProcAttributes.t option
 (** Load the attributes for the procedure from the attributes database. *)

@@ -35,8 +35,9 @@ let merge_captures ~root ~infer_deps_file = perform (MergeCaptures {root; infer_
 
 let merge_summaries ~infer_outs = perform (MergeSummaries {infer_outs})
 
-let replace_attributes ~proc_uid ~proc_attributes ~cfg ~callees ~analysis =
-  perform (ReplaceAttributes {proc_uid; proc_attributes; cfg; callees; analysis})
+let replace_attributes ~check_stored_definition ~proc_uid ~proc_attributes ~cfg ~callees ~analysis =
+  perform
+    (ReplaceAttributes {proc_uid; proc_attributes; cfg; callees; analysis; check_stored_definition})
 
 
 let shrink_analysis_db () = perform ShrinkAnalysisDB
