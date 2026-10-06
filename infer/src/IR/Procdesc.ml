@@ -1077,7 +1077,8 @@ let mark_if_unchanged ~old_pdesc ~new_pdesc =
     let proc_attributes = ProcAttributes.SQLite.serialize new_attrs in
     let cfg = SQLite.serialize (Some new_pdesc) in
     let callees = get_static_callees new_pdesc |> Procname.SQLiteList.serialize in
-    DBWriter.replace_attributes ~proc_uid ~proc_attributes ~cfg ~callees ~analysis:true )
+    DBWriter.replace_attributes ~check_stored_definition:None ~proc_uid ~proc_attributes ~cfg
+      ~callees ~analysis:true )
 
 
 module Loop = struct

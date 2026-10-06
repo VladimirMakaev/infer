@@ -1,1 +1,2 @@
 DUPLICATE_SYMBOLS source:hello.c source_captured:hello_dup.c pname:test
+count.capture_duplicate_definitions
