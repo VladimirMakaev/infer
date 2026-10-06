@@ -8,6 +8,7 @@
 #include <array>
 #include <fcntl.h>
 #include <functional>
+#include <memory>
 #include <unistd.h>
 #include <vector>
 
@@ -72,4 +73,29 @@ void FN_push_back_fd_into_local_vector_bad(const char* path) {
     return;
   }
   fds.push_back(fd);
+}
+
+void register_object(void* obj);
+
+struct RegisteredFdOwner {
+  int fd;
+  explicit RegisteredFdOwner(int f) : fd(f) { register_object(this); }
+  ~RegisteredFdOwner() { close(fd); }
+};
+
+std::unique_ptr<RegisteredFdOwner> constructor_stores_fd_and_registers_this_ok(
+    const char* path) {
+  int fd = open(path, O_RDWR);
+  if (fd < 0) {
+    return nullptr;
+  }
+  return std::unique_ptr<RegisteredFdOwner>(new RegisteredFdOwner(fd));
+}
+
+RegisteredFdOwner* new_owner_stores_fd_and_registers_this_ok(const char* path) {
+  int fd = open(path, O_RDWR);
+  if (fd < 0) {
+    return nullptr;
+  }
+  return new RegisteredFdOwner(fd);
 }
