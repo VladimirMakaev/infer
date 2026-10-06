@@ -69,6 +69,8 @@ module type DisjReady = sig
 
   val remember_dropped_disjuncts : DisjDomain.t list -> NonDisjDomain.t -> NonDisjDomain.t
 
+  val non_disj_of_non_executable : DisjDomain.t list -> NonDisjDomain.t -> NonDisjDomain.t
+
   val pp_session_name : CFG.Node.t -> Format.formatter -> unit
 
   val pp_disjunct : Pp.print_kind -> Format.formatter -> DisjDomain.t -> unit
