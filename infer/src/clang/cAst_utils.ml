@@ -330,20 +330,64 @@ let mk_capability_annot class_name expressions =
 
 
 let sil_annot_of_function_attributes attributes =
-  let required_capabilities =
-    List.concat_map attributes ~f:(function
-      | `RequiresCapabilityAttr (_, capabilities) ->
-          List.filter_map capabilities ~f:(fun {Clang_ast_t.ca_is_negative; ca_expression} ->
-              Option.some_if (not ca_is_negative)
-                (String.chop_prefix_if_exists ca_expression ~prefix:"this->") )
-      | _ ->
-          [] )
+  let capability_names capabilities =
+    List.filter_map capabilities ~f:(fun {Clang_ast_t.ca_is_negative; ca_expression} ->
+        Option.some_if (not ca_is_negative)
+          (String.chop_prefix_if_exists ca_expression ~prefix:"this->") )
+  in
+  (* without arguments, the capability is the object that the method is called on *)
+  let capability_names_or_this = function
+    | [] ->
+        ["this"]
+    | capabilities ->
+        capability_names capabilities
+  in
+  let mk_annot class_name ~f =
     (* a redeclaration has both its own attributes and those inherited from earlier declarations,
        which may spell the same capability with or without [this->] *)
-    |> List.dedup_and_sort ~compare:String.compare
+    match List.concat_map attributes ~f |> List.dedup_and_sort ~compare:String.compare with
+    | [] ->
+        []
+    | capabilities ->
+        [mk_capability_annot class_name capabilities]
   in
-  if List.is_empty required_capabilities then Annot.Item.empty
-  else [mk_capability_annot Annotations.requires_capability required_capabilities]
+  let try_acquire_annot =
+    let fails_on_true =
+      List.exists attributes ~f:(function
+        | `TryAcquireCapabilityAttr (_, {Clang_ast_t.taci_fails_on_true}) ->
+            taci_fails_on_true
+        | _ ->
+            false )
+    in
+    mk_annot Annotations.try_acquire_capability ~f:(function
+      | `TryAcquireCapabilityAttr (_, {Clang_ast_t.taci_capabilities}) ->
+          capability_names_or_this taci_capabilities
+      | _ ->
+          [] )
+    |> List.map ~f:(fun ({Annot.parameters} as annot) ->
+        if fails_on_true then
+          let fails_on_true =
+            {Annot.name= Some Annotations.fails_on_true; value= Annot.Bool true}
+          in
+          {annot with parameters= parameters @ [fails_on_true]}
+        else annot )
+  in
+  mk_annot Annotations.requires_capability ~f:(function
+    | `RequiresCapabilityAttr (_, capabilities) ->
+        capability_names capabilities
+    | _ ->
+        [] )
+  @ mk_annot Annotations.acquire_capability ~f:(function
+    | `AcquireCapabilityAttr (_, capabilities) ->
+        capability_names_or_this capabilities
+    | _ ->
+        [] )
+  @ mk_annot Annotations.release_capability ~f:(function
+    | `ReleaseCapabilityAttr (_, capabilities) ->
+        capability_names_or_this capabilities
+    | _ ->
+        [] )
+  @ try_acquire_annot
 
 
 let sil_annot_of_field_attributes attributes =
