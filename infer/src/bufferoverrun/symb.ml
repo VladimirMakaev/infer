@@ -229,6 +229,22 @@ module SymbolPath = struct
         false
 
 
+  let rec is_var_or_field_of_var = function
+    | BoField.Prim (Pvar _) ->
+        true
+    | BoField.Prim (Deref _ | Callsite _) ->
+        false
+    | BoField.(Field {prefix= x} | StarField {prefix= x}) ->
+        is_var_or_field_of_var x
+
+
+  let is_field_of_var = function
+    | Normal BoField.(Field {prefix= x} | StarField {prefix= x}) ->
+        is_var_or_field_of_var x
+    | Normal (BoField.Prim _) | Offset _ | Length _ | Modeled _ ->
+        false
+
+
   let is_length = function Length _ -> true | _ -> false
 
   let is_global = function Normal p | Offset {p} | Length {p} | Modeled p -> is_global_partial p
