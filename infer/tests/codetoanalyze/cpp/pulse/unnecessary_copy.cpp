@@ -1099,3 +1099,27 @@ struct Lists {
     return s;
   }
 };
+
+void take_two_ptrs(std::shared_ptr<int> a, std::shared_ptr<int> b);
+
+// the order of evaluation of the arguments is unspecified: `v` cannot be moved
+// into either of them
+void same_variable_passed_twice_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_two_ptrs(v, v);
+}
+
+std::shared_ptr<int> identity_ptr(const std::shared_ptr<int>& p);
+
+// the use of `v` by the other argument is in a nested call
+void FP_same_variable_in_nested_call_of_other_argument_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_two_ptrs(identity_ptr(v), v);
+}
+
+void take_one_ptr(std::shared_ptr<int> a);
+
+void variable_passed_once_bad(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_one_ptr(v);
+}
