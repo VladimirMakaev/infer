@@ -519,15 +519,6 @@ let has_var_notin vars t =
   Container.exists t ~iter:iter_variables ~f:(fun v -> not (Var.Set.mem v vars))
 
 
-let value_is_compatible_with_type z (ikind : Typ.ikind) =
-  match PulseContext.integer_widths () with
-  | None ->
-      false
-  | Some integer_widths ->
-      let lower_bound, upper_bound = IntegerWidths.range_of_ikind integer_widths ikind in
-      Z.(leq lower_bound z && leq z upper_bound)
-
-
 (** reduce to a constant when the direct sub-terms are constants *)
 let eval_const_shallow_ t0 =
   let map_const t f = match t with Const c -> f c | _ -> t0 in
@@ -555,15 +546,13 @@ let eval_const_shallow_ t0 =
         t0
     | Linear l ->
         LinArith.get_as_const l |> Option.value_map ~default:t0 ~f:(fun c -> Const c)
-    | IsInt (t', ikind) ->
+    | IsInt (t', _ikind) ->
         q_map t' (fun q ->
             if Z.(equal one) (Q.den q) then
-              (* an integer *)
-              let z = Q.num q in
-              if value_is_compatible_with_type z ikind then Q.one
-              else (
-                L.d_printfln ~color:Orange "CONTRADICTION: %a with incompatible size" (pp Var.pp) t0 ;
-                Q.zero )
+              (* an integer; one outside the range of [ikind] is not a contradiction: casts are the
+                 identity and arithmetic is on Q, so such values occur on feasible paths. The value
+                 is not wrapped into the range, so comparisons still use the unwrapped value. *)
+              Q.one
             else (
               (* a non-integer rational *)
               L.d_printfln ~color:Orange "CONTRADICTION: %a on non-int value" (pp Var.pp) t0 ;
@@ -814,25 +803,9 @@ let simplify_shallow t =
                 in
                 raise_notrace (UnsatExn {reason; source= __POS__})
               else t )
-      | `Constant -> (
-          let value = LinArith.get_constant_part l in
-          match PulseContext.integer_widths () with
-          | None ->
-              t
-          | Some integer_widths ->
-              let ikind_lower_bound, ikind_upper_bound =
-                IntegerWidths.range_of_ikind integer_widths ikind
-              in
-              if
-                Q.(lt value (of_bigint ikind_lower_bound))
-                || Q.(gt value (of_bigint ikind_upper_bound))
-              then
-                let reason () =
-                  F.asprintf "out of bound integer of type %s: value %a" (Typ.ikind_to_string ikind)
-                    Q.pp_print value
-                in
-                raise_notrace (UnsatExn {reason; source= __POS__})
-              else t )
+      | `Constant ->
+          (* see the [IsInt] case of [eval_const_shallow] *)
+          if Z.(equal one) (Q.den (LinArith.get_constant_part l)) then one else t
       | `Neither ->
           t )
     | _ ->
