@@ -90,7 +90,11 @@ val sil_annot_of_return_type : Clang_ast_t.decl -> Clang_ast_t.qual_type -> Anno
 val sil_annot_of_function_attributes : Clang_ast_t.attribute list -> Annot.Item.t
 (** [Annotations.requires_capability] with the distinct capabilities as parameters if the function
     must be called with some capability held, ie it has a [requires_capability] attribute with an
-    argument that is not a negative capability [!mu] *)
+    argument that is not a negative capability [!mu]; and [Annotations.acquire_capability],
+    [Annotations.release_capability] and [Annotations.try_acquire_capability] with the capabilities
+    that the function acquires or releases, ["this"] for the object a method is called on. A
+    [try_acquire_capability] that succeeds when the function returns [false] has a parameter
+    [Annotations.fails_on_true]. *)
 
 val sil_annot_of_field_attributes : Clang_ast_t.attribute list -> Annot.Item.t
 (** [Annotations.guarded_by] with the capability as parameter if the field has a [guarded_by]

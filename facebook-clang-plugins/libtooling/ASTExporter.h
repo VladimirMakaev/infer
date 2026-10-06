@@ -496,6 +496,9 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   DECLARE_VISITOR(GuardedByAttr)
   DECLARE_VISITOR(NonNullAttr)
   DECLARE_VISITOR(RequiresCapabilityAttr)
+  DECLARE_VISITOR(AcquireCapabilityAttr)
+  DECLARE_VISITOR(ReleaseCapabilityAttr)
+  DECLARE_VISITOR(TryAcquireCapabilityAttr)
   DECLARE_VISITOR(SentinelAttr)
   DECLARE_VISITOR(VisibilityAttr)
 
@@ -5626,6 +5629,68 @@ void ASTExporter<ATDWriter>::VisitNonNullAttr(const NonNullAttr *A) {
     for (const ParamIdx &Idx : A->args()) {
       OF.emitInteger(Idx.getASTIndex());
     }
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::AcquireCapabilityAttrTupleSize() {
+  return AttrTupleSize() + 1;
+}
+//@atd #define acquire_capability_attr_tuple attr_tuple * capability_arg list
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitAcquireCapabilityAttr(
+    const AcquireCapabilityAttr *A) {
+  VisitAttr(A);
+  ArrayScope Scope(OF, A->args_size());
+  for (const Expr *E : A->args()) {
+    dumpCapabilityArg(E);
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::ReleaseCapabilityAttrTupleSize() {
+  return AttrTupleSize() + 1;
+}
+//@atd #define release_capability_attr_tuple attr_tuple * capability_arg list
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitReleaseCapabilityAttr(
+    const ReleaseCapabilityAttr *A) {
+  VisitAttr(A);
+  ArrayScope Scope(OF, A->args_size());
+  for (const Expr *E : A->args()) {
+    dumpCapabilityArg(E);
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::TryAcquireCapabilityAttrTupleSize() {
+  return AttrTupleSize() + 1;
+}
+//@atd #define try_acquire_capability_attr_tuple attr_tuple * try_acquire_capability_info
+//@atd type try_acquire_capability_info = {
+//@atd   ~fails_on_true : bool;
+//@atd   capabilities : capability_arg list;
+//@atd } <ocaml field_prefix="taci_">
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitTryAcquireCapabilityAttr(
+    const TryAcquireCapabilityAttr *A) {
+  VisitAttr(A);
+  // the function returns its success value, usually `true`, when it acquires
+  // the capabilities; a success value that is not a constant is taken as true
+  bool SuccessValue = true;
+  const Expr *Success = A->getSuccessValue();
+  if (Success && !Success->isValueDependent()) {
+    bool Value;
+    if (Success->EvaluateAsBooleanCondition(Value, Context)) {
+      SuccessValue = Value;
+    }
+  }
+  ObjectScope Scope(OF, 1 + !SuccessValue);
+  OF.emitFlag("fails_on_true", !SuccessValue);
+  OF.emitTag("capabilities");
+  ArrayScope ArgsScope(OF, A->args_size());
+  for (const Expr *E : A->args()) {
+    dumpCapabilityArg(E);
   }
 }
 

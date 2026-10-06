@@ -1,0 +1,1331 @@
+["TranslationUnitDecl" , [
+  {
+    "pointer" : 1,
+    "source_range" : [
+      {
+      },
+      {
+      }
+    ]
+  },
+  [
+    ["TypedefDecl" , [
+      {
+        "pointer" : 2,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "__int128_t",
+        "qual_name" : [
+          "__int128_t"
+        ]
+      },
+      0,
+      {
+      }
+    ]],
+    ["TypedefDecl" , [
+      {
+        "pointer" : 3,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "__uint128_t",
+        "qual_name" : [
+          "__uint128_t"
+        ]
+      },
+      0,
+      {
+      }
+    ]],
+    ["TypedefDecl" , [
+      {
+        "pointer" : 4,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "__NSConstantString",
+        "qual_name" : [
+          "__NSConstantString"
+        ]
+      },
+      0,
+      {
+      }
+    ]],
+    ["TypedefDecl" , [
+      {
+        "pointer" : 5,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "__builtin_ms_va_list",
+        "qual_name" : [
+          "__builtin_ms_va_list"
+        ]
+      },
+      0,
+      {
+      }
+    ]],
+    ["TypedefDecl" , [
+      {
+        "pointer" : 6,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "__builtin_va_list",
+        "qual_name" : [
+          "__builtin_va_list"
+        ]
+      },
+      0,
+      {
+      }
+    ]],
+    ["CXXRecordDecl" , [
+      {
+        "pointer" : 7,
+        "parent_pointer" : 1,
+        "source_range" : [
+          {
+            "file" : "tests/thread_safety_lock_attributes.cpp",
+            "line" : 7,
+            "column" : 1
+          },
+          {
+            "line" : 12,
+            "column" : 1
+          }
+        ],
+        "is_this_declaration_referenced" : true,
+        "attributes" : [
+          ["CapabilityAttr" , [
+            {
+              "pointer" : 8,
+              "source_range" : [
+                {
+                  "line" : 7,
+                  "column" : 22
+                },
+                {
+                  "column" : 40
+                }
+              ]
+            }
+          ]]
+        ]
+      },
+      {
+        "name" : "Mutex",
+        "qual_name" : [
+          "Mutex"
+        ]
+      },
+      9,
+      [
+        ["CXXRecordDecl" , [
+          {
+            "pointer" : 10,
+            "parent_pointer" : 7,
+            "source_range" : [
+              {
+                "column" : 1
+              },
+              {
+                "column" : 44
+              }
+            ],
+            "is_implicit" : true,
+            "access" : "Public"
+          },
+          {
+            "name" : "Mutex",
+            "qual_name" : [
+              "Mutex",
+              "Mutex"
+            ]
+          },
+          9,
+          [
+          ],
+          {
+          },
+          "TTK_Class",
+          {
+            "definition_ptr" : 0
+          },
+          {
+          }
+        ]],
+        ["AccessSpecDecl" , [
+          {
+            "pointer" : 11,
+            "source_range" : [
+              {
+                "line" : 8,
+                "column" : 2
+              },
+              {
+                "column" : 8
+              }
+            ],
+            "access" : "Public"
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 12,
+            "parent_pointer" : 7,
+            "source_range" : [
+              {
+                "line" : 9,
+                "column" : 3
+              },
+              {
+                "column" : 51
+              }
+            ],
+            "attributes" : [
+              ["AcquireCapabilityAttr" , [
+                {
+                  "pointer" : 13,
+                  "source_range" : [
+                    {
+                      "column" : 30
+                    },
+                    {
+                      "column" : 49
+                    }
+                  ]
+                },
+                [
+                ]
+              ]]
+            ],
+            "access" : "Public"
+          },
+          {
+            "name" : "lock",
+            "qual_name" : [
+              "lock",
+              "Mutex"
+            ]
+          },
+          {
+            "type_ptr" : 14
+          },
+          {
+            "mangled_name" : "16496181097306359964",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 15,
+            "parent_pointer" : 7,
+            "source_range" : [
+              {
+                "line" : 10,
+                "column" : 3
+              },
+              {
+                "column" : 53
+              }
+            ],
+            "attributes" : [
+              ["ReleaseCapabilityAttr" , [
+                {
+                  "pointer" : 16,
+                  "source_range" : [
+                    {
+                      "column" : 32
+                    },
+                    {
+                      "column" : 51
+                    }
+                  ]
+                },
+                [
+                ]
+              ]]
+            ],
+            "access" : "Public"
+          },
+          {
+            "name" : "unlock",
+            "qual_name" : [
+              "unlock",
+              "Mutex"
+            ]
+          },
+          {
+            "type_ptr" : 14
+          },
+          {
+            "mangled_name" : "8790681772098979397",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 17,
+            "parent_pointer" : 7,
+            "source_range" : [
+              {
+                "line" : 11,
+                "column" : 3
+              },
+              {
+                "column" : 63
+              }
+            ],
+            "attributes" : [
+              ["TryAcquireCapabilityAttr" , [
+                {
+                  "pointer" : 18,
+                  "source_range" : [
+                    {
+                      "column" : 34
+                    },
+                    {
+                      "column" : 61
+                    }
+                  ]
+                },
+                {
+                  "capabilities" : [
+                  ]
+                }
+              ]]
+            ],
+            "access" : "Public"
+          },
+          {
+            "name" : "try_lock",
+            "qual_name" : [
+              "try_lock",
+              "Mutex"
+            ]
+          },
+          {
+            "type_ptr" : 19
+          },
+          {
+            "mangled_name" : "18429151547286911682",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]]
+      ],
+      {
+      },
+      "TTK_Class",
+      {
+        "definition_ptr" : 7,
+        "is_complete_definition" : true
+      },
+      {
+        "is_pod" : true,
+        "is_trivially_copyable" : true
+      }
+    ]],
+    ["CXXRecordDecl" , [
+      {
+        "pointer" : 20,
+        "parent_pointer" : 1,
+        "source_range" : [
+          {
+            "line" : 14,
+            "column" : 1
+          },
+          {
+            "line" : 21,
+            "column" : 1
+          }
+        ]
+      },
+      {
+        "name" : "C",
+        "qual_name" : [
+          "C"
+        ]
+      },
+      21,
+      [
+        ["CXXRecordDecl" , [
+          {
+            "pointer" : 22,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 14,
+                "column" : 1
+              },
+              {
+                "column" : 7
+              }
+            ],
+            "is_implicit" : true,
+            "access" : "Public"
+          },
+          {
+            "name" : "C",
+            "qual_name" : [
+              "C",
+              "C"
+            ]
+          },
+          21,
+          [
+          ],
+          {
+          },
+          "TTK_Class",
+          {
+            "definition_ptr" : 0
+          },
+          {
+          }
+        ]],
+        ["FieldDecl" , [
+          {
+            "pointer" : 23,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 15,
+                "column" : 3
+              },
+              {
+                "column" : 9
+              }
+            ],
+            "is_this_declaration_referenced" : true,
+            "access" : "Private"
+          },
+          {
+            "name" : "mu",
+            "qual_name" : [
+              "mu",
+              "C"
+            ]
+          },
+          {
+            "type_ptr" : 24
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 25,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 17,
+                "column" : 3
+              },
+              {
+                "column" : 53
+              }
+            ],
+            "attributes" : [
+              ["AcquireCapabilityAttr" , [
+                {
+                  "pointer" : 26,
+                  "source_range" : [
+                    {
+                      "column" : 30
+                    },
+                    {
+                      "column" : 51
+                    }
+                  ]
+                },
+                [
+                  {
+                    "expression" : "mu"
+                  }
+                ]
+              ]]
+            ],
+            "access" : "Private"
+          },
+          {
+            "name" : "lock",
+            "qual_name" : [
+              "lock",
+              "C"
+            ]
+          },
+          {
+            "type_ptr" : 14
+          },
+          {
+            "mangled_name" : "9104135169168748058",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 27,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 18,
+                "column" : 3
+              },
+              {
+                "column" : 75
+              }
+            ],
+            "attributes" : [
+              ["AcquireCapabilityAttr" , [
+                {
+                  "pointer" : 28,
+                  "source_range" : [
+                    {
+                      "column" : 37
+                    },
+                    {
+                      "column" : 73
+                    }
+                  ]
+                },
+                [
+                  {
+                    "expression" : "this->mu"
+                  }
+                ]
+              ]]
+            ],
+            "access" : "Private"
+          },
+          {
+            "name" : "lock_shared",
+            "qual_name" : [
+              "lock_shared",
+              "C"
+            ]
+          },
+          {
+            "type_ptr" : 14
+          },
+          {
+            "mangled_name" : "14940384208067769994",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 29,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 19,
+                "column" : 3
+              },
+              {
+                "column" : 74
+              }
+            ],
+            "attributes" : [
+              ["ReleaseCapabilityAttr" , [
+                {
+                  "pointer" : 30,
+                  "source_range" : [
+                    {
+                      "column" : 44
+                    },
+                    {
+                      "column" : 72
+                    }
+                  ]
+                },
+                [
+                  {
+                    "expression" : "mu"
+                  },
+                  {
+                    "expression" : "other"
+                  }
+                ]
+              ]]
+            ],
+            "access" : "Private"
+          },
+          {
+            "name" : "unlock",
+            "qual_name" : [
+              "unlock",
+              "C"
+            ]
+          },
+          {
+            "type_ptr" : 31
+          },
+          {
+            "mangled_name" : "8449989319429985875",
+            "is_cpp" : true,
+            "parameters" : [
+              ["ParmVarDecl" , [
+                {
+                  "pointer" : 32,
+                  "parent_pointer" : 29,
+                  "source_range" : [
+                    {
+                      "column" : 15
+                    },
+                    {
+                      "column" : 22
+                    }
+                  ],
+                  "is_this_declaration_referenced" : true
+                },
+                {
+                  "name" : "other",
+                  "qual_name" : [
+                    "other"
+                  ]
+                },
+                {
+                  "type_ptr" : 33
+                },
+                {
+                  "parm_index_in_function" : 0
+                }
+              ]]
+            ]
+          },
+          {
+          }
+        ]],
+        ["CXXMethodDecl" , [
+          {
+            "pointer" : 34,
+            "parent_pointer" : 20,
+            "source_range" : [
+              {
+                "line" : 20,
+                "column" : 3
+              },
+              {
+                "column" : 68
+              }
+            ],
+            "attributes" : [
+              ["TryAcquireCapabilityAttr" , [
+                {
+                  "pointer" : 35,
+                  "source_range" : [
+                    {
+                      "column" : 34
+                    },
+                    {
+                      "column" : 66
+                    }
+                  ]
+                },
+                {
+                  "fails_on_true" : true,
+                  "capabilities" : [
+                    {
+                      "expression" : "mu"
+                    }
+                  ]
+                }
+              ]]
+            ],
+            "access" : "Private"
+          },
+          {
+            "name" : "try_lock",
+            "qual_name" : [
+              "try_lock",
+              "C"
+            ]
+          },
+          {
+            "type_ptr" : 19
+          },
+          {
+            "mangled_name" : "4217888092868892776",
+            "is_cpp" : true
+          },
+          {
+          }
+        ]]
+      ],
+      {
+      },
+      "TTK_Class",
+      {
+        "definition_ptr" : 20,
+        "is_complete_definition" : true
+      },
+      {
+        "is_trivially_copyable" : true
+      }
+    ]],
+    ["TypedefDecl" , [
+      {
+        "pointer" : 36,
+        "source_range" : [
+          {
+          },
+          {
+          }
+        ],
+        "is_implicit" : true
+      },
+      {
+        "name" : "instancetype",
+        "qual_name" : [
+          "instancetype"
+        ]
+      },
+      37,
+      {
+      }
+    ]]
+  ],
+  {
+  },
+  {
+    "input_path" : "tests/thread_safety_lock_attributes.cpp",
+    "input_kind" : "IK_CXX",
+    "integer_type_widths" : {
+      "char_type" : 8,
+      "short_type" : 16,
+      "int_type" : 32,
+      "long_type" : 64,
+      "longlong_type" : 64
+    },
+    "types" : [
+      ["BuiltinType" , [
+        {
+          "pointer" : 38
+        },
+        "Void"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 39
+        },
+        "Bool"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 40
+        },
+        "Char_S"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 41
+        },
+        "SChar"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 42
+        },
+        "Short"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 43
+        },
+        "Int"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 44
+        },
+        "Long"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 45
+        },
+        "LongLong"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 46
+        },
+        "UChar"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 47
+        },
+        "UShort"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 48
+        },
+        "UInt"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 49
+        },
+        "ULong"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 50
+        },
+        "ULongLong"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 51
+        },
+        "Float"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 52
+        },
+        "Double"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 53
+        },
+        "LongDouble"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 54
+        },
+        "Float128"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 55
+        },
+        "Ibm128"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 56
+        },
+        "Float16"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 57
+        },
+        "ShortAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 58
+        },
+        "Accum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 59
+        },
+        "LongAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 60
+        },
+        "UShortAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 61
+        },
+        "UAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 62
+        },
+        "ULongAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 63
+        },
+        "ShortFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 64
+        },
+        "Fract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 65
+        },
+        "LongFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 66
+        },
+        "UShortFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 67
+        },
+        "UFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 68
+        },
+        "ULongFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 69
+        },
+        "SatShortAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 70
+        },
+        "SatAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 71
+        },
+        "SatLongAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 72
+        },
+        "SatUShortAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 73
+        },
+        "SatUAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 74
+        },
+        "SatULongAccum"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 75
+        },
+        "SatShortFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 76
+        },
+        "SatFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 77
+        },
+        "SatLongFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 78
+        },
+        "SatUShortFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 79
+        },
+        "SatUFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 80
+        },
+        "SatULongFract"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 81
+        },
+        "Int128"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 82
+        },
+        "UInt128"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 83
+        },
+        "WChar_S"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 84
+        },
+        "Char8"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 85
+        },
+        "Char16"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 86
+        },
+        "Char32"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 87
+        },
+        "Dependent"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 88
+        },
+        "Overload"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 89
+        },
+        "BoundMember"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 90
+        },
+        "UnresolvedTemplate"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 91
+        },
+        "PseudoObject"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 92
+        },
+        "UnknownAny"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 93
+        },
+        "ARCUnbridgedCast"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 94
+        },
+        "BuiltinFn"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 95
+        },
+        "ObjCId"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 96
+        },
+        "ObjCClass"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 97
+        },
+        "ObjCSel"
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 98
+        },
+        {
+          "type_ptr" : 38
+        }
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 99
+        },
+        "NullPtr"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 100
+        },
+        "Half"
+      ]],
+      ["BuiltinType" , [
+        {
+          "pointer" : 101
+        },
+        "BFloat16"
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 102
+        },
+        {
+          "type_ptr" : 40
+        }
+      ]],
+      ["RecordType" , [
+        {
+          "pointer" : 103
+        },
+        104
+      ]],
+      ["ConstantArrayType" , [
+        {
+          "pointer" : 105
+        },
+        {
+          "element_type" : {
+            "type_ptr" : 103
+          },
+          "stride" : 24
+        },
+        1
+      ]],
+      ["RecordType" , [
+        {
+          "pointer" : 106
+        },
+        107
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 108
+        },
+        {
+          "type_ptr" : 43,
+          "is_const" : true
+        }
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 109
+        },
+        {
+          "type_ptr" : 40,
+          "is_const" : true
+        }
+      ]],
+      ["RecordType" , [
+        {
+          "pointer" : 9
+        },
+        7
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 110
+        },
+        {
+          "type_ptr" : 9
+        }
+      ]],
+      ["FunctionProtoType" , [
+        {
+          "pointer" : 14
+        },
+        {
+          "return_type" : {
+            "type_ptr" : 38
+          }
+        },
+        {
+        }
+      ]],
+      ["FunctionProtoType" , [
+        {
+          "pointer" : 19
+        },
+        {
+          "return_type" : {
+            "type_ptr" : 39
+          }
+        },
+        {
+        }
+      ]],
+      ["RecordType" , [
+        {
+          "pointer" : 21
+        },
+        20
+      ]],
+      ["ElaboratedType" , [
+        {
+          "pointer" : 24,
+          "desugared_type" : 9
+        },
+        {
+        }
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 111
+        },
+        {
+          "type_ptr" : 21
+        }
+      ]],
+      ["PointerType" , [
+        {
+          "pointer" : 33
+        },
+        {
+          "type_ptr" : 24
+        }
+      ]],
+      ["FunctionProtoType" , [
+        {
+          "pointer" : 112
+        },
+        {
+          "return_type" : {
+            "type_ptr" : 38
+          }
+        },
+        {
+          "params_type" : [
+            {
+              "type_ptr" : 110
+            }
+          ]
+        }
+      ]],
+      ["FunctionProtoType" , [
+        {
+          "pointer" : 31
+        },
+        {
+          "return_type" : {
+            "type_ptr" : 38
+          }
+        },
+        {
+          "params_type" : [
+            {
+              "type_ptr" : 33
+            }
+          ]
+        }
+      ]],
+      ["ObjCObjectType" , [
+        {
+          "pointer" : 113
+        },
+        {
+          "base_type" : 95
+        }
+      ]],
+      ["ObjCObjectPointerType" , [
+        {
+          "pointer" : 114
+        },
+        {
+          "type_ptr" : 113
+        }
+      ]],
+      ["TypedefType" , [
+        {
+          "pointer" : 115,
+          "desugared_type" : 114
+        },
+        {
+          "child_type" : {
+            "type_ptr" : 114
+          },
+          "decl_ptr" : 116
+        }
+      ]],
+      ["TypedefType" , [
+        {
+          "pointer" : 37,
+          "desugared_type" : 114
+        },
+        {
+          "child_type" : {
+            "type_ptr" : 115
+          },
+          "decl_ptr" : 36
+        }
+      ]],
+      ["NoneType" , [
+        {
+          "pointer" : 0
+        }
+      ]]
+    ]
+  }
+]]

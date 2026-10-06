@@ -81,6 +81,14 @@ let recently_nonnull = "RecentlyNonNull"
 
 let requires_capability = "RequiresCapability"
 
+let acquire_capability = "AcquireCapability"
+
+let release_capability = "ReleaseCapability"
+
+let try_acquire_capability = "TryAcquireCapability"
+
+let fails_on_true = "fails_on_true"
+
 let thread_confined = "ThreadConfined"
 
 let thread_safe = "ThreadSafe"

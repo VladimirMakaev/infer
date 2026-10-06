@@ -537,6 +537,9 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         let actuals = hilexp_of_sils ~add_deref:false astate sil_actuals in
         let astate = forget_field_aliases_reachable_from tenv actuals astate in
         match get_lock_effect callee actuals with
+        | Lock [guard] when Domain.is_guard astate guard ->
+            (* a method of a scoped capability with [acquire_capability] and no argument *)
+            Domain.lock_guard tenv astate guard ~procname ~loc
         | Lock locks ->
             do_lock locks loc astate
         | GuardLock guard ->
@@ -547,6 +550,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
               log_parse_error "Couldn't parse lock in guard constructor" callee actuals ;
             if List.is_empty lock_paths then astate
             else Domain.add_guard tenv astate guard lock_paths ~acquire_now ~procname ~loc
+        | Unlock [guard] when Domain.is_guard astate guard ->
+            Domain.unlock_guard astate guard
         | Unlock locks ->
             do_unlock locks astate
         | GuardUnlock guard ->
