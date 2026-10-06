@@ -364,21 +364,21 @@ void reserve_then_resize_ok(std::vector<int>& vec) {
   std::cout << *elt << "\n";
 }
 
-// erase invalidates the elements before the erased position too
+// the position of end() is not related to the indices of the elements
 void FP_erase_last_ok(std::vector<int>& vec) {
   int* elt = &vec[0];
   vec.erase(vec.end() - 1);
   std::cout << *elt << "\n";
 }
 
-// erase invalidates the elements before the erased range too
-void FP_erase_tail_keep_front_ok(std::vector<int>& vec) {
+// the elements before the erased range stay valid
+void erase_tail_keep_front_ok(std::vector<int>& vec) {
   int& elt = vec.front();
   vec.erase(vec.begin() + 1, vec.end());
   std::cout << elt << "\n";
 }
 
-// erase invalidates every element even when the range is empty
+// the position of end() is not related to the indices of the elements
 void FP_erase_empty_range_ok(std::vector<int>& vec) {
   int* elt = &vec[0];
   vec.erase(vec.end(), vec.end());
