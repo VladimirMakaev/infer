@@ -185,6 +185,9 @@ module ParameterMap = AbstractDomain.Map (ParameterVar) (ParameterSpec)
 (** the copies into variables that reached the end of their scope on a path where they were made *)
 module ReachedEnd = AbstractDomain.FiniteSet (CopyVar)
 
+(** the intermediates whose source is used by another argument of the call they are passed to *)
+module SharedIntermediates = AbstractDomain.FiniteSet (Var)
+
 module Locked = AbstractDomain.BooleanOr
 module TrackedLoc = AbstractDomain.FiniteMultiMap (Location) (Timestamp)
 
@@ -299,18 +302,27 @@ module IntraDomElt = struct
     ; loads: Loads.t
     ; stores: Stores.t
     ; passed_to: PassedTo.t
-    ; reached_end: ReachedEnd.t }
+    ; reached_end: ReachedEnd.t
+    ; shared_intermediates: SharedIntermediates.t }
   [@@deriving abstract_domain]
 
   let pp fmt
-      {copy_map; parameter_map; destructor_checked; captured; locked; loads; passed_to; reached_end}
-      =
+      { copy_map
+      ; parameter_map
+      ; destructor_checked
+      ; captured
+      ; locked
+      ; loads
+      ; passed_to
+      ; reached_end
+      ; shared_intermediates } =
     F.fprintf fmt
       "@[@[copy map: %a@],@ @[parameter map: %a@],@ @[destructor checked: %a@],@ @[captured: \
-       %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@]@]"
+       %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@],@ @[shared \
+       intermediates: %a@]@]"
       CopyMap.pp copy_map ParameterMap.pp parameter_map DestructorChecked.pp destructor_checked
       Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to ReachedEnd.pp
-      reached_end
+      reached_end SharedIntermediates.pp shared_intermediates
 
 
   let bottom =
@@ -322,7 +334,8 @@ module IntraDomElt = struct
     ; loads= Loads.bottom
     ; stores= Stores.bottom
     ; passed_to= PassedTo.bottom
-    ; reached_end= ReachedEnd.empty }
+    ; reached_end= ReachedEnd.empty
+    ; shared_intermediates= SharedIntermediates.empty }
 
 
   let is_bottom
@@ -334,8 +347,10 @@ module IntraDomElt = struct
       ; loads
       ; stores
       ; passed_to
-      ; reached_end } =
+      ; reached_end
+      ; shared_intermediates } =
     CopyMap.is_bottom copy_map && ReachedEnd.is_bottom reached_end
+    && SharedIntermediates.is_bottom shared_intermediates
     && ParameterMap.is_bottom parameter_map
     && DestructorChecked.is_bottom destructor_checked
     && Captured.is_bottom captured && Locked.is_bottom locked && Loads.is_bottom loads
@@ -420,7 +435,8 @@ module IntraDomElt = struct
         not (Typ.is_rvalue_reference typ) )
 
 
-  let get_copied ~ref_formals ~ptr_formals ({copy_map; captured; reached_end} as astate_n) =
+  let get_copied ~ref_formals ~ptr_formals
+      ({copy_map; captured; reached_end; shared_intermediates} as astate_n) =
     let modified =
       CopyMap.fold
         (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
@@ -438,6 +454,9 @@ module IntraDomElt = struct
       (fun (CopyVar.{copied_into} as copy_var) (copy_spec : CopySpec.t) acc ->
         match (copied_into, copy_spec) with
         | _, _ when is_captured copied_into ->
+            acc
+        | IntoIntermediate {copied_var}, _
+          when SharedIntermediates.mem copied_var shared_intermediates ->
             acc
         | (IntoVar _ | IntoIntermediate _), Copied _ when not (ReachedEnd.mem copy_var reached_end)
           ->
@@ -507,6 +526,48 @@ module IntraDomElt = struct
 
 
   let remove_var var astate_n = {astate_n with copy_map= CopyMap.remove_var var astate_n.copy_map}
+
+  (* The order of evaluation of the arguments of a call is unspecified, so a variable that is copied
+     into an intermediate for one argument and also used by another argument cannot be moved. *)
+  let mark_intermediates_with_shared_source actuals ({copy_map; loads} as astate_n) =
+    let intermediate_source_of pvar =
+      CopyMap.fold
+        (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
+          match (copied_into, copy_spec) with
+          | ( IntoIntermediate {copied_var= ProgramVar tmp}
+            , ( Copied {source_opt= Some (PVar source, _)}
+              | Modified {source_opt= Some (PVar source, _)} ) )
+            when Pvar.equal tmp pvar ->
+              Some source
+          | _ ->
+              acc )
+        copy_map None
+    in
+    let intermediates, used =
+      List.fold actuals ~init:([], []) ~f:(fun (intermediates, used) ((actual : Exp.t), _) ->
+          match actual with
+          | Lvar pvar -> (
+            match intermediate_source_of pvar with
+            | Some source ->
+                ((pvar, source) :: intermediates, source :: used)
+            | None ->
+                (intermediates, pvar :: used) )
+          | Var ident ->
+              let loaded =
+                List.filter_map (Loads.get_all ident loads) ~f:(fun (var : Var.t) ->
+                    match var with ProgramVar pvar -> Some pvar | LogicalVar _ -> None )
+              in
+              (intermediates, loaded @ used)
+          | _ ->
+              (intermediates, used) )
+    in
+    List.fold intermediates ~init:astate_n ~f:(fun astate_n (tmp, source) ->
+        if List.count used ~f:(Pvar.equal source) > 1 then
+          { astate_n with
+            shared_intermediates=
+              SharedIntermediates.add (Var.of_pvar tmp) astate_n.shared_intermediates }
+        else astate_n )
+
 
   let add_field copied_field ~source_addr_opt res astate_n =
     { astate_n with
@@ -624,6 +685,10 @@ module IntraDom = struct
 
 
   let remove_var var = map (IntraDomElt.remove_var var)
+
+  let mark_intermediates_with_shared_source actuals =
+    map (IntraDomElt.mark_intermediates_with_shared_source actuals)
+
 
   let add_field copied_field ~source_addr_opt res =
     map (IntraDomElt.add_field copied_field ~source_addr_opt res)
@@ -826,6 +891,10 @@ let add_var copied_into ~source_addr_opt res =
 
 
 let remove_var var = map_intra (IntraDom.remove_var var)
+
+let mark_intermediates_with_shared_source actuals =
+  map_intra (IntraDom.mark_intermediates_with_shared_source actuals)
+
 
 let add_field copied_field ~source_addr_opt res =
   map_intra (IntraDom.add_field copied_field ~source_addr_opt res)
