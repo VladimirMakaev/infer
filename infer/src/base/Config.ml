@@ -3708,8 +3708,11 @@ and suppress_lint_ignore_types =
 and suppressions =
   CLOpt.mk_bool ~long:"suppressions" ~default:true
     ~in_help:InferCommand.[(Report, manual_generic)]
-    "Suppress infer issues on source lines matching the @infer-disable ISSUE_TYPE1, ISSUE_TYPE2, \
-     ... and @infer-disable-every ISSUE_TYPE1, ISSUE_TYPE2, ... keywords."
+    "Suppress infer issues on source lines matching the @infer-ignore ISSUE_TYPE1, ISSUE_TYPE2, \
+     ... and @infer-ignore-every ISSUE_TYPE1, ISSUE_TYPE2, ... keywords. These comments are read \
+     from the source files when the report is written: issues in a source file that cannot be read \
+     then (for instance, because the analysis runs on a different machine than the capture) are \
+     reported unsuppressed, and a single warning gives the number of such files."
 
 
 and tenv_json =

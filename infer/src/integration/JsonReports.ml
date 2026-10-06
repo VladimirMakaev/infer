@@ -214,14 +214,14 @@ let issue_in_report_block_list_specs ~file ~issue ~proc =
   List.exists ~f:(is_in_report_block_list_spec ~file ~issue ~proc) Config.report_block_list_spec
 
 
-module JsonIssuePrinter = MakeJsonListPrinter (struct
-  type elt = json_issue_printer_typ
+module SourceSuppressions = struct
+  let cache = ref SourceFile.Map.empty
 
-  let suppressions_cache = ref SourceFile.Map.empty
+  let unreadable_files = ref 0
 
   let is_suppressed source_file ~issue_type ~line =
     let suppressions =
-      match SourceFile.Map.find_opt source_file !suppressions_cache with
+      match SourceFile.Map.find_opt source_file !cache with
       | Some s ->
           s
       | None -> (
@@ -229,7 +229,9 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
           L.debug Report Verbose "Parsing suppressions for %s@\n" filename ;
           match Utils.read_file filename with
           | Error _ ->
-              L.user_error "Could not read file %s@\n" filename ;
+              L.debug Report Quiet "Could not read file %s, not applying its suppressions@\n"
+                filename ;
+              incr unreadable_files ;
               IString.Map.empty
           | Ok lines ->
               let suppressions, errors = Suppressions.parse_lines ~file:filename lines in
@@ -237,9 +239,20 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
                   L.user_error "%s" (error ()) ) ;
               suppressions )
     in
-    suppressions_cache := SourceFile.Map.add source_file suppressions !suppressions_cache ;
+    cache := SourceFile.Map.add source_file suppressions !cache ;
     Suppressions.is_suppressed ~suppressions ~issue_type ~line
 
+
+  let warn_unreadable_files () =
+    if !unreadable_files > 0 then
+      L.user_warning
+        "Could not read %d source file(s) with issues: their in-source suppressions were not \
+         applied. See --suppressions.@\n"
+        !unreadable_files
+end
+
+module JsonIssuePrinter = MakeJsonListPrinter (struct
+  type elt = json_issue_printer_typ
 
   (* Temporary function that will be deleted once we migrate to the new autofix format *)
   let get_autofixes (err_data : Errlog.err_data) proc_name =
@@ -354,7 +367,8 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
       in
       let suppressed =
         Config.suppressions
-        && is_suppressed source_file ~issue_type:bug_type ~line:err_data.loc.Location.line
+        && SourceSuppressions.is_suppressed source_file ~issue_type:bug_type
+             ~line:err_data.loc.Location.line
       in
       let bug =
         { Jsonbug_j.bug_type
@@ -574,6 +588,7 @@ let write_reports ~issues_json ~costs_json ~config_impact_json =
   let costs_outf = open_outfile_and_fmt costs_json in
   let config_impact_outf = open_outfile_and_fmt config_impact_json in
   process_all_summaries_and_issues ~issues_outf ~costs_outf ~config_impact_outf ;
+  SourceSuppressions.warn_unreadable_files () ;
   close_fmt_and_outfile config_impact_outf ;
   close_fmt_and_outfile costs_outf ;
   close_fmt_and_outfile issues_outf
