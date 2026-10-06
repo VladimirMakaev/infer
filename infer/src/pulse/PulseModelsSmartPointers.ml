@@ -1058,6 +1058,30 @@ module UniquePtr = struct
     swap this other ~desc model_data astate
 end
 
+let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
+  let is_unique = Option.is_some (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) in
+  if is_unique || Option.is_some (SharedPtr.find_element_type tenv typ) then
+    Some
+      (fun {path; location} astate ->
+        let assign_count constant astate =
+          if is_unique then Sat (Ok astate)
+          else SharedPtr.assign_count path location this ~constant ~desc astate
+        in
+        let null =
+          let** astate = assign_value_nullptr path location this ~desc astate in
+          assign_count IntLit.zero astate
+        in
+        let non_null =
+          let value = (AbstractValue.mk_fresh (), Hist.single_call path location desc) in
+          let** astate = PulseArithmetic.and_positive (fst value) astate in
+          let=* astate, _ = write_value path location this ~value ~desc astate in
+          assign_count IntLit.one astate
+        in
+        SatUnsat.to_list (null >>|| ExecutionDomain.continue)
+        @ SatUnsat.to_list (non_null >>|| ExecutionDomain.continue) )
+  else None
+
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   [ (* matchers for unique_ptr *)
