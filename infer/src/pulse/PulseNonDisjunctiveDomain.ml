@@ -181,6 +181,10 @@ module CopyMap = struct
 end
 
 module ParameterMap = AbstractDomain.Map (ParameterVar) (ParameterSpec)
+
+(** the copies into variables that reached the end of their scope on a path where they were made *)
+module ReachedEnd = AbstractDomain.FiniteSet (CopyVar)
+
 module Locked = AbstractDomain.BooleanOr
 module TrackedLoc = AbstractDomain.FiniteMultiMap (Location) (Timestamp)
 
@@ -294,15 +298,19 @@ module IntraDomElt = struct
     ; locked: Locked.t
     ; loads: Loads.t
     ; stores: Stores.t
-    ; passed_to: PassedTo.t }
+    ; passed_to: PassedTo.t
+    ; reached_end: ReachedEnd.t }
   [@@deriving abstract_domain]
 
-  let pp fmt {copy_map; parameter_map; destructor_checked; captured; locked; loads; passed_to} =
+  let pp fmt
+      {copy_map; parameter_map; destructor_checked; captured; locked; loads; passed_to; reached_end}
+      =
     F.fprintf fmt
       "@[@[copy map: %a@],@ @[parameter map: %a@],@ @[destructor checked: %a@],@ @[captured: \
-       %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@]@]"
+       %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@]@]"
       CopyMap.pp copy_map ParameterMap.pp parameter_map DestructorChecked.pp destructor_checked
-      Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to
+      Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to ReachedEnd.pp
+      reached_end
 
 
   let bottom =
@@ -313,20 +321,34 @@ module IntraDomElt = struct
     ; locked= Locked.bottom
     ; loads= Loads.bottom
     ; stores= Stores.bottom
-    ; passed_to= PassedTo.bottom }
+    ; passed_to= PassedTo.bottom
+    ; reached_end= ReachedEnd.empty }
 
 
   let is_bottom
-      {copy_map; parameter_map; destructor_checked; captured; locked; loads; stores; passed_to} =
-    CopyMap.is_bottom copy_map
+      { copy_map
+      ; parameter_map
+      ; destructor_checked
+      ; captured
+      ; locked
+      ; loads
+      ; stores
+      ; passed_to
+      ; reached_end } =
+    CopyMap.is_bottom copy_map && ReachedEnd.is_bottom reached_end
     && ParameterMap.is_bottom parameter_map
     && DestructorChecked.is_bottom destructor_checked
     && Captured.is_bottom captured && Locked.is_bottom locked && Loads.is_bottom loads
     && Stores.is_bottom stores && PassedTo.is_bottom passed_to
 
 
-  let mark_copy_as_modified ~is_modified ~copied_into ~source_addr_opt ({copy_map} as astate_n) =
+  let mark_copy_as_modified ?(reached_end = false) ~is_modified ~copied_into ~source_addr_opt
+      ({copy_map} as astate_n) =
     let copy_var = CopyVar.{copied_into; source_addr_opt} in
+    let astate_n =
+      if reached_end then {astate_n with reached_end= ReachedEnd.add copy_var astate_n.reached_end}
+      else astate_n
+    in
     let copy_map =
       match CopyMap.find_opt copy_var copy_map with
       | Some
@@ -398,7 +420,7 @@ module IntraDomElt = struct
         not (Typ.is_rvalue_reference typ) )
 
 
-  let get_copied ~ref_formals ~ptr_formals ({copy_map; captured} as astate_n) =
+  let get_copied ~ref_formals ~ptr_formals ({copy_map; captured; reached_end} as astate_n) =
     let modified =
       CopyMap.fold
         (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
@@ -413,9 +435,14 @@ module IntraDomElt = struct
           false
     in
     CopyMap.fold
-      (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
+      (fun (CopyVar.{copied_into} as copy_var) (copy_spec : CopySpec.t) acc ->
         match (copied_into, copy_spec) with
         | _, _ when is_captured copied_into ->
+            acc
+        | (IntoVar _ | IntoIntermediate _), Copied _ when not (ReachedEnd.mem copy_var reached_end)
+          ->
+            (* the copy is checked at the end of the scope of its variable, which no path where the
+               copy was made reached, e.g. because their disjuncts were dropped *)
             acc
         | _, Copied _ when CopiedSet.mem copied_into modified ->
             acc
@@ -576,8 +603,8 @@ module IntraDom = struct
 
   let is_bottom = get ~default:false IntraDomElt.is_bottom
 
-  let mark_copy_as_modified ~is_modified ~copied_into ~source_addr_opt =
-    map (IntraDomElt.mark_copy_as_modified ~is_modified ~copied_into ~source_addr_opt)
+  let mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt =
+    map (IntraDomElt.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
 
 
   let mark_parameter_as_modified ~is_modified ~var =
@@ -778,8 +805,8 @@ let map_intra f ({intra} as x) = {x with intra= f intra}
 
 let map_inter f ({inter} as x) = {x with inter= f inter}
 
-let mark_copy_as_modified ~is_modified ~copied_into ~source_addr_opt =
-  map_intra (IntraDom.mark_copy_as_modified ~is_modified ~copied_into ~source_addr_opt)
+let mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt =
+  map_intra (IntraDom.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
 
 
 let mark_parameter_as_modified ~is_modified ~var =
