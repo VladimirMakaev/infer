@@ -255,6 +255,7 @@ module Attribute = struct
     | SourceOriginOfCopy of {source: AbstractValue.t; is_const_ref: bool}
     | StaticType of Typ.Name.t
     | StdMoved
+    | StdVectorErased of Trace.t
     | StdVectorReserve
     | Tainted of (TaintedSet.t[@yojson.opaque])
     | TaintSanitized of (TaintSanitizedSet.t[@yojson.opaque])
@@ -324,6 +325,8 @@ module Attribute = struct
   let static_type_rank = Variants.statictype.rank
 
   let std_moved_rank = Variants.stdmoved.rank
+
+  let std_vector_erased_rank = Variants.stdvectorerased.rank
 
   let std_vector_reserve_rank = Variants.stdvectorreserve.rank
 
@@ -418,6 +421,10 @@ module Attribute = struct
         F.fprintf f "StaticType %a" Typ.Name.pp type_name
     | StdMoved ->
         F.pp_print_string f "std::move()"
+    | StdVectorErased trace ->
+        F.fprintf f "StdVectorErased(@[%a@])"
+          (Trace.pp ~pp_immediate:(pp_string_if_debug "erased"))
+          trace
     | StdVectorReserve ->
         F.pp_print_string f "std::vector::reserve()"
     | Tainted tainted ->
@@ -473,6 +480,7 @@ module Attribute = struct
     | SourceOriginOfCopy _
     | StaticType _
     | StdMoved
+    | StdVectorErased _
     | StdVectorReserve
     | Tainted _
     | TaintSanitized _
@@ -519,6 +527,7 @@ module Attribute = struct
     | SourceOriginOfCopy _
     | StaticType _
     | StdMoved
+    | StdVectorErased _
     | StdVectorReserve
     | Tainted _
     | TaintSanitized _
@@ -566,6 +575,7 @@ module Attribute = struct
     | ReturnedFromUnknown _
     | StaticType _
     | StdMoved
+    | StdVectorErased _
     | StdVectorReserve
     | TaintSanitized _
     | Uninitialized _
@@ -643,6 +653,8 @@ module Attribute = struct
         TaintSanitized (TaintSanitizedSet.map add_call_to_taint_sanitized taint_sanitized)
     | UnknownEffect (call, hist) ->
         UnknownEffect (call, add_call_to_history hist)
+    | StdVectorErased trace ->
+        StdVectorErased (add_call_to_trace trace)
     | WrittenTo (_timestamp, trace) ->
         WrittenTo (timestamp, add_call_to_trace trace)
     | CopiedInto _ | SourceOriginOfCopy _ ->
@@ -788,6 +800,7 @@ module Attribute = struct
       | SourceOriginOfCopy _
       | StaticType _
       | StdMoved
+      | StdVectorErased _
       | StdVectorReserve
       | Tainted _
       | TaintSanitized _
@@ -1018,6 +1031,11 @@ module Attributes = struct
   let is_std_moved = mem_by_rank Attribute.std_moved_rank
 
   let is_std_vector_reserved = mem_by_rank Attribute.std_vector_reserve_rank
+
+  let get_std_vector_erased =
+    get_by_rank Attribute.std_vector_erased_rank ~dest:(function[@warning "-partial-match"]
+        | StdVectorErased trace -> trace )
+
 
   let get_last_lookup =
     get_by_rank Attribute.last_lookup_rank ~dest:(function[@warning "-partial-match"]
