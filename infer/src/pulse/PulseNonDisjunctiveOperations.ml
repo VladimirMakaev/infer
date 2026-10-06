@@ -607,6 +607,7 @@ let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~as
     astate_n =
   match (call_exp : Exp.t) with
   | Const (Cfun pname) | Closure {name= pname} ->
+      let astate_n = NonDisjDomain.mark_intermediates_with_shared_source actuals astate_n in
       continue_fold_map astates ~init:astate_n ~f:(fun astate_n astate ->
           let default = (astate_n, astate) in
           let ( |-> ) = IOption.continue ~default in
