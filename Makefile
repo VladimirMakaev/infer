@@ -68,6 +68,7 @@ DIRECT_TESTS += \
   c_export-textual \
   c_sil \
   c_starvation \
+  c_starvation-dedup \
   c_topl \
   cpp_bufferoverrun \
   cpp_frontend \
@@ -86,6 +87,7 @@ DIRECT_TESTS += \
   cpp_sil \
   cpp_siof \
   cpp_starvation \
+  cpp_starvation-dedup \
 
 ifeq ($(BUILD_CPU),x86_64)
 DIRECT_TESTS += \
