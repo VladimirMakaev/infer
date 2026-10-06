@@ -1343,10 +1343,11 @@ and cxx =
 
 
 and cxx_scope_guards =
-  CLOpt.mk_json ~long:"cxx-scope-guards"
+  CLOpt.mk_json ~bare_string_as_list:true ~long:"cxx-scope-guards"
     ~in_help:InferCommand.[(Analyze, manual_clang)]
     "Specify scope guard classes that can be read only by destructors without being reported as \
-     dead stores."
+     dead stores, as a JSON list of class names, e.g. $(b,--cxx-scope-guards '[\"ns::Guard\"]'). A \
+     single class name, e.g. $(b,--cxx-scope-guards ns::Guard), is read as a one-element list."
 
 
 and data_flow_queries_on_topl =
@@ -2023,12 +2024,14 @@ and liveness_block_list_var_regex =
 
 
 and liveness_dangerous_classes =
-  CLOpt.mk_json ~long:"liveness-dangerous-classes"
+  CLOpt.mk_json ~bare_string_as_list:true ~long:"liveness-dangerous-classes"
     ~in_help:InferCommand.[(Analyze, manual_clang)]
     "Specify classes where the destructor should be ignored when computing liveness. In other \
      words, assignement to variables of these types (or common wrappers around these types such as \
      $(i,unique_ptr<type>)) will count as dead stores when the variables are not read explicitly \
-     by the program."
+     by the program. The classes are given as a JSON list, e.g. $(b,--liveness-dangerous-classes \
+     '[\"ns::Lock\"]'); a single class name, e.g. $(b,--liveness-dangerous-classes ns::Lock), is \
+     read as a one-element list."
 
 
 and liveness_ignored_constant =
