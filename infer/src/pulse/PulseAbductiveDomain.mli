@@ -573,7 +573,8 @@ module Summary : sig
 end
 
 val add_event_to_value_origin :
-  PathContext.t -> Location.t -> ValueHistory.event -> ValueOrigin.t -> t -> t
+  ?written:bool -> PathContext.t -> Location.t -> ValueHistory.event -> ValueOrigin.t -> t -> t
+(** [written] (default [true]) records a write to the memory cell holding the value, if any *)
 
 val transfer_transitive_info_to_caller : Procname.t -> Location.t -> Summary.t -> t -> t
 

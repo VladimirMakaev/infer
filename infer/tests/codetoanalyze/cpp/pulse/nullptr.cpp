@@ -439,3 +439,15 @@ int FN_deref_dangerous_getter_after_change_bad(dangerous_holder& h) {
   change_holder(h);
   return *h.get();
 }
+
+void use_pointer(int* p);
+void on_null();
+
+int compared_to_null_after_null_constant_bad() {
+  use_pointer(nullptr);
+  int* p = maybe_dangerous();
+  if (p == nullptr) {
+    on_null();
+  }
+  return *p;
+}
