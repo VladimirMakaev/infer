@@ -1,0 +1,116 @@
+/* @generated */
+digraph cfg {
+"byte_builtins.7a5e0b3564513c75_1" [label="1: Start byte_builtins\nFormals: \nLocals:  b:_Bool flag:unsigned char \n  " color=yellow style=filled]
+	
+
+	 "byte_builtins.7a5e0b3564513c75_1" -> "byte_builtins.7a5e0b3564513c75_4" ;
+"byte_builtins.7a5e0b3564513c75_2" [label="2: Exit byte_builtins \n  " color=yellow style=filled]
+	
+
+"byte_builtins.7a5e0b3564513c75_3" [label="3:  AtomicExpr \n   *(char*)&flag:unsigned char=0 [line 14, column 3]\n " shape="box"]
+	
+
+	 "byte_builtins.7a5e0b3564513c75_3" -> "byte_builtins.7a5e0b3564513c75_2" ;
+"byte_builtins.7a5e0b3564513c75_4" [label="4:  BinaryOperatorStmt: Assign \n   n$1=*(char*)&flag:unsigned char [line 13, column 7]\n  *(char*)&flag:unsigned char=1 [line 13, column 7]\n  *&b:_Bool=(n$1 != 0) [line 13, column 3]\n " shape="box"]
+	
+
+	 "byte_builtins.7a5e0b3564513c75_4" -> "byte_builtins.7a5e0b3564513c75_3" ;
+"c11_nand.d52029389c4531a8_1" [label="1: Start c11_nand\nFormals: \nLocals:  a:void _a:int \n  " color=yellow style=filled]
+	
+
+	 "c11_nand.d52029389c4531a8_1" -> "c11_nand.d52029389c4531a8_3" ;
+"c11_nand.d52029389c4531a8_2" [label="2: Exit c11_nand \n  " color=yellow style=filled]
+	
+
+"c11_nand.d52029389c4531a8_3" [label="3:  BinaryOperatorStmt: Assign \n   n$0=*&a:int [line 20, column 8]\n  *&a:int=~(n$0 & 1) [line 20, column 8]\n  *&_a:int=n$0 [line 20, column 3]\n " shape="box"]
+	
+
+	 "c11_nand.d52029389c4531a8_3" -> "c11_nand.d52029389c4531a8_2" ;
+"hip_builtins.f7af7348b0681cf5_1" [label="1: Start hip_builtins\nFormals:  expected:int*\nLocals:  0$?%__sil_tmpSIL_temp_compare_exchange___n$4:_Bool i:int _i:int \n  " color=yellow style=filled]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_1" -> "hip_builtins.f7af7348b0681cf5_15" ;
+"hip_builtins.f7af7348b0681cf5_2" [label="2: Exit hip_builtins \n  " color=yellow style=filled]
+	
+
+"hip_builtins.f7af7348b0681cf5_3" [label="3:  BinaryOperatorStmt: Assign \n   n$0=_fun___atomic_fetch_max(&i:int*,5:int,5:int,1:int) [line 41, column 8]\n  *&_i:int=n$0 [line 41, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_3" -> "hip_builtins.f7af7348b0681cf5_2" ;
+"hip_builtins.f7af7348b0681cf5_4" [label="4: + \n  " ]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_4" -> "hip_builtins.f7af7348b0681cf5_10" ;
+"hip_builtins.f7af7348b0681cf5_5" [label="5: Prune (true branch, atomic compare exchange) \n   PRUNE((n$1 == n$3), true); [line 39, column 8]\n " shape="invhouse"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_5" -> "hip_builtins.f7af7348b0681cf5_6" ;
+"hip_builtins.f7af7348b0681cf5_6" [label="6:  Atomic compare exchange branch \n   *&i:int=4 [line 39, column 8]\n  n$5=*&i:int [line 39, column 8]\n  *&0$?%__sil_tmpSIL_temp_compare_exchange___n$4:_Bool=1 [line 39, column 8]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_6" -> "hip_builtins.f7af7348b0681cf5_4" ;
+"hip_builtins.f7af7348b0681cf5_7" [label="7: Prune (false branch, atomic compare exchange) \n   PRUNE(!(n$1 == n$3), false); [line 39, column 8]\n " shape="invhouse"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_7" -> "hip_builtins.f7af7348b0681cf5_8" ;
+"hip_builtins.f7af7348b0681cf5_8" [label="8:  Atomic compare exchange branch \n   *n$2:int=n$1 [line 39, column 8]\n  n$6=*n$2:int [line 39, column 8]\n  *&0$?%__sil_tmpSIL_temp_compare_exchange___n$4:_Bool=0 [line 39, column 8]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_8" -> "hip_builtins.f7af7348b0681cf5_4" ;
+"hip_builtins.f7af7348b0681cf5_9" [label="9:  AtomicExpr \n   n$2=*&expected:int* [line 40, column 11]\n  n$1=*&i:int [line 39, column 8]\n  n$3=*n$2:int [line 39, column 8]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_9" -> "hip_builtins.f7af7348b0681cf5_5" ;
+	 "hip_builtins.f7af7348b0681cf5_9" -> "hip_builtins.f7af7348b0681cf5_7" ;
+"hip_builtins.f7af7348b0681cf5_10" [label="10:  BinaryOperatorStmt: Assign \n   n$7=*&0$?%__sil_tmpSIL_temp_compare_exchange___n$4:_Bool [line 39, column 8]\n  *&_i:int=n$7 [line 39, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_10" -> "hip_builtins.f7af7348b0681cf5_3" ;
+"hip_builtins.f7af7348b0681cf5_11" [label="11:  BinaryOperatorStmt: Assign \n   n$8=*&i:int [line 38, column 8]\n  *&i:int=3 [line 38, column 8]\n  *&_i:int=n$8 [line 38, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_11" -> "hip_builtins.f7af7348b0681cf5_9" ;
+"hip_builtins.f7af7348b0681cf5_12" [label="12:  BinaryOperatorStmt: Assign \n   n$9=*&i:int [line 37, column 8]\n  *&_i:int=n$9 [line 37, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_12" -> "hip_builtins.f7af7348b0681cf5_11" ;
+"hip_builtins.f7af7348b0681cf5_13" [label="13:  AtomicExpr \n   *&i:int=2 [line 36, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_13" -> "hip_builtins.f7af7348b0681cf5_12" ;
+"hip_builtins.f7af7348b0681cf5_14" [label="14:  BinaryOperatorStmt: Assign \n   n$11=*&i:int [line 35, column 8]\n  *&i:int=(n$11 + 1) [line 35, column 8]\n  *&_i:int=n$11 [line 35, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_14" -> "hip_builtins.f7af7348b0681cf5_13" ;
+"hip_builtins.f7af7348b0681cf5_15" [label="15:  DeclStmt \n   VARIABLE_DECLARED(i:int); [line 34, column 3]\n  *&i:int=0 [line 34, column 3]\n " shape="box"]
+	
+
+	 "hip_builtins.f7af7348b0681cf5_15" -> "hip_builtins.f7af7348b0681cf5_14" ;
+"scoped_builtins.78f7aa33ab07e040_1" [label="1: Start scoped_builtins\nFormals: \nLocals:  i:int _i:int \n  " color=yellow style=filled]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_1" -> "scoped_builtins.78f7aa33ab07e040_7" ;
+"scoped_builtins.78f7aa33ab07e040_2" [label="2: Exit scoped_builtins \n  " color=yellow style=filled]
+	
+
+"scoped_builtins.78f7aa33ab07e040_3" [label="3:  BinaryOperatorStmt: Assign \n   n$0=*&i:int [line 29, column 8]\n  *&i:int=(n$0 & 1) [line 29, column 8]\n  n$1=*&i:int [line 29, column 8]\n  *&_i:int=n$1 [line 29, column 3]\n " shape="box"]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_3" -> "scoped_builtins.78f7aa33ab07e040_2" ;
+"scoped_builtins.78f7aa33ab07e040_4" [label="4:  BinaryOperatorStmt: Assign \n   n$2=*&i:int [line 28, column 8]\n  *&i:int=(n$2 | 1) [line 28, column 8]\n  *&_i:int=n$2 [line 28, column 3]\n " shape="box"]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_4" -> "scoped_builtins.78f7aa33ab07e040_3" ;
+"scoped_builtins.78f7aa33ab07e040_5" [label="5:  BinaryOperatorStmt: Assign \n   n$3=*&i:int [line 27, column 8]\n  *&i:int=(n$3 - 1) [line 27, column 8]\n  n$4=*&i:int [line 27, column 8]\n  *&_i:int=n$4 [line 27, column 3]\n " shape="box"]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_5" -> "scoped_builtins.78f7aa33ab07e040_4" ;
+"scoped_builtins.78f7aa33ab07e040_6" [label="6:  BinaryOperatorStmt: Assign \n   n$5=*&i:int [line 26, column 8]\n  *&i:int=(n$5 + 1) [line 26, column 8]\n  *&_i:int=n$5 [line 26, column 3]\n " shape="box"]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_6" -> "scoped_builtins.78f7aa33ab07e040_5" ;
+"scoped_builtins.78f7aa33ab07e040_7" [label="7:  DeclStmt \n   VARIABLE_DECLARED(i:int); [line 25, column 3]\n  *&i:int=0 [line 25, column 3]\n " shape="box"]
+	
+
+	 "scoped_builtins.78f7aa33ab07e040_7" -> "scoped_builtins.78f7aa33ab07e040_6" ;
+}
