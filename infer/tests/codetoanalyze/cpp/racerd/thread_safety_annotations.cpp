@@ -17,6 +17,7 @@
   __attribute__((exclusive_locks_required(__VA_ARGS__)))
 #define ACQUIRE(...) __attribute__((acquire_capability(__VA_ARGS__)))
 #define RELEASE(...) __attribute__((release_capability(__VA_ARGS__)))
+#define TRY_ACQUIRE(...) __attribute__((try_acquire_capability(__VA_ARGS__)))
 #define ASSERT_CAPABILITY(x) __attribute__((assert_capability(x)))
 #define SCOPED_CAPABILITY __attribute__((scoped_lockable))
 #define NO_THREAD_SAFETY_ANALYSIS __attribute__((no_thread_safety_analysis))
@@ -208,9 +209,94 @@ class OpaqueLock {
 
   void increment_locked_ok() REQUIRES(mu_) { x_++; }
 
+  int lock_unlock_ok() {
+    mu_.Lock();
+    int x = x_;
+    mu_.Unlock();
+    return x;
+  }
+
+  int get_unlocked_bad() { return x_; }
+
  private:
   OpaqueMutex mu_;
   int x_ GUARDED_BY(mu_) = 0;
+};
+
+// a guard defined in another translation unit
+class SCOPED_CAPABILITY OpaqueGuard {
+ public:
+  explicit OpaqueGuard(std::mutex* mu) ACQUIRE(mu);
+  ~OpaqueGuard() RELEASE();
+};
+
+// lock helpers defined in another translation unit
+class Counter {
+ public:
+  void add() {
+    std::lock_guard<std::mutex> lock(mu_);
+    count_++;
+  }
+
+  int acquire_release_ok() {
+    lock_helper();
+    int n = count_;
+    unlock_helper();
+    return n;
+  }
+
+  int read_after_release_bad() {
+    lock_helper();
+    unlock_helper();
+    return count_;
+  }
+
+  int try_acquire_ok() {
+    if (try_lock_helper()) {
+      int n = count_;
+      unlock_helper();
+      return n;
+    }
+    return 0;
+  }
+
+  int try_acquire_failed_bad() {
+    if (!try_lock_helper()) {
+      return count_;
+    }
+    unlock_helper();
+    return 0;
+  }
+
+  int try_acquire_on_false_ok() {
+    if (!try_lock_helper_returns_false()) {
+      int n = count_;
+      unlock_helper();
+      return n;
+    }
+    return 0;
+  }
+
+  int scoped_capability_ok() {
+    OpaqueGuard guard(&mu_);
+    return count_;
+  }
+
+  int scoped_capability_destroyed_bad() {
+    {
+      OpaqueGuard guard(&mu_);
+    }
+    return count_;
+  }
+
+  void lock_helper() ACQUIRE(mu_);
+  void unlock_helper() RELEASE(mu_);
+  bool try_lock_helper() TRY_ACQUIRE(true, mu_);
+  bool try_lock_helper_returns_false() TRY_ACQUIRE(false, mu_);
+
+ private:
+  std::mutex mu_;
+  int count_ = 0;
 };
 
 template <typename T>

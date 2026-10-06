@@ -324,6 +324,103 @@ end = struct
         NoEffect
 
 
+  (** The lock effect of a function that is not defined, from its clang thread safety attributes
+      [acquire_capability], [release_capability] and [try_acquire_capability]. A defined function
+      gets its effect from its summary instead. A capability is ["this"], a formal [f], a field
+      [f->g] or [f.g] of a formal, or a field of [this]. Other capabilities, eg globals, are counted
+      as locks but have no lock path. *)
+  let get_capability_lock_effect pname actuals =
+    (* builtins have no attributes, and missing attributes are not cached *)
+    let attributes = if BuiltinDecl.is_declared pname then None else Attributes.load pname in
+    match attributes with
+    | Some {ProcAttributes.is_defined= false; formals; ret_annots}
+      when not (List.is_empty ret_annots) -> (
+        let find_annot class_name =
+          List.find ret_annots ~f:(fun {Annot.class_name= name} -> String.equal name class_name)
+        in
+        let formal_actual name =
+          List.findi formals ~f:(fun _ (formal, _, _) ->
+              String.equal (Mangled.to_string formal) name )
+          |> Option.bind ~f:(fun (index, (_, typ, _)) ->
+              List.nth actuals index |> Option.map ~f:(fun actual -> (actual, typ)) )
+        in
+        let receiver = formal_actual "this" in
+        let rec field_address (pointer : HilExp.t) (typ : Typ.t) field_name =
+          match (pointer, typ.desc) with
+          | Cast (_, pointer), _ ->
+              field_address pointer typ field_name
+          | AccessExpression pointer, (Tptr ({desc= Tstruct class_name}, _) | Tstruct class_name) ->
+              let open IOption.Let_syntax in
+              let* obj = HilExp.AccessExpression.add_access pointer MemoryAccess.Dereference in
+              let* field =
+                HilExp.AccessExpression.add_access obj
+                  (MemoryAccess.FieldAccess (Fieldname.make class_name field_name))
+              in
+              let+ address = HilExp.AccessExpression.add_access field MemoryAccess.TakeAddress in
+              HilExp.AccessExpression address
+          | _ ->
+              None
+        in
+        let resolve name =
+          match name with
+          | "this" | "*this" ->
+              Option.map receiver ~f:fst
+          | _ -> (
+            match formal_actual name with
+            | Some (actual, _) ->
+                Some actual
+            | None -> (
+                let field_of_formal =
+                  List.find_map ["->"; "."] ~f:(fun on ->
+                      String.substr_index name ~pattern:on
+                      |> Option.map ~f:(fun i ->
+                          (String.prefix name i, String.drop_prefix name (i + String.length on)) ) )
+                in
+                match field_of_formal with
+                | Some (formal, field) ->
+                    formal_actual formal
+                    |> Option.bind ~f:(fun (actual, typ) -> field_address actual typ field)
+                | None ->
+                    Option.bind receiver ~f:(fun (actual, typ) -> field_address actual typ name) ) )
+        in
+        let locks {Annot.parameters} =
+          List.filter_map parameters ~f:(function
+            | {Annot.name= None; value= Annot.Str name} ->
+                Some (resolve name |> Option.value ~default:(HilExp.Constant (Const.Cstr name)))
+            | _ ->
+                None )
+        in
+        let receiver = Option.map receiver ~f:fst in
+        match
+          ( find_annot Annotations.acquire_capability
+          , find_annot Annotations.release_capability
+          , find_annot Annotations.try_acquire_capability )
+        with
+        | Some acquire, None, None -> (
+          match receiver with
+          | Some guard when Procname.is_constructor pname ->
+              GuardConstruct {guard; locks= locks acquire; acquire_now= true}
+          | _ ->
+              Lock (locks acquire) )
+        | None, Some release, None -> (
+          match receiver with
+          | Some guard when Procname.is_destructor pname ->
+              GuardDestroy guard
+          | _ ->
+              Unlock (locks release) )
+        | None, None, Some try_acquire when not (Procname.is_constructor pname) ->
+            let fails_on_true =
+              List.exists try_acquire.parameters ~f:(fun {Annot.name} ->
+                  Option.exists name ~f:(String.equal Annotations.fails_on_true) )
+            in
+            if fails_on_true then LockedIfZero (locks try_acquire)
+            else LockedIfTrue (locks try_acquire)
+        | _ ->
+            NoEffect )
+    | _ ->
+        NoEffect
+
+
   let get_lock_effect pname actuals =
     let fst_arg = match actuals with x :: _ -> [x] | _ -> [] in
     if is_std_lock pname then make_lock pname actuals
@@ -337,7 +434,7 @@ end = struct
     else if is_guard_unlock pname then make_guard_unlock pname actuals
     else if is_guard_destructor pname then make_guard_destructor pname actuals
     else if is_guard_trylock pname then make_guard_trylock pname actuals
-    else NoEffect
+    else get_capability_lock_effect pname actuals
 end
 
 module Java : sig
