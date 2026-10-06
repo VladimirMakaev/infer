@@ -693,20 +693,66 @@ let should_report_on_proc proc_name =
           false )
 
 
+let is_protected_cpp_method proc_name =
+  match (proc_name : Procname.t) with
+  | ObjC_Cpp {kind= CPPMethod _} ->
+      Attributes.load proc_name
+      |> Option.exists ~f:(fun attrs -> ProcAttributes.(equal_access (get_access attrs) Protected))
+  | _ ->
+      false
+
+
+(** The protected C++ methods of the class that are called by other methods of the class, and only
+    with a lock held. The accesses that a method inlines from a callee start with the call to the
+    callee in their traces. *)
+let protected_methods_with_locked_callers summaries =
+  let open RacerDDomain in
+  let protected_methods =
+    List.filter_map summaries ~f:(fun (procname, _) ->
+        Option.some_if (is_protected_cpp_method procname) procname )
+    |> Procname.Set.of_list
+  in
+  if Procname.Set.is_empty protected_methods then Procname.Set.empty
+  else
+    let add_call_site caller ({elem; trace} : AccessSnapshot.t) callees_locked =
+      match trace with
+      | call_site :: _
+        when Procname.Set.mem (CallSite.pname call_site) protected_methods
+             && not (Procname.equal (CallSite.pname call_site) caller) ->
+          let is_locked = LockDomain.is_locked elem.lock in
+          Procname.Map.update (CallSite.pname call_site)
+            (fun locked -> Some (is_locked && Option.value locked ~default:true))
+            callees_locked
+      | _ ->
+          callees_locked
+    in
+    let callees_locked =
+      List.fold summaries ~init:Procname.Map.empty ~f:(fun acc (caller, {accesses}) ->
+          AccessDomain.fold (add_call_site caller) accesses acc )
+    in
+    Procname.Map.fold
+      (fun callee locked acc -> if locked then Procname.Set.add callee acc else acc)
+      callees_locked Procname.Set.empty
+
+
 (* create a map from [abstraction of a memory loc] -> accesses that
    may touch that memory loc. the abstraction of a location is an access
    path like x.f.g whose concretization is the set of memory cells
    that x.f.g may point to during execution *)
 let make_results_table summaries =
   let open RacerDDomain in
+  let locked_protected_methods = protected_methods_with_locked_callers summaries in
   let aggregate_post tenv procname acc {threads; accesses} =
     (* report on the procedure as if its callers held the locks it requires, but leave its summary
        alone so that callers that do not hold them are reported *)
     let locks_held_on_entry = RacerDModels.num_required_capabilities procname in
+    (* like a private method, since its callers carry its accesses with their lock held *)
+    let drop_unprotected = Procname.Set.mem procname locked_protected_methods in
     AccessDomain.fold
       (fun snapshot acc ->
         let snapshot = AccessSnapshot.with_locks_held_on_entry locks_held_on_entry snapshot in
-        ReportMap.add {threads; snapshot; tenv; procname} acc )
+        if drop_unprotected && AccessSnapshot.is_unprotected snapshot then acc
+        else ReportMap.add {threads; snapshot; tenv; procname} acc )
       accesses acc
   in
   List.fold summaries ~init:ReportMap.empty ~f:(fun acc (procname, summary) ->
