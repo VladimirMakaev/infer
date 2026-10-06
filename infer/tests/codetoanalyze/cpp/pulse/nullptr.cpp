@@ -401,3 +401,41 @@ int call_next_data_compared_to_null_with_null_bad() {
   NodeWithNext n{nullptr, 0};
   return n.next_data_compared_to_null_bad();
 }
+
+std::unique_ptr<int> dangerous_unique();
+std::shared_ptr<int> dangerous_shared();
+
+int deref_dangerous_unique_bad() { return *dangerous_unique(); }
+
+int deref_dangerous_shared_bad() {
+  std::shared_ptr<int> p = dangerous_shared();
+  return *p;
+}
+
+int deref_dangerous_unique_checked_ok() {
+  std::unique_ptr<int> p = dangerous_unique();
+  return p ? *p : 0;
+}
+
+struct dangerous_holder {
+  const int* get() const;
+};
+
+int deref_dangerous_getter_checked_ok(const dangerous_holder& h) {
+  return h.get() != nullptr ? *h.get() : 0;
+}
+
+int deref_dangerous_getter_unchecked_bad(const dangerous_holder& h) {
+  return *h.get();
+}
+
+void change_holder(dangerous_holder& h);
+
+// the second call is assumed to return the same value even though the holder changed in between
+int FN_deref_dangerous_getter_after_change_bad(dangerous_holder& h) {
+  if (h.get() == nullptr) {
+    return 0;
+  }
+  change_holder(h);
+  return *h.get();
+}
