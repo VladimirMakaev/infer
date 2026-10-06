@@ -137,7 +137,9 @@ type t =
             (* [copied_location] has a value when the copied location is different to where to
                report: e.g. this is the case for returning copied values. *)
       ; location_instantiated: Location.t option
-      ; from: PulseAttribute.CopyOrigin.t }
+      ; from: PulseAttribute.CopyOrigin.t
+      ; has_no_move_operations: bool
+            (** the copied type has no move operations, so moving would copy too *) }
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
