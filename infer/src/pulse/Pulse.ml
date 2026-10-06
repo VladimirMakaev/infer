@@ -1825,6 +1825,17 @@ module PulseTransferFunctions = struct
 
   let remember_dropped_disjuncts = NonDisjDomain.remember_dropped_disjuncts
 
+  let non_disj_of_non_executable disjuncts non_disj =
+    if
+      List.for_all disjuncts ~f:(function
+        | ExecutionDomain.Stopped (ExitProgram _), _ ->
+            true
+        | _ ->
+            false )
+    then NonDisjDomain.top_keeping_dropped_disjuncts non_disj
+    else NonDisjDomain.top
+
+
   let pp_session_name _node fmt = F.fprintf fmt "Pulse%t" pp_space_specialization
 
   let pp_disjunct kind fmt (exec_astate, path) =
