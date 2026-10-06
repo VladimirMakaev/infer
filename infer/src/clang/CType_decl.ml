@@ -277,6 +277,38 @@ let get_struct_decls decl =
   Clang_ast_proj.get_decl_context_tuple decl |> Option.value_map ~f:fst ~default:[]
 
 
+(* A class that declares a destructor or a copy operation has no implicit move operations, so it
+   only has the ones it declares. A deleted move operation is no better: [std::move] then does not
+   compile. *)
+let has_no_move_operations struct_decl =
+  let open Clang_ast_t in
+  let user_declared =
+    List.filter (get_struct_decls struct_decl) ~f:(fun decl ->
+        not (CAst_utils.is_cpp_implicit_decl decl) )
+  in
+  let is_move_assignment decl =
+    match decl with
+    | CXXMethodDecl
+        (_, {ni_name= "operator="}, _, {fdi_parameters= [ParmVarDecl (_, _, param_qual_type, _)]}, _)
+      -> (
+      match CAst_utils.get_desugared_type param_qual_type.qt_type_ptr with
+      | Some (RValueReferenceType _) ->
+          true
+      | _ ->
+          false )
+    | _ ->
+        false
+  in
+  List.exists user_declared ~f:(fun decl ->
+      (match decl with CXXDestructorDecl _ -> true | _ -> false)
+      || CMethodProperties.is_cpp_copy_ctor decl
+      || CMethodProperties.is_cpp_copy_assignment decl )
+  && not
+       (List.exists user_declared ~f:(fun decl ->
+            (not (CMethodProperties.is_cpp_deleted decl))
+            && (CMethodProperties.is_cpp_move_ctor decl || is_move_assignment decl) ) )
+
+
 let add_predefined_objc_types tenv =
   ignore (Tenv.mk_struct tenv (CType_to_sil_type.get_builtin_objc_typename `ObjCClass)) ;
   ignore (Tenv.mk_struct tenv (CType_to_sil_type.get_builtin_objc_typename `ObjCId))
@@ -744,7 +776,8 @@ and add_record tenv decl_info definition_decl record_decl_info ?cxx_record_decl_
             Option.exists cxx_record_decl_info ~f:(fun {Clang_ast_t.xrdi_is_trivially_copyable} ->
                 xrdi_is_trivially_copyable )
           in
-          Struct.ClassInfo.CppClassInfo {is_trivially_copyable}
+          let has_no_move_operations = has_no_move_operations definition_decl in
+          Struct.ClassInfo.CppClassInfo {is_trivially_copyable; has_no_move_operations}
         in
         let source_file =
           (fst decl_info.Clang_ast_t.di_source_range).sl_file

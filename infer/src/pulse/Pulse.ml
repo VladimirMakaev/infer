@@ -124,8 +124,8 @@ let is_unnecessary_copy_intermediate_in_loop node copied_into =
       false
 
 
-let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc} as analysis_data) non_disj_astate
-    =
+let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
+    non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
   if is_not_implicit_or_copy_ctor_assignment pname then
     PulseNonDisjunctiveDomain.get_copied
@@ -137,6 +137,11 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc} as analysis_d
            let copy_name = Format.asprintf "%a" Attribute.CopiedInto.pp copied_into in
            let is_suppressed = PulseNonDisjunctiveOperations.has_copy_in copy_name in
            let location_instantiated = get_loc_instantiated pname in
+           let has_no_move_operations =
+             Option.exists source_typ ~f:(fun ({desc} as typ : Typ.t) ->
+                 let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
+                 Tenv.has_no_move_operations tenv typ )
+           in
            let diagnostic =
              Diagnostic.UnnecessaryCopy
                { copied_into
@@ -145,7 +150,8 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc} as analysis_d
                ; location
                ; copied_location
                ; location_instantiated
-               ; from }
+               ; from
+               ; has_no_move_operations }
            in
            if
              ( is_copy_cted_into_var from copied_into

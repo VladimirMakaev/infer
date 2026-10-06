@@ -100,6 +100,8 @@ let check_balanced_parenthesis str =
 
 let get_autofix pdesc diagnostic =
   match (diagnostic : Diagnostic.t) with
+  | UnnecessaryCopy {copied_into= IntoField _; has_no_move_operations= true} ->
+      []
   | UnnecessaryCopy {copied_into; source_opt; location; copied_location= None} -> (
       let is_formal pvar =
         let pvar_name = Pvar.get_name pvar in

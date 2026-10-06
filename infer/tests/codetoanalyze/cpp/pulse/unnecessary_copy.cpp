@@ -570,6 +570,43 @@ class CopiedToField2_Ok {
   CopiedToField2_Ok(Arr a) { field = std::move(a); }
 };
 
+// the user-declared destructor prevents implicit move operations
+struct NoMoveOps {
+  ~NoMoveOps();
+  std::vector<int> vec;
+};
+
+// reported without a `std::move` autofix, which would still copy
+class CopiedToFieldNoMoveOps_Bad {
+  NoMoveOps field;
+
+ public:
+  CopiedToFieldNoMoveOps_Bad(NoMoveOps a) { field = a; }
+
+  void set_from_local_bad() {
+    NoMoveOps local;
+    local.vec.push_back(42);
+    field = local;
+  }
+};
+
+struct DeclaredMoveOps {
+  ~DeclaredMoveOps();
+  DeclaredMoveOps() = default;
+  DeclaredMoveOps(const DeclaredMoveOps&) = default;
+  DeclaredMoveOps(DeclaredMoveOps&&) = default;
+  DeclaredMoveOps& operator=(const DeclaredMoveOps&) = default;
+  DeclaredMoveOps& operator=(DeclaredMoveOps&&) = default;
+  std::vector<int> vec;
+};
+
+class CopiedToFieldDeclaredMoveOps_Bad {
+  DeclaredMoveOps field;
+
+ public:
+  CopiedToFieldDeclaredMoveOps_Bad(DeclaredMoveOps a) { field = a; }
+};
+
 struct Arrs {
   Arr a;
   Arr b;
