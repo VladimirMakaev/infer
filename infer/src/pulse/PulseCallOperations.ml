@@ -176,6 +176,15 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
     | _ ->
         `DoNotHavoc
   in
+  let pre_values =
+    lazy
+      (let roots =
+         AbductiveDomain.Stack.fold ~pre_or_post:`Pre
+           (fun _ vo roots -> Seq.cons (ValueOrigin.value vo) roots)
+           astate0 Seq.empty
+       in
+       AbductiveDomain.reachable_addresses_from roots astate0 `Pre )
+  in
   let havoc_actual_if_ptr ((actual, _), actual_typ) formal_opt astate =
     let fold_on_reachable_from_arg astate f =
       let reachable_from_arg =
@@ -189,6 +198,31 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
         is_pure := false ;
         (* this will deallocate anything reachable from the [actual] and havoc the values pointed to
            by [actual] *)
+        let astate =
+          (* callers apply the unknown effect of [actual] before the callee's writes, so they do
+             not reach what the callee linked to [actual]: tag the values of the pre at the end of
+             edges missing from the pre; callers reach the rest from [actual] and these values *)
+          let reachable_in_pre =
+            AbductiveDomain.reachable_addresses_from (Seq.return actual) astate0 `Pre
+          in
+          let is_pre_edge src access dest =
+            AbductiveDomain.Memory.exists_edge ~pre_or_post:`Pre src astate0
+              ~f:(fun (access', (dest', _)) ->
+                Access.equal access access' && AbstractValue.equal dest dest' )
+          in
+          fold_on_reachable_from_arg astate (fun src astate ->
+              AbductiveDomain.Memory.fold_edges src astate0 ~init:astate
+                ~f:(fun astate (access, (dest, _)) ->
+                  if
+                    AbstractValue.Set.mem dest reachable_in_pre
+                    || (not (AbstractValue.Set.mem dest (Lazy.force pre_values)))
+                    || is_pre_edge src access dest
+                  then astate
+                  else
+                    AddressAttributes.add_all dest
+                      (Attributes.singleton (UnknownEffect (reason, hist)))
+                      astate ) )
+        in
         let astate =
           AbductiveDomain.apply_unknown_effect hist actual astate
           (* record the [UnknownEffect] attribute so callers of the current procedure can apply the
