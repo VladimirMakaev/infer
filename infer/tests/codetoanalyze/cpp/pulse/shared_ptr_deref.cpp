@@ -132,4 +132,43 @@ int shared_ptr_check_null2_ok(std::shared_ptr<int> p) {
     return 1;
   return *p;
 }
+
+void on_null();
+
+int deref_after_compared_to_nullptr_bad(const std::shared_ptr<X>& p) {
+  if (p == nullptr) {
+    on_null();
+  }
+  return p->field;
+}
+
+int deref_after_negated_bad(const std::shared_ptr<X>& p) {
+  if (!p) {
+    on_null();
+  }
+  return p->field;
+}
+
+int deref_if_not_equal_to_nullptr_ok(const std::shared_ptr<X>& p) {
+  if (nullptr != p) {
+    return p->field;
+  }
+  return 0;
+}
+
+int null_pointer_in_null_branch_bad(const std::shared_ptr<X>& p, X* x) {
+  if (!p) {
+    x = nullptr;
+  }
+  return x->field;
+}
+
+int empty_shared_ptr_in_null_branch_bad(const std::shared_ptr<X>& p) {
+  if (p) {
+    return 0;
+  }
+  std::shared_ptr<X> q;
+  return q->field;
+}
+
 } // namespace shared_ptr
