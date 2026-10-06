@@ -53,7 +53,7 @@ let load, clear_cache, store, set_lru_limit =
           some )
   in
   let clear_cache () = Cache.clear cache in
-  let store ~proc_desc (attr : ProcAttributes.t) ~analysis =
+  let store ?check_stored_definition ~proc_desc (attr : ProcAttributes.t) ~analysis =
     if attr.is_defined && Option.is_none proc_desc then
       Logging.die InternalError "Was given DEFINED procedure without procdesc: %a@."
         ProcAttributes.pp attr ;
@@ -69,7 +69,12 @@ let load, clear_cache, store, set_lru_limit =
       Option.value_map proc_desc ~f:Procdesc.get_static_callees ~default:[]
       |> Procname.SQLiteList.serialize
     in
-    DBWriter.replace_attributes ~proc_uid ~proc_attributes ~cfg ~callees ~analysis ;
+    let check_stored_definition =
+      Option.map check_stored_definition ~f:(fun check stored ->
+          check (ProcAttributes.SQLite.deserialize stored) )
+    in
+    DBWriter.replace_attributes ~check_stored_definition ~proc_uid ~proc_attributes ~cfg ~callees
+      ~analysis ;
     Cache.remove cache pname
   in
   let set_lru_limit ~lru_limit = Cache.set_lru_mode cache ~lru_limit in

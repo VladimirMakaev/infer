@@ -15,5 +15,6 @@ include $(TESTS_DIR)/clang.make
 
 issues.exp.test:
 	$(QUIET)cat infer-out$(TEST_SUFFIX)/duplicates.txt > $@
+	$(QUIET)grep -ho 'count\.capture_duplicate_definitions' infer-out$(TEST_SUFFIX)/stats/*.jsonl >> $@ || true
 #	delete duplicates file to avoid throwing an error because duplicate symbols were found
 	$(QUIET)$(REMOVE) infer-out$(TEST_SUFFIX)/duplicates.txt
