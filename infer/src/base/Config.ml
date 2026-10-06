@@ -2826,7 +2826,10 @@ and pulse_sanity_checks =
 and pulse_skip_procedures =
   CLOpt.mk_string_opt ~long:"pulse-skip-procedures"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
-    ~meta:"regex" "Regex of procedures that should not be analyzed by Pulse."
+    ~meta:"regex"
+    "Regex of procedures that should not be analyzed by Pulse. A procedure is skipped when the \
+     regex matches the start of its qualified name (e.g. $(i,ns::Class::method)) or of its unique \
+     identifier."
 
 
 and pulse_specialization_abort_if_impossible =
