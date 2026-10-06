@@ -46,3 +46,30 @@ void std_function_takes_fd_ok(const std::function<void(int)>& f,
   }
   f(fd);
 }
+
+void push_back_fd_ok(std::vector<int>& fds, const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  fds.push_back(fd);
+}
+
+void emplace_back_fd_ok(std::vector<int>& fds, const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  fds.emplace_back(fd);
+}
+
+// the descriptor stored in the local vector is not reported when the vector
+// goes away
+void FN_push_back_fd_into_local_vector_bad(const char* path) {
+  std::vector<int> fds;
+  int fd = open(path, O_RDONLY);
+  if (fd == -1) {
+    return;
+  }
+  fds.push_back(fd);
+}
