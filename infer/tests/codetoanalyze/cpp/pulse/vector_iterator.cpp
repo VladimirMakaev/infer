@@ -169,7 +169,64 @@ void erase_loop_ok(std::vector<int>& vec) {
   }
 }
 
-// erase invalidates the iterators before the erased position too
+void erase_keeps_earlier_reference_ok(std::vector<int>& vec) {
+  int* elt = &vec[0];
+  auto iter = vec.begin();
+  ++iter;
+  vec.erase(iter);
+  std::cout << *elt << '\n';
+}
+
+void erase_then_read_later_reference_bad(std::vector<int>& vec) {
+  int* elt = &vec[2];
+  auto iter = vec.begin();
+  ++iter;
+  vec.erase(iter);
+  std::cout << *elt << '\n';
+}
+
+void erase_keeps_previous_iterator_ok(std::vector<int>& vec) {
+  auto prev = vec.begin();
+  auto iter = vec.begin();
+  ++iter;
+  iter = vec.erase(iter);
+  std::cout << *prev << '\n';
+}
+
+struct Extent {
+  int start;
+  int length;
+};
+
+void erase_merge_adjacent_loop_ok(std::vector<Extent>& extents) {
+  if (extents.empty()) {
+    return;
+  }
+  auto prev = extents.begin();
+  auto iter = extents.begin();
+  for (++iter; iter != extents.end();) {
+    if (iter->start == prev->start + prev->length) {
+      prev->length += iter->length;
+      iter = extents.erase(iter);
+      continue;
+    }
+    prev = iter;
+    ++iter;
+  }
+}
+
+// an iterator after the erased position is only invalidated if its element
+// was accessed before the erase
+void FN_iterator_after_erased_position_read_bad(std::vector<int>& vec) {
+  auto iter = vec.begin();
+  ++iter;
+  auto later = iter;
+  ++later;
+  vec.erase(iter);
+  std::cout << *later << '\n';
+}
+
+// the position of end() is not related to the one of begin()
 void FP_iterator_before_erased_position_read_ok(std::vector<int>& vec) {
   auto iter = vec.begin();
   vec.erase(vec.end() - 1);
@@ -283,4 +340,112 @@ int iterator_assign_end_then_prev_loop_ok(std::vector<int>& vec) {
     sum += *iter;
   }
   return sum;
+}
+
+void iterator_end_minus_one_read_ok(std::vector<int>& vec) {
+  if (vec.empty()) {
+    return;
+  }
+  std::cout << *(vec.end() - 1) << '\n';
+}
+
+void iterator_end_minus_assign_read_ok(std::vector<int>& vec) {
+  if (vec.empty()) {
+    return;
+  }
+  auto iter = vec.end();
+  iter -= 1;
+  std::cout << *iter << '\n';
+}
+
+void iterator_plus_after_push_back_bad(std::vector<int>& vec) {
+  auto iter = vec.begin() + 1;
+  vec.push_back(4);
+  std::cout << *iter << '\n';
+}
+
+void iterator_plus_assign_after_push_back_bad(std::vector<int>& vec) {
+  auto iter = vec.begin();
+  iter += 1;
+  vec.push_back(4);
+  std::cout << *iter << '\n';
+}
+
+int iterator_plus_base_ok(std::vector<int>::iterator iter) {
+  if ((iter + 2).base() != iter.base() + 2) {
+    int* q = nullptr;
+    return *q;
+  }
+  return 0;
+}
+
+int iterator_cbegin_loop_ok(const std::vector<int>& vec) {
+  int sum = 0;
+  for (auto iter = vec.cbegin(); iter != vec.cend(); ++iter) {
+    sum += *iter;
+  }
+  return sum;
+}
+
+void iterator_cend_read_bad() {
+  std::vector<int> vec = {1, 2};
+  auto iter = vec.cend();
+  std::cout << *iter << '\n';
+}
+
+void iterator_end_plus_zero_read_bad(std::vector<int>& vec) {
+  std::cout << *(vec.end() + 0) << '\n';
+}
+
+void iterator_end_minus_then_plus_read_bad(std::vector<int>& vec) {
+  auto iter = vec.end() - 1;
+  std::cout << *(iter + 1) << '\n';
+}
+
+int iterator_plus_minus_assign_round_trip_ok(std::vector<int>& vec) {
+  auto iter = vec.begin();
+  iter += 2;
+  iter -= 2;
+  if (iter != vec.begin()) {
+    int* q = nullptr;
+    return *q;
+  }
+  return 0;
+}
+
+int iterator_plus_same_offset_ok(std::vector<int>& vec) {
+  if (vec.begin() + 1 != vec.begin() + 1) {
+    int* q = nullptr;
+    return *q;
+  }
+  return 0;
+}
+
+int iterator_arrow_after_push_back_bad(std::vector<IteratorElem>& vec) {
+  auto iter = vec.begin();
+  vec.push_back(IteratorElem{1});
+  return iter->x;
+}
+
+int iterator_end_arrow_bad(std::vector<IteratorElem>& vec) {
+  return vec.end()->x;
+}
+
+struct IteratorNode {
+  bool defined;
+};
+
+IteratorNode* iterator_arrow_loop_until_defined_ok(
+    std::vector<std::pair<IteratorNode*, IteratorNode*>>& vec) {
+  auto iter = vec.begin();
+  while (iter != vec.end() && !iter->first->defined) {
+    ++iter;
+  }
+  return iter == vec.end() ? nullptr : iter->second;
+}
+
+void erase_keeps_iterator_before_offset_position_ok(std::vector<int>& vec) {
+  auto prev = vec.begin();
+  vec.erase(vec.begin() + 1);
+  std::cout << *prev << '\n';
 }
