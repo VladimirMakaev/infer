@@ -300,6 +300,10 @@ module Attributes : sig
 
   val remove_uninitialized : t -> t
 
+  val remove_initialized : t -> t
+
+  val remove_must_be_initialized : t -> t
+
   val get_must_be_initialized : t -> (Timestamp.t * Trace.t) option
 
   val get_unreachable_at : t -> Location.t option

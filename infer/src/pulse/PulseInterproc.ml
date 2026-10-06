@@ -815,6 +815,15 @@ let add_attributes pre_or_post {PathContext.timestamp} callee_attributes call_st
           AddressAttributes.add_all
     in
     let astate = abduce_or_add addr_caller attrs_caller astate in
+    let astate =
+      match (pre_or_post, Attributes.get_uninitialized attrs_caller) with
+      | `Post, Some typ ->
+          (* the callee leaves the cell uninitialized, eg by copying an uninitialized field into it;
+             this overrides earlier writes by the caller and the [WrittenTo] attribute *)
+          AddressAttributes.uninitialize addr_caller typ astate
+      | _ ->
+          astate
+    in
     if phys_equal astate call_state.astate then call_state else {call_state with astate}
   in
   UnsafeAttributes.fold

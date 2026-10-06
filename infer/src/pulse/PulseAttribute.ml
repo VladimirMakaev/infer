@@ -1118,6 +1118,10 @@ module Attributes = struct
 
   let remove_uninitialized = remove_by_rank Attribute.uninitialized_rank
 
+  let remove_initialized = remove_by_rank Attribute.initialized_rank
+
+  let remove_must_be_initialized = remove_by_rank Attribute.must_be_initialized_rank
+
   let get_allocation =
     get_by_rank Attribute.allocated_rank ~dest:(function[@warning "-partial-match"]
         | Allocated (allocator, trace) -> (allocator, trace) )
