@@ -235,6 +235,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | LastLookup _
   | SourceOriginOfCopy _
   | StdMoved
+  | StdVectorErased _
   | UsedAsBranchCond _
   | WrittenTo _ ->
       Some attr
@@ -354,6 +355,8 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
   | UnreachableAt loc1, UnreachableAt loc2 ->
       let loc = if Location.compare loc1 loc2 > 0 then loc1 else loc2 in
       Some (UnreachableAt loc)
+  | StdVectorErased _, StdVectorErased _ ->
+      (* arbitrary, doesn't matter much which side *) Some attr1
   | UsedAsBranchCond _, UsedAsBranchCond _ ->
       (* arbitrary, doesn't matter much which side *) Some attr1
   | WrittenTo (ts1, _), WrittenTo (ts2, _) ->
