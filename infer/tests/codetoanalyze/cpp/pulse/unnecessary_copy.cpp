@@ -1001,3 +1001,58 @@ void capture_array_by_value_bad_FN() {
   ArrCopyCtor a[2];
   auto f = [a]() { int n = a[0].arr[0]; };
 }
+
+void use_string(const std::string& s);
+
+// the arms of `?:` have different types, so its result is a temporary that one
+// arm copy-constructs: a reference would not avoid the copy
+void copy_from_mixed_conditional_ok(const std::string& p) {
+  std::string m = p.empty() ? "x" : p;
+  use_string(m);
+}
+
+void copy_from_lvalue_conditional_bad(bool c,
+                                      const std::string& a,
+                                      const std::string& b) {
+  std::string m = c ? a : b;
+  use_string(m);
+}
+
+// `c ? std::move(local) : "x"` would avoid the copy
+void copy_from_local_in_mixed_conditional_bad(bool c) {
+  std::string local = "abc";
+  std::string m = c ? local : "x";
+  use_string(m);
+}
+
+struct LookupState {
+  bool found;
+  std::string s;
+};
+
+void fill_state(LookupState* state);
+
+// reported in C++11, where the result of `?:` is a temporary copied from
+// `state.s`, which `std::move(state.s)` would avoid
+std::string return_local_field_in_mixed_conditional_bad() {
+  LookupState state;
+  fill_state(&state);
+  return state.found ? state.s : std::string("not found");
+}
+
+struct NoMoveCtor {
+  NoMoveCtor();
+  NoMoveCtor(const NoMoveCtor& other);
+  ~NoMoveCtor();
+  std::vector<int> v;
+};
+
+NoMoveCtor make_no_move_ctor();
+void fill_no_move_ctor(NoMoveCtor* x);
+
+// moving would still copy
+NoMoveCtor return_local_without_move_ctor_in_mixed_conditional_ok(bool c) {
+  NoMoveCtor local;
+  fill_no_move_ctor(&local);
+  return c ? local : make_no_move_ctor();
+}
