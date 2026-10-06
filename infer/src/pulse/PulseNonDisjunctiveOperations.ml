@@ -319,6 +319,45 @@ let is_copied_from_address_reachable_from_unowned ~is_captured_by_ref ~is_interm
       || is_address_reachable_from_unowned source_addr ~astates_before proc_lvalue_ref_parameters )
 
 
+(* The attributes of a constructor are only captured when the translation unit uses it, so a
+   one-parameter constructor without attributes may be a move constructor (the copy constructor
+   being executed has attributes). *)
+let has_move_constructor tenv typ =
+  let may_be_move_constructor {Struct.name} =
+    Procname.is_constructor name
+    &&
+    match IRAttributes.load name with
+    | Some attrs ->
+        attrs.ProcAttributes.is_cpp_move_ctor && not attrs.ProcAttributes.is_cpp_deleted
+    | None ->
+        Int.equal (List.length (Procname.get_parameters name)) 1
+  in
+  match (Typ.strip_ptr typ).desc with
+  | Tstruct name -> (
+    match Tenv.lookup tenv name with
+    | None | Some {dummy= true} ->
+        true
+    | Some {methods} ->
+        List.exists methods ~f:may_be_move_constructor )
+  | _ ->
+      true
+
+
+(* When the arms of [?:] do not have the same type and value category, the result is a prvalue that
+   one arm copy-constructs: binding a reference to it would still copy, only moving from the arm
+   avoids the copy. *)
+let is_unmovable_copy_into_conditional_result ~is_captured_by_ref tenv node
+    (from : Attribute.CopyOrigin.t) source_typ source_addr_typ_opt proc_lvalue_ref_parameters
+    ~astates_before =
+  match (from, Procdesc.Node.get_kind node) with
+  | CopyCtor, Stmt_node ConditionalStmtBranch ->
+      (not (has_move_constructor tenv source_typ))
+      || is_copied_from_address_reachable_from_unowned ~is_captured_by_ref ~is_intermediate:true
+           ~from source_addr_typ_opt proc_lvalue_ref_parameters ~astates_before
+  | _ ->
+      false
+
+
 let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters integer_type_widths
     tenv node path location from args ~astates_before (astate_n, astate) =
   let open IOption.Let_syntax in
@@ -331,6 +370,13 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters i
         get_copied_and_source path rest_args node location from astate
       in
       let* _, source_expr, _ = source_addr_typ_opt in
+      let* () =
+        Option.some_if
+          (not
+             (is_unmovable_copy_into_conditional_result ~is_captured_by_ref tenv node from
+                source_typ source_addr_typ_opt proc_lvalue_ref_parameters ~astates_before ) )
+          ()
+      in
       let copy_into_source_opt : (Attribute.CopiedInto.t * DecompilerExpr.source_expr option) option
           =
         (* order matters here  *)
@@ -399,6 +445,8 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters i
           if
             is_copied_from_address_reachable_from_unowned ~is_captured_by_ref ~is_intermediate:false
               source_addr_typ_opt ~from proc_lvalue_ref_parameters ~astates_before
+            || is_unmovable_copy_into_conditional_result ~is_captured_by_ref tenv node from
+                 source_typ source_addr_typ_opt proc_lvalue_ref_parameters ~astates_before
           then
             (* If source is copy assigned from a member field/global, we cannot suggest move as other procedures might access it. *)
             None
