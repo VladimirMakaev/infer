@@ -12,6 +12,12 @@ open PulseModelsImport
 
 val matchers : matcher list
 
+val nullable_return :
+  Tenv.t -> (AbstractValue.t * ValueHistory.t) FuncArg.t -> desc:string -> model_no_non_disj option
+(** [nullable_return tenv dest ~desc]: the null and non-null results that a callee returning a
+    [std::unique_ptr] or a [std::shared_ptr] by value writes into [dest], if [dest] has one of these
+    types *)
+
 module SharedPtr : sig
   val assign_count :
        PathContext.t
