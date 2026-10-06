@@ -64,6 +64,8 @@ duplicates.txt
 /infer/tests/build_systems/incremental_analysis_remove_file/src
 /infer/tests/build_systems/java_test_determinator/*.test
 /infer/tests/build_systems/java_source_parser/*.test
+/infer/tests/build_systems/suppressions_unreadable_source/analyze.stderr
+/infer/tests/build_systems/suppressions_unreadable_source/copy
 /infer/tests/codetoanalyze/dotnet/*/*.json
 /infer/tests/codetoanalyze/erlang/**/_build
 infer/tests/codetoanalyze/objcpp/fb-pulse/*.mm

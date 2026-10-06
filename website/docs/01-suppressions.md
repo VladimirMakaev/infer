@@ -99,3 +99,10 @@ free(x);
 // @infer-ignore USE_AFTER_FREE, DEAD_STORE
 return *x;
 ```
+
+### Source files must be readable at report time
+
+The suppression comments are read from the source files when Infer writes the report, not when it
+captures them. If a source file cannot be read at that point, for instance because the analysis
+runs on a different machine than the capture, the issues in that file are reported as not
+suppressed and Infer prints a single warning with the number of such files.

@@ -30,6 +30,7 @@ BUILD_SYSTEMS_TESTS += \
   duplicate_symbols \
   extract_capture \
   suppressions \
+  suppressions_unreadable_source \
   fail_on_issue \
   infer-debug \
   j1 \
