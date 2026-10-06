@@ -1561,17 +1561,45 @@ let folly_co_yield_co_error : model =
   start_named_model "folly::coro::detail::*::yield_value(folly::coro::co_error)" @@ fun () -> throw
 
 
-let nullable_model _args : model =
+(* Run as an unknown call first: calls that cannot change the memory they read return the same
+   value, so checking one of them checks the others. *)
+let nullable_model args : model =
   let open PulseModelsDSL.Syntax in
   start_model
   @@ fun () ->
   L.d_printfln ~color:Orange "model for matching nullable functions" ;
-  disj
-    [ (let* res = null in
-       assign_ret res )
-    ; (let* res = fresh_nonneg () in
-       let* () = prune_positive res in
-       assign_ret res ) ]
+  let* {analysis_data= {tenv}; callee_procname; path; location; ret= ret_id, _} = get_data in
+  let* () = lift_to_monad (lift_model (PulseModelsImport.Basic.skipped_known_call args)) in
+  let has_return_param =
+    Option.exists (IRAttributes.load callee_procname) ~f:(fun attrs ->
+        attrs.ProcAttributes.has_added_return_param )
+  in
+  match (List.last args, has_return_param) with
+  | Some return_param, true -> (
+      let desc = Procname.to_string callee_procname in
+      match PulseModelsSmartPointers.nullable_return tenv return_param ~desc with
+      | Some model ->
+          lift_to_monad (lift_model model)
+      | None ->
+          ret () )
+  | _ ->
+      let* ((v, _) as res) = read (Exp.Var ret_id) in
+      disj
+        [ (let* hist = add_model_call ValueHistory.epoch in
+           let null_deref = Invalidation.ConstantDereference IntLit.zero in
+           let res =
+             ( v
+             , ValueHistory.sequence
+                 (ValueHistory.Invalidated (null_deref, location, path.timestamp))
+                 hist )
+           in
+           let* () = and_eq_int res IntLit.zero in
+           let* () =
+             PulseOperations.invalidate path UntraceableAccess location null_deref res
+             |> exec_command
+           in
+           assign_ret res )
+        ; prune_positive res ]
 
 
 let matchers : matcher list =
@@ -2073,7 +2101,7 @@ let simple_matchers =
     ; -"folly" &:: "expected_detail" &:: "ExpectedStorage" &:: "ExpectedStorage"
       &++> Basic.unknown_call "folly::expected_detail::ExpectedStorage"
       |> with_non_disj
-    ; +match_nullable_fn &::.*+++> nullable_model ]
+    ; +match_nullable_fn &::.*++> nullable_model ]
 
 
 let matchers =
