@@ -3028,12 +3028,19 @@ let is_read_from_pre_cell astate (v, hist) =
       call (namely when we are changing the history of a logical var: we should also update the history
       of the program var or memory location where it came from) but better safe than infinite
       loop-y. *)
-let rec add_event_to_value_origin_ ~recurse (path : PathContext.t) location event value_origin
-    astate =
+let rec add_event_to_value_origin_ ~recurse ~written (path : PathContext.t) location event
+    value_origin astate =
   match (value_origin : ValueOrigin.t) with
   | InMemory {src; access; dest= dest_addr, dest_hist} ->
       let dest_hist = ValueHistory.sequence event dest_hist in
-      Memory.add_edge path src access (dest_addr, dest_hist) location astate
+      if written then Memory.add_edge path src access (dest_addr, dest_hist) location astate
+      else
+        SafeMemory.map_post_heap astate
+          ~f:
+            (BaseMemory.add_edge
+               (CanonValue.canon' astate (fst src))
+               (CanonValue.canon_access astate access)
+               (dest_addr, dest_hist) )
   | OnStack {var; addr_hist= addr, hist} ->
       let hist = ValueHistory.sequence event hist in
       let astate, new_origin =
@@ -3043,7 +3050,8 @@ let rec add_event_to_value_origin_ ~recurse (path : PathContext.t) location even
         | Some var_origin ->
             let astate =
               if recurse then
-                add_event_to_value_origin_ ~recurse:false path location event var_origin astate
+                add_event_to_value_origin_ ~recurse:false ~written path location event var_origin
+                  astate
               else astate
             in
             let origin =
@@ -3059,8 +3067,8 @@ let rec add_event_to_value_origin_ ~recurse (path : PathContext.t) location even
       astate
 
 
-let add_event_to_value_origin path location event value_origin astate =
-  add_event_to_value_origin_ ~recurse:true path location event value_origin astate
+let add_event_to_value_origin ?(written = true) path location event value_origin astate =
+  add_event_to_value_origin_ ~recurse:true ~written path location event value_origin astate
 
 
 module CanonValue = struct
