@@ -5941,6 +5941,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           instruction trans_state value
       | None ->
           genericSelectionExprUnknown_trans trans_state stmt_info stmts )
+    | `SizeOfPackExpr (_, _, expr_info, {Clang_ast_t.sope_pack_length= Some pack_length}) ->
+        characterLiteral_trans trans_state expr_info pack_length
     | `SizeOfPackExpr _ ->
         mk_trans_result (Exp.get_undefined false, StdTyp.void) empty_control
     | `GCCAsmStmt (stmt_info, stmts) ->
