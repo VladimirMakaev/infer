@@ -4095,7 +4095,10 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     in
     let exp_typ = res_trans_stmt.return in
     (* This gives the difference among cast operations kind *)
-    let cast_inst, cast_exp = cast_operation ?objc_bridge_cast_kind cast_kind exp_typ typ sil_loc in
+    let cast_inst, cast_exp =
+      cast_operation ?objc_bridge_cast_kind
+        context.CContext.translation_unit_context.integer_type_widths cast_kind exp_typ typ sil_loc
+    in
     { res_trans_stmt with
       control= {res_trans_stmt.control with instrs= res_trans_stmt.control.instrs @ cast_inst}
     ; return= cast_exp }
