@@ -225,7 +225,7 @@ digraph cfg {
 	
 
 	 "scopes.1e9ac935c692fb21_27" -> "scopes.1e9ac935c692fb21_8" ;
-"scopes.1e9ac935c692fb21_28" [label="28:  DeclStmt \n   VARIABLE_DECLARED(c:char); [line 15, column 5]\n  *&c:char=97 [line 15, column 5]\n " shape="box"]
+"scopes.1e9ac935c692fb21_28" [label="28:  DeclStmt \n   VARIABLE_DECLARED(c:char); [line 15, column 5]\n  *&c:char=(char)97 [line 15, column 5]\n " shape="box"]
 	
 
 	 "scopes.1e9ac935c692fb21_28" -> "scopes.1e9ac935c692fb21_24" ;
