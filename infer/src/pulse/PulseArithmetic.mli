@@ -148,4 +148,6 @@ val absval_of_int : AbductiveDomain.t -> IntLit.t -> AbductiveDomain.t * Abstrac
 
 val absval_of_string : AbductiveDomain.t -> string -> AbductiveDomain.t * AbstractValue.t
 
+val as_constant_q : AbductiveDomain.t -> AbstractValue.t -> Q.t option
+
 val as_constant_string : AbductiveDomain.t -> AbstractValue.t -> string option

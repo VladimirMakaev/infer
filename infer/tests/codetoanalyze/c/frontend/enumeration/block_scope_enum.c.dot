@@ -15,7 +15,7 @@ digraph cfg {
 	
 
 	 "block_scope_enum.efe44049d2024a0d_4" -> "block_scope_enum.efe44049d2024a0d_2" ;
-"block_scope_enum.efe44049d2024a0d_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(j:int); [line 12, column 3]\n  n$1=*&i:int [line 12, column 25]\n  n$2=*&e:int [line 12, column 29]\n  *&j:int=((unsigned int)n$1 + (unsigned int)n$2) [line 12, column 3]\n " shape="box"]
+"block_scope_enum.efe44049d2024a0d_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(j:int); [line 12, column 3]\n  n$1=*&i:int [line 12, column 25]\n  n$2=*&e:int [line 12, column 29]\n  *&j:int=(int)((unsigned int)n$1 + (unsigned int)n$2) [line 12, column 3]\n " shape="box"]
 	
 
 	 "block_scope_enum.efe44049d2024a0d_5" -> "block_scope_enum.efe44049d2024a0d_3" ;
