@@ -349,4 +349,89 @@ class Versions {
   int last_record_ GUARDED_BY(mu_) = 0;
 };
 
+// clang checks calls through the base against its annotation, so overrides
+// that do not repeat it are called with mu_ held
+class Device {
+ public:
+  void start() {
+    std::lock_guard<std::mutex> lock(mu_);
+    set_enabled_locked_ok(true);
+  }
+
+  // not modelled: calls through the base are unknown to RacerD
+  void FN_start_unlocked_bad() { set_enabled_locked_ok(true); }
+
+ protected:
+  virtual int set_enabled_locked_ok(bool on) REQUIRES(mu_) = 0;
+
+  Mutex mu_;
+};
+
+class Camera : public Device {
+ public:
+  void reset() {
+    std::lock_guard<std::mutex> lock(mu_);
+    enabled_count_ = 0;
+  }
+
+  int call_locked_ok(bool on) REQUIRES(mu_) {
+    return set_enabled_locked_ok(on);
+  }
+
+  int call_unlocked_bad(bool on) { return set_enabled_locked_ok(on); }
+
+  int set_enabled_locked_ok(bool on) override {
+    if (on) {
+      enabled_count_++;
+    }
+    return enabled_count_;
+  }
+
+ private:
+  int enabled_count_ GUARDED_BY(mu_) = 0;
+};
+
+class FrontCamera : public Camera {
+ public:
+  void reset_front() {
+    std::lock_guard<std::mutex> lock(mu_);
+    front_count_ = 0;
+  }
+
+  int set_enabled_locked_ok(bool on) override {
+    front_count_++;
+    return front_count_;
+  }
+
+ private:
+  int front_count_ GUARDED_BY(mu_) = 0;
+};
+
+// only overrides are called through the base declaration: a method that hides
+// a REQUIRES method without overriding it does not take its annotation
+class Sensor {
+ public:
+  virtual void add_bad(int n) REQUIRES(mu_) = 0;
+
+  void step_bad() REQUIRES(mu_) {}
+
+ protected:
+  Mutex mu_;
+};
+
+class Thermometer : public Sensor {
+ public:
+  void reset() {
+    std::lock_guard<std::mutex> lock(mu_);
+    count_ = 0;
+  }
+
+  void add_bad(long n) { count_ += n; }
+
+  void step_bad() { count_++; }
+
+ private:
+  int count_ GUARDED_BY(mu_) = 0;
+};
+
 } // namespace thread_safety_annotations
