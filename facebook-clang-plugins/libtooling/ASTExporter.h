@@ -415,6 +415,7 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   DECLARE_VISITOR(GenericSelectionExpr)
   DECLARE_VISITOR(CXXNoexceptExpr)
   DECLARE_VISITOR(CXXParenListInitExpr)
+  DECLARE_VISITOR(SizeOfPackExpr)
 
   // ObjC
   DECLARE_VISITOR(ObjCAtCatchStmt)
@@ -4328,6 +4329,25 @@ void ASTExporter<ATDWriter>::VisitCXXParenListInitExpr(
   if (Filler) {
     OF.emitTag("array_filler");
     dumpStmt(Filler);
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::SizeOfPackExprTupleSize() {
+  return ExprTupleSize() + 1;
+}
+//@atd #define size_of_pack_expr_tuple expr_tuple * size_of_pack_expr_info
+//@atd type size_of_pack_expr_info = {
+//@atd   ?pack_length : int option;
+//@atd } <ocaml field_prefix="sope_">
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitSizeOfPackExpr(const SizeOfPackExpr *Node) {
+  VisitExpr(Node);
+  bool HasPackLength = !Node->isValueDependent();
+  ObjectScope Scope(OF, 0 + HasPackLength);
+  if (HasPackLength) {
+    OF.emitTag("pack_length");
+    OF.emitInteger(Node->getPackLength());
   }
 }
 
