@@ -431,8 +431,10 @@ module Basic = struct
       was called. *)
   let assert_ {FuncArg.exp= condition} : model_no_non_disj =
    fun {analysis_data= {proc_desc}; path; location} astate ->
-    let<++> astate, _ = PulseOperations.prune proc_desc path location ~condition astate in
-    astate
+    PulseOperations.prune proc_desc path location ~condition astate
+    |> List.concat_map ~f:(fun prune_result ->
+        let<++> astate, _ = prune_result in
+        astate )
 
 
   let matchers : matcher list =
