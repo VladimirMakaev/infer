@@ -7,7 +7,7 @@ digraph cfg {
 "integral_cast.d5430d978bb8b1ae_2" [label="2: Exit integral_cast \n  " color=yellow style=filled]
 	
 
-"integral_cast.d5430d978bb8b1ae_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(b:int); [line 10, column 3]\n  n$0=*&a:char [line 10, column 18]\n  *&b:int=(n$0 + 2) [line 10, column 3]\n " shape="box"]
+"integral_cast.d5430d978bb8b1ae_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(b:int); [line 10, column 3]\n  n$0=*&a:int [line 10, column 18]\n  *&b:int=((char)n$0 + 2) [line 10, column 3]\n " shape="box"]
 	
 
 	 "integral_cast.d5430d978bb8b1ae_3" -> "integral_cast.d5430d978bb8b1ae_2" ;

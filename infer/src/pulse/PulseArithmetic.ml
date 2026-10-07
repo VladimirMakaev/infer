@@ -167,4 +167,6 @@ let absval_of_string astate s =
   (astate, v)
 
 
+let as_constant_q astate v = Formula.as_constant_q astate.AbductiveDomain.path_condition v
+
 let as_constant_string astate v = Formula.as_constant_string astate.AbductiveDomain.path_condition v
