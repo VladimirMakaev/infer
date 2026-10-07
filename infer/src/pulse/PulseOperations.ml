@@ -282,6 +282,27 @@ let degrade_mode addr astate mode =
       mode
 
 
+let rec constant_of_field_base (exp : Exp.t) =
+  match exp with
+  | Const (Cint i) ->
+      Some i
+  | Cast (_, exp) | Lfield ({exp}, _, _) ->
+      constant_of_field_base exp
+  | _ ->
+      None
+
+
+let constant_address (path : PathContext.t) location i (astate, v) =
+  let invalidation = Invalidation.ConstantDereference i in
+  let astate =
+    AddressAttributes.invalidate
+      (v, ValueHistory.singleton (Assignment (location, path.timestamp)))
+      invalidation location astate
+  in
+  let hist = ValueHistory.singleton (Invalidated (invalidation, location, path.timestamp)) in
+  (astate, ValueOrigin.Unknown (v, hist))
+
+
 let rec eval (path : PathContext.t) mode location exp astate :
     (t * (AbstractValue.t * ValueHistory.t)) PulseOperationResult.t =
   let++ astate, value_origin = eval_to_value_origin path mode location exp astate in
@@ -352,10 +373,16 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
       Sat (Ok (astate, origin))
   | Lvar pvar ->
       Sat (Ok (eval_var_to_value_origin path location pvar astate))
-  | Lfield ({exp= exp'}, field, _) ->
-      let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
-      let mode = degrade_mode addr astate mode in
-      eval_access_to_value_origin path mode location addr_hist (FieldAccess field) astate
+  | Lfield ({exp= exp'}, field, _) -> (
+    match constant_of_field_base exp' with
+    | Some i ->
+        (* taking the address of a field through a constant pointer, e.g. a null one in
+           [offsetof]-like macros, does not access memory and gives another constant *)
+        Sat (Ok (constant_address path location i (astate, AbstractValue.mk_fresh ())))
+    | None ->
+        let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
+        let mode = degrade_mode addr astate mode in
+        eval_access_to_value_origin path mode location addr_hist (FieldAccess field) astate )
   | Lindex (exp', exp_index) ->
       let** astate, addr_hist_index = eval path Read location exp_index astate in
       let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
@@ -392,15 +419,7 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
   | Cast (_, exp') ->
       eval_to_value_origin path mode location exp' astate
   | Const (Cint i) ->
-      let astate, v = PulseArithmetic.absval_of_int astate i in
-      let invalidation = Invalidation.ConstantDereference i in
-      let astate =
-        AddressAttributes.invalidate
-          (v, ValueHistory.singleton (Assignment (location, path.timestamp)))
-          invalidation location astate
-      in
-      let hist = ValueHistory.singleton (Invalidated (invalidation, location, path.timestamp)) in
-      Sat (Ok (astate, ValueOrigin.Unknown (v, hist)))
+      Sat (Ok (constant_address path location i (PulseArithmetic.absval_of_int astate i)))
   | Const (Cstr s) ->
       let astate, v = PulseArithmetic.absval_of_string astate s in
       Sat
