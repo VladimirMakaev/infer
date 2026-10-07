@@ -728,7 +728,9 @@ void iterate_arraysize_ok(int array[256]) {
 }
 
 // Iterate over an array using a bitmask to compute array value
-void iterate_bitmask_ok(int array[256], int len) {
+// A negative len converts to a bound of at least 2^31, which Pulse does not track: the loop
+// terminates after reaching it
+void FP_iterate_bitmask_ok(int array[256], int len) {
   unsigned int i = 0;
   while (i < len) {
     array[i] = (i & (~7));
@@ -737,7 +739,8 @@ void iterate_bitmask_ok(int array[256], int len) {
 }
 
 // Iterate over an array using a bitmask to compute array index
-void iterate_bitmask2_ok(int array[256], int len) {
+// Same as FP_iterate_bitmask_ok
+void FP_iterate_bitmask2_ok(int array[256], int len) {
   unsigned int i = 0;
   unsigned int j = 0;
   while (i < len) {
@@ -788,7 +791,9 @@ void iterate_bitshift_bad(int array[256]) {
 }
 
 // Iterate over an array using a bitshift to compute array index
-void iterate_bitshift1_ok(int array[256], int len) {
+// A negative len other than INT_MIN converts to a bound above 2^31: i reaches 2^31, then shifts
+// to 0
+void iterate_bitshift1_negative_len_bad(int array[256], int len) {
   unsigned int i = 1;
   while (i < len) {
     array[i] = i;

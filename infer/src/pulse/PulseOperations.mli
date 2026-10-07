@@ -123,7 +123,8 @@ val prune :
   -> Location.t
   -> condition:Exp.t
   -> t
-  -> (t * ValueHistory.t) AccessResult.t SatUnsat.t
+  -> (t * ValueHistory.t) AccessResult.t SatUnsat.t list
+(** one result per case of [condition] *)
 
 val eval_deref :
      PathContext.t
