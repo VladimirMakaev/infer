@@ -48,7 +48,7 @@ define count_args_int__int__int_(ts: .lvalue_reference *int, ts: .lvalue_referen
       jmp  @[14:1]
       
   #node_5: @[13:3]
-      ret 3 @[13:3]
+      ret __sil_cast(<int>, 3) @[13:3]
       
   #node_4: @[10:3]
       jmp node_5 @[10:3]
