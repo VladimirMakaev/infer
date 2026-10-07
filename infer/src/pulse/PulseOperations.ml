@@ -335,6 +335,37 @@ let constant_address (path : PathContext.t) location i (astate, v) =
   (astate, ValueOrigin.Unknown (v, hist))
 
 
+(** the range of [typ] when it is an integer type whose conversions are modelled *)
+let integral_cast_range (typ : Typ.t) =
+  match typ.desc with
+  | Tint IBool ->
+      None
+  | Tint ikind when Language.curr_language_is Clang ->
+      PulseContext.integer_widths ()
+      |> Option.map ~f:(fun widths -> IntegerWidths.range_of_ikind widths ikind)
+  | _ ->
+      None
+
+
+(** casts of values not known to be constants are the identity *)
+let eval_integral_cast typ value_origin astate =
+  match integral_cast_range typ with
+  | None ->
+      (astate, value_origin)
+  | Some (lower, upper) -> (
+      let v, hist = ValueOrigin.addr_hist value_origin in
+      match PulseArithmetic.as_constant_q astate v with
+      | Some q when Z.equal (Q.den q) Z.one ->
+          let z = Q.num q in
+          if Z.(leq lower z && leq z upper) then (astate, value_origin)
+          else
+            let z' = Z.(erem (z - lower) (upper - lower + one) + lower) in
+            let astate, v' = PulseArithmetic.absval_of_int astate (IntLit.of_big_int z') in
+            (astate, ValueOrigin.Unknown (v', hist))
+      | _ ->
+          (astate, value_origin) )
+
+
 let rec eval (path : PathContext.t) mode location exp astate :
     (t * (AbstractValue.t * ValueHistory.t)) PulseOperationResult.t =
   let++ astate, value_origin = eval_to_value_origin path mode location exp astate in
@@ -448,8 +479,9 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
       (* function pointers are represented as closures with no captured variables *)
       let++ astate, v_hist = record_closure astate path location proc_name [] in
       (astate, v_hist)
-  | Cast (_, exp') ->
-      eval_to_value_origin path mode location exp' astate
+  | Cast (typ, exp') ->
+      let++ astate, value_origin = eval_to_value_origin path mode location exp' astate in
+      eval_integral_cast typ value_origin astate
   | Const (Cint i) ->
       Sat (Ok (constant_address path location i (PulseArithmetic.absval_of_int astate i)))
   | Const (Cstr s) ->
@@ -535,6 +567,59 @@ let is_this_equal_to_param_in_constructor pdesc ~negated bop lhs_op rhs_op astat
       false
 
 
+(** The cases of [condition], each a conjunction of conditions. Comparing an operand [x] converted
+    to an unsigned type of [n] bits at least as wide as [int] is unsigned (narrower operands are
+    promoted to [int]), so the comparison is split on the sign of [x]. A negative [x] converts to
+    [x + 2^n], at least [2^(n-1)]; unless it is a constant, the other operand is assumed to be below
+    [2^(n-1)], which decides the comparison for a negative [x]. The cast of the other operand stays
+    the identity. *)
+let unsigned_comparison_cases condition : Exp.t list list =
+  let rec strip_negations negated (exp : Exp.t) =
+    match exp with UnOp (LNot, exp', _) -> strip_negations (not negated) exp' | _ -> (negated, exp)
+  in
+  let unsigned_cast (exp : Exp.t) =
+    match exp with
+    | Cast (({desc= Tint ikind} as typ), x) when Typ.ikind_is_unsigned ikind ->
+        let open IOption.Let_syntax in
+        let* _, upper = integral_cast_range typ in
+        let* widths = PulseContext.integer_widths () in
+        let _, uint_upper = IntegerWidths.range_of_ikind widths IUInt in
+        Option.some_if Z.(geq upper uint_upper) (x, Z.(upper + one))
+    | _ ->
+        None
+  in
+  match strip_negations false condition with
+  | negated, BinOp (((Lt | Le | Gt | Ge) as bop), lhs, rhs) -> (
+      let is_lower = match bop with Lt | Le -> true | _ -> false in
+      let lhs_below = Bool.(is_lower <> negated) in
+      let cases x two_to_the_n ~below ~other ~negative_comparison =
+        let is_negative = Exp.BinOp (Lt, x, Exp.zero) in
+        let negative_case =
+          match (other : Exp.t) with
+          | Const (Cint c) when Z.(gt (IntLit.to_big_int c) (two_to_the_n / of_int 2)) ->
+              let x_converted =
+                Exp.BinOp (PlusA None, x, Exp.int (IntLit.of_big_int two_to_the_n))
+              in
+              let comparison = negative_comparison x_converted in
+              [[is_negative; (if negated then Exp.UnOp (LNot, comparison, None) else comparison)]]
+          | _ ->
+              if below then [] else [[is_negative]]
+        in
+        negative_case @ [[Exp.BinOp (Ge, x, Exp.zero); condition]]
+      in
+      match (unsigned_cast lhs, unsigned_cast rhs) with
+      | Some (x, two_to_the_n), _ ->
+          cases x two_to_the_n ~below:lhs_below ~other:rhs ~negative_comparison:(fun x' ->
+              Exp.BinOp (bop, x', rhs) )
+      | None, Some (x, two_to_the_n) ->
+          cases x two_to_the_n ~below:(not lhs_below) ~other:lhs ~negative_comparison:(fun x' ->
+              Exp.BinOp (bop, lhs, x') )
+      | None, None ->
+          [[condition]] )
+  | _ ->
+      [[condition]]
+
+
 let prune pdesc path location ~condition astate =
   let rec prune_aux ~negated exp astate =
     match (exp : Exp.t) with
@@ -605,7 +690,14 @@ let prune pdesc path location ~condition astate =
     | exp ->
         prune_aux ~negated (Exp.BinOp (Ne, exp, Exp.zero)) astate
   in
-  prune_aux ~negated:false condition astate
+  let prune_all conditions =
+    List.fold conditions
+      ~init:(Sat (Ok (astate, ValueHistory.epoch)))
+      ~f:(fun result condition ->
+        let** astate, _ = result in
+        prune_aux ~negated:false condition astate )
+  in
+  List.map (unsigned_comparison_cases condition) ~f:prune_all
 
 
 let degrade_mode_exp path location exp astate mode =

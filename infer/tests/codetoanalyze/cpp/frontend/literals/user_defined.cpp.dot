@@ -26,7 +26,7 @@ digraph cfg {
 	
 
 	 "operator\"\"_literal#10799417371478.892e3238d686eb1d_3" -> "operator\"\"_literal#10799417371478.892e3238d686eb1d_4" ;
-"operator\"\"_literal#10799417371478.892e3238d686eb1d_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 8, column 49]\n " shape="box"]
+"operator\"\"_literal#10799417371478.892e3238d686eb1d_4" [label="4:  Return Stmt \n   *&return:int=(int)n$0 [line 8, column 49]\n " shape="box"]
 	
 
 	 "operator\"\"_literal#10799417371478.892e3238d686eb1d_4" -> "operator\"\"_literal#10799417371478.892e3238d686eb1d_2" ;

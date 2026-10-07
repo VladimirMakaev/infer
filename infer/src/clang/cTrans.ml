@@ -4049,7 +4049,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           , inner_expr_info
           , inner_cast_expr_info
           , part_of_explicit_cast )
-        when part_of_explicit_cast ->
+        when part_of_explicit_cast
+             (* integral casts convert the loaded value with [Exp.Cast] instead *)
+             && not (cast_expr_info.Clang_ast_t.cei_cast_kind = `IntegralCast) ->
           `ImplicitCastExpr
             ( inner_stmt_info
             , inner_stmt_list

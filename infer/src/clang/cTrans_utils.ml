@@ -609,8 +609,19 @@ let converted_int_constant integer_type_widths ikind exp =
   else Some (Exp.Const (Cint (IntLit.of_big_int converted)))
 
 
-let cast_operation_of_kind ?objc_bridge_cast_kind cast_kind ((exp, typ) as exp_typ) cast_typ sil_loc
-    =
+(** whether converting a value of type [typ] to [cast_typ] can change it *)
+let is_lossy_integral_cast integer_type_widths typ cast_typ =
+  match (Typ.get_ikind_opt typ, Typ.get_ikind_opt cast_typ) with
+  | Some ikind, Some cast_ikind ->
+      let lower, upper = IntegerWidths.range_of_ikind integer_type_widths ikind in
+      let cast_lower, cast_upper = IntegerWidths.range_of_ikind integer_type_widths cast_ikind in
+      Z.(lt lower cast_lower || gt upper cast_upper)
+  | _ ->
+      false
+
+
+let cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind
+    ((exp, typ) as exp_typ) cast_typ sil_loc =
   match cast_kind with
   | `NoOp when Typ.is_rvalue_reference cast_typ ->
       ([], (Exp.Cast (cast_typ, exp), cast_typ))
@@ -619,7 +630,8 @@ let cast_operation_of_kind ?objc_bridge_cast_kind cast_kind ((exp, typ) as exp_t
       ([], exp_typ)
   | `BitCast when Typ.is_pointer_to_int cast_typ ->
       ([], (Exp.Cast (cast_typ, exp), cast_typ))
-  | `IntegralCast when Typ.is_unsigned_int cast_typ ->
+  | `IntegralCast
+    when Typ.is_unsigned_int cast_typ || is_lossy_integral_cast integer_type_widths typ cast_typ ->
       ([], (Exp.Cast (cast_typ, exp), cast_typ))
   | `BitCast | `IntegralCast | `IntegralToBoolean ->
       (* This is treated as a nop by returning the same expressions exps*)
@@ -680,7 +692,8 @@ let cast_operation ?objc_bridge_cast_kind integer_type_widths cast_kind ((exp, _
   | Some exp ->
       ([], (exp, cast_typ))
   | None ->
-      cast_operation_of_kind ?objc_bridge_cast_kind cast_kind exp_typ cast_typ sil_loc
+      cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind exp_typ cast_typ
+        sil_loc
 
 
 let trans_assertion_failure sil_loc (context : CContext.t) =

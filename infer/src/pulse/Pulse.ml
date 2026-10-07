@@ -1257,6 +1257,30 @@ module PulseTransferFunctions = struct
         Sat (Ok astate)
 
 
+  (** like loaded values, call results are in the range of their integer type *)
+  let and_is_int_ret (ret_id, (ret_typ : Typ.t)) astates =
+    match ret_typ.desc with
+    | Tint ikind ->
+        List.filter_map astates ~f:(fun (exec_state : ExecutionDomain.t) ->
+            match exec_state with
+            | ContinueProgram astate -> (
+              match PulseOperations.read_id ret_id astate with
+              | None ->
+                  Some exec_state
+              | Some (ret_value, _) -> (
+                match PulseArithmetic.and_is_int ret_value ikind astate with
+                | Sat (Ok astate) ->
+                    Some (ContinueProgram astate)
+                | Sat (Recoverable _ | FatalError _) ->
+                    Some exec_state
+                | Unsat _ ->
+                    None ) )
+            | ExceptionRaised _ | Stopped _ ->
+                Some exec_state )
+    | _ ->
+        astates
+
+
   let check_modified_before_destructor args call_exp astate astate_n =
     match ((call_exp : Exp.t), args) with
     | (Const (Cfun proc_name) | Closure {name= proc_name}), (Exp.Lvar pvar, _) :: _
@@ -1667,6 +1691,7 @@ module PulseTransferFunctions = struct
           if not (CallGlobalForStats.is_node_not_stuck ()) then (
             if Config.log_pulse_coverage then add_verbose_never_return_info proc_desc instr loc ;
             CallGlobalForStats.one_call_is_stuck () ) ;
+          let astates = and_is_int_ret ret astates in
           let astate_n, astates =
             let pname = Procdesc.get_proc_name proc_desc in
             let integer_type_widths = Exe_env.get_integer_type_widths pname in
@@ -1680,13 +1705,12 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
-          let prune_result =
-            let=* astate = check_config_usage analysis_data loc condition astate in
-            PulseOperations.prune proc_desc path loc ~condition astate
-          in
           let results =
-            let<++> astate, _ = prune_result in
-            astate
+            let<*> astate = check_config_usage analysis_data loc condition astate in
+            PulseOperations.prune proc_desc path loc ~condition astate
+            |> List.concat_map ~f:(fun prune_result ->
+                let<++> astate, _ = prune_result in
+                astate )
           in
           let astates = PulseReport.report_exec_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)

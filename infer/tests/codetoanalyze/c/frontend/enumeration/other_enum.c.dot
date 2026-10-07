@@ -67,7 +67,7 @@ digraph cfg {
 	
 
 	 "other_enum_test.100f3583adf02590_8" -> "other_enum_test.100f3583adf02590_9" ;
-"other_enum_test.100f3583adf02590_9" [label="9:  Return Stmt \n   *&return:int=((unsigned int)n$1 / (unsigned int)n$2) [line 24, column 5]\n " shape="box"]
+"other_enum_test.100f3583adf02590_9" [label="9:  Return Stmt \n   *&return:int=(int)((unsigned int)n$1 / (unsigned int)n$2) [line 24, column 5]\n " shape="box"]
 	
 
 	 "other_enum_test.100f3583adf02590_9" -> "other_enum_test.100f3583adf02590_2" ;

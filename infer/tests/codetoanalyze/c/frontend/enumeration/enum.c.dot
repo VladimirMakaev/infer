@@ -15,11 +15,11 @@ digraph cfg {
 	
 
 	 "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_4" -> "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_3" ;
-"main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_5" [label="5:  BinaryOperatorStmt: Assign \n   *&today:int=((unsigned int)2 + (unsigned int)1) [line 23, column 3]\n " shape="box"]
+"main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_5" [label="5:  BinaryOperatorStmt: Assign \n   *&today:int=(int)((unsigned int)2 + (unsigned int)1) [line 23, column 3]\n " shape="box"]
 	
 
 	 "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_5" -> "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_4" ;
-"main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_6" [label="6:  BinaryOperatorStmt: Assign \n   n$0=*&today:int [line 22, column 11]\n  *&today:int=((unsigned int)n$0 + (unsigned int)4) [line 22, column 3]\n " shape="box"]
+"main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_6" [label="6:  BinaryOperatorStmt: Assign \n   n$0=*&today:int [line 22, column 11]\n  *&today:int=(int)((unsigned int)n$0 + (unsigned int)4) [line 22, column 3]\n " shape="box"]
 	
 
 	 "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_6" -> "main#3beb0349aeffe350dabe3c205af4.60258b72230e137c_5" ;
