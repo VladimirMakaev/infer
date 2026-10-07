@@ -570,7 +570,47 @@ let dereference_value_from_result ?(strip_pointer = false) source_range sil_loc 
   ; return= (cast_exp, cast_typ) }
 
 
-let cast_operation ?objc_bridge_cast_kind cast_kind ((exp, typ) as exp_typ) cast_typ sil_loc =
+let wrap_to_ikind integer_type_widths ikind value =
+  let lower, upper = IntegerWidths.range_of_ikind integer_type_widths ikind in
+  Z.(lower + erem (value - lower) (upper - lower + one))
+
+
+(** with [wrap = None], the value that the analyses compute for [exp], which evaluate integral
+    conversions as the identity; with [wrap = Some integer_type_widths], the value of [exp] in C *)
+let rec int_constant_value ~wrap (exp : Exp.t) =
+  let unop f exp (typ : Typ.t option) =
+    int_constant_value ~wrap exp
+    |> Option.map ~f:(fun value ->
+        match (wrap, typ) with
+        | Some integer_type_widths, Some {desc= Tint ikind} ->
+            wrap_to_ikind integer_type_widths ikind (f value)
+        | _ ->
+            f value )
+  in
+  match exp with
+  | Const (Cint i) ->
+      Some (IntLit.to_big_int i)
+  | UnOp (Neg, exp, typ) ->
+      unop Z.neg exp typ
+  | UnOp (BNot, exp, typ) ->
+      unop Z.lognot exp typ
+  | _ ->
+      None
+
+
+(** the integer constant [exp] converted to [ikind], when the analyses would otherwise compute
+    another value for it *)
+let converted_int_constant integer_type_widths ikind exp =
+  let open IOption.Let_syntax in
+  let* value = int_constant_value ~wrap:(Some integer_type_widths) exp in
+  let* naive_value = int_constant_value ~wrap:None exp in
+  let converted = wrap_to_ikind integer_type_widths ikind value in
+  if Z.equal converted naive_value then None
+  else Some (Exp.Const (Cint (IntLit.of_big_int converted)))
+
+
+let cast_operation_of_kind ?objc_bridge_cast_kind cast_kind ((exp, typ) as exp_typ) cast_typ sil_loc
+    =
   match cast_kind with
   | `NoOp when Typ.is_rvalue_reference cast_typ ->
       ([], (Exp.Cast (cast_typ, exp), cast_typ))
@@ -625,6 +665,22 @@ let cast_operation ?objc_bridge_cast_kind cast_kind ((exp, typ) as exp_typ) cast
           (Pp.of_string ~f:Clang_ast_j.string_of_cast_kind)
           cast_kind ;
         ([], (exp, cast_typ)) )
+
+
+let cast_operation ?objc_bridge_cast_kind integer_type_widths cast_kind ((exp, _) as exp_typ)
+    cast_typ sil_loc =
+  let converted_constant =
+    match (cast_kind, cast_typ.Typ.desc) with
+    | `IntegralCast, Tint ikind ->
+        converted_int_constant integer_type_widths ikind exp
+    | _ ->
+        None
+  in
+  match converted_constant with
+  | Some exp ->
+      ([], (exp, cast_typ))
+  | None ->
+      cast_operation_of_kind ?objc_bridge_cast_kind cast_kind exp_typ cast_typ sil_loc
 
 
 let trans_assertion_failure sil_loc (context : CContext.t) =
