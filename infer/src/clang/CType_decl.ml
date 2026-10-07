@@ -210,6 +210,29 @@ module BuildMethodSignature = struct
         (return_typ, None, return_typ_annot, false, is_ret_typ_pod)
 
 
+  let is_requires_capability_attr = function `RequiresCapabilityAttr _ -> true | _ -> false
+
+  let rec requires_capability_attrs_of_overridden_methods method_decl =
+    let open Clang_ast_t in
+    match method_decl with
+    | CXXMethodDecl (_, _, _, _, {xmdi_overriden_methods})
+    | CXXConversionDecl (_, _, _, _, {xmdi_overriden_methods})
+    | CXXDestructorDecl (_, _, _, _, {xmdi_overriden_methods}) ->
+        List.concat_map xmdi_overriden_methods ~f:(fun {dr_decl_pointer} ->
+            match CAst_utils.get_decl dr_decl_pointer with
+            | None ->
+                []
+            | Some base -> (
+                let base_attributes = (Clang_ast_proj.get_decl_tuple base).di_attributes in
+                match List.filter base_attributes ~f:is_requires_capability_attr with
+                | [] ->
+                    requires_capability_attrs_of_overridden_methods base
+                | attributes ->
+                    attributes ) )
+    | _ ->
+        []
+
+
   let method_signature_of_decl qual_type_to_sil_type tenv method_decl ?block_return_type
       ?(block_as_arg_attributes = None) procname =
     let decl_info = Clang_ast_proj.get_decl_tuple method_decl in
@@ -222,7 +245,13 @@ module BuildMethodSignature = struct
     let pointer_to_parent = decl_info.di_parent_pointer in
     let class_param = get_class_param qual_type_to_sil_type tenv method_decl in
     let params = get_parameters qual_type_to_sil_type tenv ~block_return_type method_decl in
-    let attributes = decl_info.Clang_ast_t.di_attributes in
+    let attributes =
+      let attributes = decl_info.Clang_ast_t.di_attributes in
+      (* clang checks a virtual call against the declaration it calls, so an override that does
+         not repeat [REQUIRES] is still called with the locks required by the overridden method *)
+      if List.exists attributes ~f:is_requires_capability_attr then attributes
+      else attributes @ requires_capability_attrs_of_overridden_methods method_decl
+    in
     let is_cpp_const_member_fun = CMethodProperties.is_cpp_const_member_fun method_decl in
     let is_cpp_virtual = CMethodProperties.is_cpp_virtual method_decl in
     let is_cpp_copy_assignment = CMethodProperties.is_cpp_copy_assignment method_decl in
