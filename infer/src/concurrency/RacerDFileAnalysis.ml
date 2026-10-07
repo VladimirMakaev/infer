@@ -30,6 +30,32 @@ type reported_access =
   ; tenv: Tenv.t
   ; procname: Procname.t }
 
+(* the accesses come in an order that involves the mangled names of callees, which differ between
+   standard libraries, so deduplication goes by source position instead *)
+type rank = (int * int * string) list [@@deriving compare]
+
+(** The source positions from the method down to the access, the last one with the callee. *)
+let rank {snapshot} =
+  let name pname = Procname.to_simplified_string ~withclass:true pname in
+  let callee =
+    match snapshot.elem.access with
+    | ContainerRead {pname} | ContainerWrite {pname} | InterfaceCall {pname} ->
+        name pname
+    | Read _ | Write _ ->
+        ""
+  in
+  List.map snapshot.trace ~f:(fun call_site ->
+      let {Location.line; col; _} = CallSite.loc call_site in
+      (line, col, name (CallSite.pname call_site)) )
+  @ [(snapshot.loc.line, snapshot.loc.col, callee)]
+
+
+let sort_by_rank accesses =
+  List.map accesses ~f:(fun access -> (rank access, access))
+  |> List.stable_sort ~compare:(fun (rank1, _) (rank2, _) -> compare_rank rank1 rank2)
+  |> List.map ~f:snd
+
+
 module ReportedSet : sig
   (** Type for deduplicating and storing reports. *)
   type t
@@ -46,7 +72,8 @@ module ReportedSet : sig
 
   val deduplicate :
     f:(reported_access -> IssueLog.t -> IssueLog.t) -> guardedby:bool -> reported_access -> t -> t
-  (** Deduplicate [f]. Whatever the value of [Config.deduplicate], container accesses of the same
+  (** Deduplicate [f], keeping the first of the accesses met, so pass them in the order of
+      [sort_by_rank]. Whatever the value of [Config.deduplicate], container accesses of the same
       kind on the same line of a method are reported once per location. *)
 end = struct
   module ContainerLine = struct
@@ -559,53 +586,6 @@ let report_unsafe_access accesses acc ({procname} as reported_access) =
       acc
 
 
-module ContainerCallLine = struct
-  type t = {procname: Procname.t; line: int; is_write: bool} [@@deriving compare]
-end
-
-module ContainerCallLineMap = Stdlib.Map.Make (ContainerCallLine)
-
-(* Container calls of one kind on one line are reported once (see [ReportedSet.deduplicate]). The
-   order of the accesses comes from sets ordered by procedure names, which depend on the standard
-   library, so visit each such group by column and method name to keep the reported call stable. *)
-let order_container_accesses (accesses : reported_access list) =
-  let key ({snapshot; procname} : reported_access) =
-    match snapshot.elem.access with
-    | ContainerRead {pname} | ContainerWrite {pname} ->
-        let loc = RacerDDomain.AccessSnapshot.get_loc snapshot in
-        Some
-          ( { ContainerCallLine.procname
-            ; line= loc.line
-            ; is_write= RacerDDomain.AccessSnapshot.is_write snapshot }
-          , (loc.col, Procname.get_method pname) )
-    | Read _ | Write _ | InterfaceCall _ ->
-        None
-  in
-  let groups =
-    List.fold accesses ~init:ContainerCallLineMap.empty ~f:(fun groups access ->
-        match key access with
-        | Some (line_key, order) ->
-            ContainerCallLineMap.update line_key
-              (fun group -> Some ((order, access) :: Option.value group ~default:[]))
-              groups
-        | None ->
-            groups )
-    |> ContainerCallLineMap.map (fun group ->
-        List.stable_sort group ~compare:(fun (o1, _) (o2, _) -> [%compare: int * string] o1 o2)
-        |> List.map ~f:snd )
-  in
-  List.folding_map accesses ~init:groups ~f:(fun groups access ->
-      match key access with
-      | Some (line_key, _) -> (
-        match ContainerCallLineMap.find_opt line_key groups with
-        | Some (next :: rest) ->
-            (ContainerCallLineMap.add line_key rest groups, next)
-        | _ ->
-            (groups, access) )
-      | None ->
-          (groups, access) )
-
-
 (** Report accesses that may race with each other.
 
     Principles for race reporting.
@@ -635,17 +615,17 @@ let order_container_accesses (accesses : reported_access list) =
     thread" as if "known to be confined to UI thread". *)
 let report_unsafe_accesses ~issue_log classname aggregated_access_map =
   let open RacerDDomain in
-  let report_accesses_on_location reportable_accesses init =
+  let report_accesses_on_location ~sorted reportable_accesses init =
     (* Don't report on location if all accesses are on non-concurrent contexts *)
     if
       List.for_all reportable_accesses ~f:(fun ({threads} : reported_access) ->
           ThreadsDomain.is_any threads |> not )
     then init
-    else List.fold reportable_accesses ~init ~f:(report_unsafe_access reportable_accesses)
+    else List.fold sorted ~init ~f:(report_unsafe_access reportable_accesses)
   in
-  let report_guardedby_violations_on_location grouped_accesses init =
+  let report_guardedby_violations_on_location sorted init =
     if Config.racerd_guardedby then
-      List.fold grouped_accesses ~init ~f:(fun acc r ->
+      List.fold sorted ~init ~f:(fun acc r ->
           if should_report_guardedby_violation classname r then
             report_thread_safety_violation ~acc ~report_kind:GuardedByViolation
               ~make_description:make_guardedby_violation_description r
@@ -653,11 +633,11 @@ let report_unsafe_accesses ~issue_log classname aggregated_access_map =
     else init
   in
   let report grouped_accesses acc =
-    let grouped_accesses = order_container_accesses grouped_accesses in
     (* reset the reported reads and writes for each memory location *)
+    let sorted = sort_by_rank grouped_accesses in
     ReportedSet.reset acc
-    |> report_guardedby_violations_on_location grouped_accesses
-    |> report_accesses_on_location grouped_accesses
+    |> report_guardedby_violations_on_location sorted
+    |> report_accesses_on_location ~sorted grouped_accesses
   in
   ReportedSet.empty_of_issue_log issue_log
   |> ReportMap.fold report aggregated_access_map

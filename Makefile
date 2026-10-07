@@ -91,6 +91,7 @@ DIRECT_TESTS += \
   cpp_pulse-no-nullability-annotations \
   cpp_pulse-unsafe-malloc \
   cpp_racerd \
+  cpp_racerd-dedup \
   cpp_sil \
   cpp_siof \
   cpp_starvation \
