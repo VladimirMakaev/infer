@@ -11,11 +11,11 @@ digraph cfg {
 	
 
 	 "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_3" -> "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_2" ;
-"main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(overflow_int:int); [line 18, column 3]\n  *&overflow_int:int=9223372036854775808 [line 18, column 3]\n " shape="box"]
+"main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(overflow_int:int); [line 18, column 3]\n  *&overflow_int:int=0 [line 18, column 3]\n " shape="box"]
 	
 
 	 "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_4" -> "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_3" ;
-"main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(large_int:int); [line 17, column 3]\n  *&large_int:int=9223372036854775807 [line 17, column 3]\n " shape="box"]
+"main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(large_int:int); [line 17, column 3]\n  *&large_int:int=-1 [line 17, column 3]\n " shape="box"]
 	
 
 	 "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_5" -> "main#703c4cc76fc8619d9e6db15cf7bb.e03e02b382fad7d1_4" ;
