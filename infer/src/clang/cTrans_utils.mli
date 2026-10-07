@@ -121,6 +121,7 @@ val dereference_value_from_result :
 
 val cast_operation :
      ?objc_bridge_cast_kind:Clang_ast_t.obj_c_bridge_cast_kind
+  -> IntegerWidths.t
   -> Clang_ast_t.cast_kind
   -> Exp.t * Typ.t
   -> Typ.t

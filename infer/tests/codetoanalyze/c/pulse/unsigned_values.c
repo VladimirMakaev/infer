@@ -161,8 +161,8 @@ int unsigned_to_signed(unsigned int u) {
 // [u > INT_MAX], so the path is pruned
 void FN_unsigned_to_signed_bad() { unsigned_to_signed(0xffffffffu); }
 
-// [n] is -1, not wrapped to 0xFFFFFFFF, so the comparison is false
-int FP_minus_one_equals_max_ok() {
+// the frontend converts -1 to unsigned int: [n] is 0xFFFFFFFF
+int minus_one_equals_max_ok() {
   unsigned int n = -1;
   if (n == 0xFFFFFFFFu) {
     return 0;
