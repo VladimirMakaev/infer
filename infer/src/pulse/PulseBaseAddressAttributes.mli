@@ -140,6 +140,8 @@ module type S = sig
 
   val remove_all_must_be_initialized : t -> t
 
+  val remove_must_be_initialized : key -> t -> t
+
   val finalize_all_hack_builders : t -> t
 
   val remove_must_be_valid_attr : key -> t -> t
