@@ -103,6 +103,34 @@ let is_internal {field_name} =
   String.is_prefix field_name ~prefix:"_M_"
 
 
+let is_cpp_library_storage {class_name; field_name} =
+  let class_name = Typ.Name.name class_name in
+  let is_in template =
+    String.equal class_name template || String.is_prefix class_name ~prefix:(template ^ "<")
+  in
+  match field_name with
+  | "__infer_backing_array"
+  | "__infer_backing_pointer"
+  | "__infer_backing_value"
+  | "__infer_has_value"
+  | "__infer_model_backing_string"
+  | "__infer_weak_backing_pointer" ->
+      is_in "__infer_pulse_model"
+  | "__ptr_" ->
+      is_in "std::unique_ptr" || is_in "std::shared_ptr" || is_in "std::weak_ptr"
+  | "__value_" ->
+      is_in "std::__compressed_pair_elem"
+  | "_M_t" ->
+      is_in "std::unique_ptr" || is_in "std::__uniq_ptr_impl"
+  | "_M_head_impl" ->
+      is_in "std::_Head_base"
+  | "_M_ptr" ->
+      is_in "std::__shared_ptr" || is_in "std::__weak_ptr"
+  | _ ->
+      (* recent libc++ keeps the pointer of [std::unique_ptr] in an anonymous struct *)
+      String.is_prefix field_name ~prefix:"__anon_field_" && is_in "std::unique_ptr"
+
+
 module T = struct
   type nonrec t = t [@@deriving compare]
 
