@@ -151,7 +151,10 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
                ; copied_location
                ; location_instantiated
                ; from
-               ; has_no_move_operations }
+               ; has_no_move_operations
+               ; in_conditional_arm=
+                   Procdesc.Node.equal_nodekind (Procdesc.Node.get_kind node)
+                     (Stmt_node ConditionalStmtBranch) }
            in
            if
              ( is_copy_cted_into_var from copied_into

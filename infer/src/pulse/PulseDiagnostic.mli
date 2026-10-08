@@ -139,7 +139,10 @@ type t =
       ; location_instantiated: Location.t option
       ; from: PulseAttribute.CopyOrigin.t
       ; has_no_move_operations: bool
-            (** the copied type has no move operations, so moving would copy too *) }
+            (** the copied type has no move operations, so moving would copy too *)
+      ; in_conditional_arm: bool
+            (** the copy is made by an arm of a conditional expression whose result is a prvalue, so
+                binding a reference to the result would copy too *) }
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit

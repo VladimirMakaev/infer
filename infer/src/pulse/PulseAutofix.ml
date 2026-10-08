@@ -102,7 +102,8 @@ let get_autofix pdesc diagnostic =
   match (diagnostic : Diagnostic.t) with
   | UnnecessaryCopy {copied_into= IntoField _; has_no_move_operations= true} ->
       []
-  | UnnecessaryCopy {copied_into; source_opt; location; copied_location= None} -> (
+  | UnnecessaryCopy {copied_into; source_opt; location; copied_location= None; in_conditional_arm}
+    -> (
       let is_formal pvar =
         let pvar_name = Pvar.get_name pvar in
         List.exists (Procdesc.get_formals pdesc) ~f:(fun (formal, _, _) ->
@@ -131,7 +132,8 @@ let get_autofix pdesc diagnostic =
                 , F.asprintf "%a = std::move(%s);" Fieldname.pp field param )
               ; ( F.asprintf ".%a = %s," Fieldname.pp field param
                 , F.asprintf ".%a = std::move(%s)," Fieldname.pp field param ) ] )
-      | IntoVar {copied_var= ProgramVar pvar}, Some (DecompilerExpr.PVar _, [MethodCall _]) ->
+      | IntoVar {copied_var= ProgramVar pvar}, Some (DecompilerExpr.PVar _, [MethodCall _])
+        when not in_conditional_arm ->
           let tgt = Pvar.to_string pvar in
           make_autofix location ~replacer:(fun _ ->
               [(F.asprintf "auto %s = " tgt, F.asprintf "auto& %s = " tgt)] )
