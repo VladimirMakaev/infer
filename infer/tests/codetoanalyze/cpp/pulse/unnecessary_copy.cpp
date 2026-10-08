@@ -1218,3 +1218,38 @@ void copy_from_local_field_in_mixed_conditional_bad(bool c) {
   std::string m = c ? local.name : "x";
   use_string(m);
 }
+
+class PathLike {
+ public:
+  PathLike(const PathLike& other);
+  PathLike(PathLike&& other) noexcept;
+  PathLike& operator=(PathLike&& other) noexcept;
+  PathLike& operator=(const PathLike& other);
+  ~PathLike();
+  bool has_name() const;
+  PathLike parent() const;
+  bool operator!=(const PathLike& other) const;
+
+ private:
+  char* data_;
+  unsigned long size_;
+};
+
+// Pulse assumes that the unknown loop condition returns the same value on
+// every iteration, so only the path that skips the loop reaches the end of the
+// scope of `p`
+bool copy_reassigned_in_loop_ok(const PathLike& root) {
+  PathLike p = root;
+  while (!p.has_name()) {
+    p = p.parent();
+  }
+  return p != root;
+}
+
+bool copy_compared_after_loop_bad(const PathLike& root, PathLike& other) {
+  PathLike p = root;
+  while (!other.has_name()) {
+    other = other.parent();
+  }
+  return p != other;
+}
