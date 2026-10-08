@@ -790,6 +790,12 @@ module Internal = struct
       BaseAddressAttributes.has_unknown_effect addr (astate.post :> base_domain).attrs
 
 
+    let is_uninitialized addr astate =
+      find_opt `Post addr astate
+      |> Option.exists ~f:(fun attrs ->
+          Attribute.Attributes.get_uninitialized attrs |> Option.is_some )
+
+
     let is_global_initializer_called addr astate =
       BaseAddressAttributes.is_global_initializer_called addr (astate.post :> base_domain).attrs
 
@@ -3009,6 +3015,10 @@ module AddressAttributes = struct
 
   let has_unknown_effect v astate =
     SafeAttributes.has_unknown_effect (CanonValue.canon' astate v) astate
+
+
+  let is_uninitialized v astate =
+    SafeAttributes.is_uninitialized (CanonValue.canon' astate v) astate
 
 
   let is_global_initializer_called v astate =
