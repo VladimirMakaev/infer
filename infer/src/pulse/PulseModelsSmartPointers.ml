@@ -1099,6 +1099,79 @@ module UniquePtr = struct
     swap this other ~desc model_data astate
 end
 
+(** takes the pointer and the deleter of [unique_ptr&& other] and leaves [other] empty *)
+let take_unique_ptr tenv path location FuncArg.{arg_payload= other; typ= other_typ} ~desc astate =
+  let fresh_deleter () = (AbstractValue.mk_fresh (), Hist.single_call path location desc) in
+  let=* astate, deleter_opt =
+    match UniquePtr.get_pointer_type_and_deleter_kind tenv other_typ with
+    | Some (_, DefaultDelete _) | None ->
+        Ok (astate, None)
+    | Some (_, FunctionPointer) ->
+        let+ astate, deleter = read_deleter path location other astate in
+        (astate, Some deleter)
+    | Some (_, Functor class_name) ->
+        let deleter = fresh_deleter () in
+        let astate =
+          PulseArithmetic.and_dynamic_type_is_unsafe (fst deleter) (Typ.mk_struct class_name)
+            location astate
+        in
+        Ok (astate, Some deleter)
+    | Some (_, UnknownDeleter) ->
+        Ok (astate, Some (fresh_deleter ()))
+  in
+  let=* astate, value = to_internal_value_deref path Read location other astate in
+  let++ astate = assign_value_nullptr path location other ~desc astate in
+  (astate, value, deleter_opt)
+
+
+(** makes the shared_ptr [this] own [value] with [deleter_opt], or be empty if [value] is null *)
+let install_in_shared_ptr path location this value deleter_opt ~desc astate =
+  let<*> astate, _ = write_value path location this ~value ~desc astate in
+  let empty =
+    PulseArithmetic.prune_eq_zero (fst value) astate
+    >>== SharedPtr.assign_count path location this ~constant:IntLit.zero ~desc
+  in
+  let owning =
+    let** astate = PulseArithmetic.prune_positive (fst value) astate in
+    let** astate = SharedPtr.assign_count path location this ~constant:IntLit.one ~desc astate in
+    match deleter_opt with
+    | None ->
+        Sat (Ok astate)
+    | Some deleter ->
+        let=* astate, control_block =
+          SharedPtr.to_internal_count_deref path Read location this astate
+        in
+        Sat (write_deleter path location control_block deleter astate)
+  in
+  SatUnsat.to_list (empty >>|| ExecutionDomain.continue)
+  @ SatUnsat.to_list (owning >>|| ExecutionDomain.continue)
+
+
+(** [shared_ptr(unique_ptr&& other)]: owns [other.release()] with the deleter of [other], or is
+    empty if [other] is *)
+let shared_ptr_from_unique_ptr this other ~desc : model_no_non_disj =
+ fun {analysis_data= {tenv}; path; location} astate ->
+  let<**> astate, value, deleter_opt = take_unique_ptr tenv path location other ~desc astate in
+  install_in_shared_ptr path location this value deleter_opt ~desc astate
+
+
+(** [operator=(unique_ptr&& other)]: empties [other] before releasing the old pointee, which may own
+    [other] *)
+let shared_ptr_assign_unique_ptr (FuncArg.{arg_payload= this} as arg) other ~desc : model =
+ fun ({analysis_data= {tenv}; path; location} as model_data) astate non_disj ->
+  let ( let<**> ) x f = bind_sat_result non_disj x f in
+  let<**> astate, value, deleter_opt = take_unique_ptr tenv path location other ~desc astate in
+  let astates, non_disj = SharedPtr.destructor arg ~desc model_data astate non_disj in
+  ( List.concat_map astates ~f:(fun exec_state_result ->
+        let<*> exec_state = exec_state_result in
+        match exec_state with
+        | ContinueProgram astate ->
+            install_in_shared_ptr path location this value deleter_opt ~desc astate
+        | _ ->
+            [Ok exec_state] )
+  , non_disj )
+
+
 let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
   let is_unique = Option.is_some (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) in
   if is_unique || Option.is_some (SharedPtr.find_element_type tenv typ) then
@@ -1195,6 +1268,9 @@ let matchers : matcher list =
   ; -"std" &:: "shared_ptr" &:: "operator=" $ capt_arg
     $+ capt_arg_payload_of_typ (-"std" &:: "shared_ptr")
     $--> SharedPtr.copy_move_assignment ~desc:"std::shared_ptr::operator=(std::shared_ptr<T>)"
+  ; -"std" &::+ SharedPtr.is_shared_ptr &:: "operator=" $ capt_arg
+    $+ capt_arg_of_typ (-"std" &:: "unique_ptr")
+    $--> shared_ptr_assign_unique_ptr ~desc:"std::shared_ptr::operator=(std::unique_ptr<T>)"
   ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload
     $+ capt_arg_payload_of_typ (-"std" &::+ WeakPtr.is_weak_ptr)
     $--> WeakPtr.to_shared ~desc:"std::shared_ptr::shared_ptr(std::weak_ptr<T>)"
@@ -1202,6 +1278,14 @@ let matchers : matcher list =
   ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload
     $+ capt_arg_payload_of_typ (-"std" &::+ WeakPtr.is_weak_ptr)
     $--> WeakPtr.to_shared ~desc:"std::shared_ptr::shared_ptr(std::weak_ptr<T>)"
+    |> with_non_disj
+  ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload
+    $+ capt_arg_of_typ (-"std" &:: "unique_ptr")
+    $+...$--> shared_ptr_from_unique_ptr ~desc:"std::shared_ptr::shared_ptr(std::unique_ptr<T>)"
+    |> with_non_disj
+  ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload
+    $+ capt_arg_of_typ (-"std" &:: "unique_ptr")
+    $+...$--> shared_ptr_from_unique_ptr ~desc:"std::shared_ptr::shared_ptr(std::unique_ptr<T>)"
     |> with_non_disj
   ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload $+ capt_arg $+ capt_arg
     $+...$--> SharedPtr.assign_pointer_with_deleter ~desc:"std::shared_ptr::shared_ptr(T*, D)"
