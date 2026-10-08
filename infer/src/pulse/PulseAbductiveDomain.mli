@@ -361,6 +361,8 @@ module AddressAttributes : sig
 
   val has_unknown_effect : AbstractValue.t -> t -> bool
 
+  val is_uninitialized : AbstractValue.t -> t -> bool
+
   val is_global_initializer_called : AbstractValue.t -> t -> bool
 
   val is_hack_constinit_called : AbstractValue.t -> t -> bool
