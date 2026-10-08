@@ -916,6 +916,59 @@ module PointerIterator = struct
     store ~ref:iter_ref res
 end
 
+(** The frontend translates [{a, b, c}] into [__infer_initializer_list(&arr)] where [arr] holds the
+    elements. The list's elements and length are kept in model fields of the list object, which is
+    [arr] itself when the list is passed directly to a function. A local variable holding the list
+    is another object, whose fields are unknown. *)
+module InitializerList = struct
+  let begin_field = Fieldname.make PulseOperations.pulse_model_type "__infer_init_list_begin"
+
+  let size_field = Fieldname.make PulseOperations.pulse_model_type "__infer_init_list_size"
+
+  let make ({FuncArg.arg_payload= arr; typ} : PulseModelsDSL.aval FuncArg.t) : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model "infer_init_list"
+    @@ fun () ->
+    let* hist = add_model_call (snd arr) in
+    let list = (fst arr, hist) in
+    let length =
+      match typ.Typ.desc with
+      | Tarray {length= Some n} | Tptr ({desc= Tarray {length= Some n}}, _) ->
+          IntLit.to_int n
+      | _ ->
+          None
+    in
+    let* () = store_field ~ref:list begin_field list in
+    option_iter length ~f:(fun n ->
+        let* size = int n in
+        store_field ~ref:list size_field size )
+    @@> assign_ret list
+
+
+  let load_field this field =
+    let open PulseModelsDSL.Syntax in
+    load_access this (FieldAccess field)
+
+
+  let size ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> load_field this size_field >>= assign_ret
+
+
+  let begin_ ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> load_field this begin_field >>= assign_ret
+
+
+  let end_ ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* first = load_field this begin_field in
+    let* size = load_field this size_field in
+    binop PlusPI first size >>= assign_ret
+end
+
 module Vector = struct
   let reallocate_internal_array path trace vector vector_f location astate =
     let* astate, array_address =
@@ -2098,6 +2151,14 @@ let simple_matchers =
       &::+ PointerIterator.is_function_on_pointers ["advance"]
       $ capt_arg_payload $+ capt_arg_payload
       $--> PointerIterator.advance ~desc:"std::advance"
+    ; +BuiltinDecl.(match_builtin __infer_initializer_list)
+      <>$ capt_arg $+...$--> InitializerList.make
+    ; -"std" &:: "initializer_list" &:: "size" <>$ capt_arg_payload
+      $--> InitializerList.size ~desc:"std::initializer_list::size()"
+    ; -"std" &:: "initializer_list" &:: "begin" <>$ capt_arg_payload
+      $--> InitializerList.begin_ ~desc:"std::initializer_list::begin()"
+    ; -"std" &:: "initializer_list" &:: "end" <>$ capt_arg_payload
+      $--> InitializerList.end_ ~desc:"std::initializer_list::end()"
     ; -"std" &:: "distance" &--> Basic.nondet ~desc:"std::distance" |> with_non_disj
     ; -"std" &:: "integral_constant" < any_typ &+ capt_int
       >::+ (fun _ name -> String.is_prefix ~prefix:"operator_" name)
