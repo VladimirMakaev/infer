@@ -560,6 +560,10 @@ module Summary : sig
 
   val remove_all_must_be_initialized : summary -> summary
 
+  val remove_must_be_initialized_of_fields : Pvar.t -> f:(Fieldname.t -> bool) -> summary -> summary
+  (** the fields [fld] such that [f fld] of the object that the formal [pvar] points to in the
+      precondition no longer need to be initialized *)
+
   val pre_heap_has_assumptions : summary -> bool
   (** whether the pre heap encodes some assumptions about values: either a value is restricted (>=
       0) or there is sharing in the heap. Both represent implicit assumptions that the program must

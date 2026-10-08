@@ -215,6 +215,8 @@ let remove_all_must_be_initialized =
       if AttributesNoRank.is_empty attrs then None else Some attrs )
 
 
+let remove_must_be_initialized = remove_attribute Attributes.remove_must_be_initialized
+
 let remove_taint_attrs address memory =
   remove_tainted address memory |> remove_taint_sanitizer address
   |> remove_propagate_taint_from address
@@ -545,6 +547,8 @@ module type S = sig
   val remove_all_must_not_be_tainted : ?kinds:TaintConfig.Kind.Set.t -> t -> t
 
   val remove_all_must_be_initialized : t -> t
+
+  val remove_must_be_initialized : key -> t -> t
 
   val finalize_all_hack_builders : t -> t
 
