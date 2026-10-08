@@ -646,8 +646,10 @@ let cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind
         (* So we assign the LValue to a temp and we pass it to the parent.*)
         let instr, deref_exp = dereference_var_sil (exp, cast_typ) sil_loc in
         ([instr], (deref_exp, cast_typ)) )
-  | `NullToPointer ->
-      if Exp.is_zero exp then ([], (Exp.null, cast_typ)) else ([], (exp, cast_typ))
+  | `NullToPointer | `NullToMemberPointer ->
+      (* the operand is a null pointer constant or any expression of type [std::nullptr_t], possibly
+         an lvalue such as a reference to [nullptr] *)
+      ([], (Exp.null, cast_typ))
   | `ToVoid ->
       (* If exp is not used later, i.e. as in `(void) exp;` we miss reads *)
       (* We create a call to skip function passing the exp as a parameter *)
