@@ -255,7 +255,7 @@ module Attribute = struct
     | ReturnedFromUnknown of AbstractValue.t list
     (* [ret_v -> ReturnedFromUnknown \[v1; ..; vn\]] does not
          retain actuals [v1] to [vn] just like PropagateTaintFrom *)
-    | SourceOriginOfCopy of {source: AbstractValue.t; is_const_ref: bool}
+    | SourceOriginOfCopy of {source: AbstractValue.t; is_unmovable_source: bool}
     | StaticType of Typ.Name.t
     | StdMoved
     | StdVectorErased of Trace.t
@@ -432,9 +432,9 @@ module Attribute = struct
           (Pp.seq ~sep:";" pp_taint_in) taints_in
     | ReturnedFromUnknown values ->
         F.fprintf f "ReturnedFromUnknown([%a])" (Pp.seq ~sep:";" AbstractValue.pp) values
-    | SourceOriginOfCopy {source; is_const_ref} ->
+    | SourceOriginOfCopy {source; is_unmovable_source} ->
         F.fprintf f "copied of source %a" AbstractValue.pp source ;
-        if is_const_ref then F.pp_print_string f " (const&)"
+        if is_unmovable_source then F.pp_print_string f " (unmovable)"
     | StaticType type_name ->
         F.fprintf f "StaticType %a" Typ.Name.pp type_name
     | StdMoved ->
@@ -1069,7 +1069,7 @@ module Attributes = struct
 
   let get_source_origin_of_copy =
     get_by_rank Attribute.copy_origin_rank ~dest:(function[@warning "-partial-match"]
-        | SourceOriginOfCopy {source; is_const_ref} -> (source, is_const_ref) )
+        | SourceOriginOfCopy {source; is_unmovable_source} -> (source, is_unmovable_source) )
 
 
   let get_address_of_stack_variable =
