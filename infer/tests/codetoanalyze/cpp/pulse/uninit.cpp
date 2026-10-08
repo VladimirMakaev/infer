@@ -338,3 +338,192 @@ int FN_read_uninitialized_field_of_copy_in_callee_bad() {
   PartialStruct t = copy_struct(s);
   return t.a;
 }
+
+struct PartialWithString {
+  int a;
+  std::string s;
+  int c;
+};
+
+void take_with_string_by_value(PartialWithString s);
+
+// the same for the member-wise copies of classes that are not trivially
+// copyable
+void pass_partially_initialized_with_string_by_value_ok() {
+  PartialWithString s;
+  s.c = 1;
+  take_with_string_by_value(s);
+  s.c = 2;
+}
+
+void assign_partially_initialized_with_string_ok(PartialWithString& out) {
+  PartialWithString s;
+  s.c = 1;
+  out = s;
+  s.c = 2;
+}
+
+int read_uninitialized_field_of_copy_with_string_bad() {
+  PartialWithString s;
+  s.c = 1;
+  PartialWithString t = s;
+  t.c = 2;
+  return t.a;
+}
+
+int read_initialized_field_of_copy_with_string_ok() {
+  PartialWithString s;
+  s.c = 1;
+  PartialWithString t = s;
+  s.c = 2;
+  return t.c;
+}
+
+int read_uninitialized_field_after_move_with_string_bad() {
+  PartialWithString s;
+  s.c = 1;
+  PartialWithString t = std::move(s);
+  return t.a;
+}
+
+int read_uninitialized_field_after_assign_with_string_bad() {
+  PartialWithString t;
+  t.a = 1;
+  t.c = 2;
+  assign_partially_initialized_with_string_ok(t);
+  return t.a;
+}
+
+template <typename T>
+struct PartialTemplate {
+  T a;
+  std::string s;
+};
+
+int read_uninitialized_field_of_template_copy_bad() {
+  PartialTemplate<int> s;
+  PartialTemplate<int> t = s;
+  t.s = "x";
+  return t.a;
+}
+
+struct PartialBaseWithString {
+  int x;
+  std::string s;
+};
+
+struct PartialDerivedWithString : PartialBaseWithString {
+  PartialWithString inner;
+  int z;
+};
+
+int read_initialized_field_of_derived_copy_with_string_ok() {
+  PartialDerivedWithString d;
+  d.z = 1;
+  PartialDerivedWithString e = d;
+  d.z = 2;
+  return e.z;
+}
+
+int read_uninitialized_base_field_of_copy_with_string_bad() {
+  PartialDerivedWithString d;
+  d.z = 1;
+  PartialDerivedWithString e = d;
+  e.z = 2;
+  return e.x;
+}
+
+int read_uninitialized_nested_field_of_assign_with_string_bad() {
+  PartialDerivedWithString d;
+  d.inner.c = 1;
+  PartialDerivedWithString e;
+  e.inner.a = 1;
+  e = d;
+  e.z = 2;
+  return e.inner.a;
+}
+
+struct UserCopied {
+  int x;
+  std::string s;
+  UserCopied() {}
+  UserCopied(const UserCopied& other) : x(other.x), s(other.s) {}
+};
+
+void take_user_copied_by_value(UserCopied u);
+
+// the reads of user-written copy constructors are still checked
+void pass_user_copied_by_value_bad() {
+  UserCopied u;
+  take_user_copied_by_value(u);
+  u.x = 1;
+}
+
+struct HasUserCopiedField {
+  UserCopied u;
+  int y;
+};
+
+void take_has_user_copied_field_by_value(HasUserCopiedField h);
+
+void pass_user_copied_field_by_value_bad() {
+  HasUserCopiedField h;
+  h.y = 1;
+  take_has_user_copied_field_by_value(h);
+  h.y = 2;
+}
+
+struct ResetOnCopy {
+  int x;
+  std::string s;
+  ResetOnCopy() {}
+  ResetOnCopy(const ResetOnCopy& other) : x(0), s(other.s) {}
+};
+
+struct HasResetOnCopyField {
+  ResetOnCopy r;
+  std::string t;
+};
+
+int read_field_reset_by_user_copy_ok() {
+  HasResetOnCopyField h;
+  HasResetOnCopyField g = h;
+  h.t = "x";
+  return g.r.x;
+}
+
+struct ResetOnCopyWithDefaultArg {
+  int x;
+  std::string s;
+  ResetOnCopyWithDefaultArg() {}
+  ResetOnCopyWithDefaultArg(const ResetOnCopyWithDefaultArg& other, int = 0)
+      : x(0), s(other.s) {}
+};
+
+struct HasResetOnCopyWithDefaultArgField {
+  ResetOnCopyWithDefaultArg r;
+  std::string t;
+};
+
+int read_field_reset_by_user_copy_with_default_arg_ok() {
+  HasResetOnCopyWithDefaultArgField h;
+  HasResetOnCopyWithDefaultArgField g = h;
+  h.t = "x";
+  return g.r.x;
+}
+
+struct DefaultedCopy {
+  int x;
+  std::string s;
+  DefaultedCopy() {}
+  DefaultedCopy(const DefaultedCopy&) = default;
+};
+
+void take_defaulted_copy_by_value(DefaultedCopy d);
+
+// explicitly defaulted copy constructors are checked like user-written ones
+void FP_pass_defaulted_copy_by_value_ok() {
+  DefaultedCopy d;
+  take_defaulted_copy_by_value(d);
+  d.x = 1;
+}
