@@ -147,14 +147,69 @@ class FullDisjsInLoop {
     }
   }
 
-  void full_disjs_in_loop_ok2_FP(int k) {
+  void full_disjs_in_loop_ok2(int k) {
     Arr x;
     get_full_disjs();
     for (int i = 0; i < k; i++) {
-      // Pulse does not know `x` is copied multiple times here.
+      // `x` is copied again in the next iteration, which Pulse may not
+      // analyze, so moving it here would be wrong.
       arr = x;
     }
   }
+
+  void full_disjs_in_loop_field_of_local_ok(int k) {
+    Arr x;
+    get_full_disjs();
+    for (int i = 0; i < k; i++) {
+      FullDisjsInLoop local;
+      local.arr = x;
+      local.use();
+    }
+  }
+
+  void full_disjs_in_loop_source_declared_in_loop_bad(int k) {
+    get_full_disjs();
+    for (int i = 0; i < k; i++) {
+      Arr x;
+      arr = x;
+    }
+  }
+
+  // the body of `do { ... } while (0)` runs once, so moving `x` is fine
+  void copy_in_do_while_zero_bad() {
+    Arr x;
+    do {
+      FullDisjsInLoop local;
+      local.arr = x;
+      local.use();
+    } while (0);
+  }
+
+#define SET_ARR(dst, src) \
+  do {                    \
+    (dst) = (src);        \
+  } while (0)
+
+  void copy_in_do_while_zero_macro_bad() {
+    Arr x;
+    SET_ARR(arr, x);
+  }
+
+  // the loop ends right after the copy, so moving `x` is fine
+  void FN_copy_in_loop_then_set_done_bad() {
+    Arr x;
+    bool done = false;
+    while (!done) {
+      if (unknown_bool()) {
+        FullDisjsInLoop local;
+        local.arr = x;
+        local.use();
+        done = true;
+      }
+    }
+  }
+
+  void use();
 
   void get_arr(Arr arr) {}
 
