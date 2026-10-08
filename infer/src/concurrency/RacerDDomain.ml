@@ -27,10 +27,21 @@ let apply_to_first_actual actuals astate ~f =
   accexp_of_first_hilexp actuals |> Option.value_map ~default:astate ~f
 
 
+let without_cpp_library_storage exp =
+  let base, accesses = AccessExpression.to_accesses exp in
+  List.fold accesses ~init:(Some base) ~f:(fun exp_opt (access : _ MemoryAccess.t) ->
+      match access with
+      | FieldAccess field when Fieldname.is_cpp_library_storage field ->
+          exp_opt
+      | _ ->
+          Option.bind exp_opt ~f:(fun exp -> AccessExpression.add_access exp access) )
+  |> Option.value ~default:exp
+
+
 let pp_exp fmt exp =
   match Language.get_language () with
   | Clang ->
-      AccessExpression.pp fmt exp
+      AccessExpression.pp fmt (without_cpp_library_storage exp)
   | Java ->
       AccessPath.pp fmt (AccessExpression.to_access_path exp)
   | CIL ->
@@ -913,5 +924,6 @@ let add_lock_attribute attribute ret_access_exp (astate : t) =
 
 let lock_if_true ~guard =
   add_lock_attribute (if guard then Attribute.GuardLockHeld else Attribute.LockHeld)
+
 
 let lock_if_zero = add_lock_attribute Attribute.LockHeldIfZero
