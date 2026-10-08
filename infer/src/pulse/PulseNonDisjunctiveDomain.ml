@@ -389,6 +389,30 @@ module IntraDomElt = struct
     {astate_n with copy_map}
 
 
+  let mark_copies_into_var_as_modified var ({copy_map} as astate_n) =
+    let copy_map =
+      CopyMap.mapi
+        (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) : CopySpec.t ->
+          match (copied_into, copy_spec) with
+          | ( IntoVar {copied_var}
+            , Copied
+                { source_typ
+                ; source_opt
+                ; from
+                ; node
+                ; copied_location
+                ; location
+                ; timestamp= copied_timestamp } )
+            when Var.equal var copied_var ->
+              Modified
+                {source_typ; source_opt; node; location; copied_location; from; copied_timestamp}
+          | _ ->
+              copy_spec )
+        copy_map
+    in
+    {astate_n with copy_map}
+
+
   let mark_parameter_as_modified ~is_modified ~var ({parameter_map} as astate_n) =
     let parameter_map =
       match ParameterMap.find_opt var parameter_map with
@@ -668,6 +692,8 @@ module IntraDom = struct
     map (IntraDomElt.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
 
 
+  let mark_copies_into_var_as_modified var = map (IntraDomElt.mark_copies_into_var_as_modified var)
+
   let mark_parameter_as_modified ~is_modified ~var =
     map (IntraDomElt.mark_parameter_as_modified ~is_modified ~var)
 
@@ -873,6 +899,8 @@ let map_inter f ({inter} as x) = {x with inter= f inter}
 let mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt =
   map_intra (IntraDom.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
 
+
+let mark_copies_into_var_as_modified var = map_intra (IntraDom.mark_copies_into_var_as_modified var)
 
 let mark_parameter_as_modified ~is_modified ~var =
   map_intra (IntraDom.mark_parameter_as_modified ~is_modified ~var)
