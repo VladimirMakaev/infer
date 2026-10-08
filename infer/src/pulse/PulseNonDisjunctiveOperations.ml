@@ -957,6 +957,35 @@ let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
             mark_modified_address_at ~address:source_addr ~source_addr_opt ~copied_into Source
               astate astate_n ) )
   in
+  (* a copy of a field of a C++ temporary that outlives the temporary cannot be replaced by a
+     reference, which would dangle *)
+  let mark_copies_outliving_temporary var astate_n =
+    match (var : Var.t) with
+    | ProgramVar pvar when Pvar.is_cpp_temporary pvar ->
+        Stack.find_opt var astate
+        |> Option.value_map ~default:astate_n ~f:(fun vo ->
+            let temporary = ValueOrigin.value vo in
+            let fields =
+              AbductiveDomain.reachable_addresses_from (Seq.return temporary)
+                ~edge_filter:(function
+                  | FieldAccess _ -> true | ArrayAccess _ | Dereference -> false )
+                astate `Post
+              |> AbstractValue.Set.remove temporary
+            in
+            AbstractValue.Set.fold
+              (fun source astate_n ->
+                match AddressAttributes.get_copied_into source astate with
+                | Some (IntoVar {copied_var} as copied_into)
+                  when is_alive_variable copied_var astate ->
+                    NonDisjDomain.mark_copy_as_modified ~copied_into ~source_addr_opt:(Some source)
+                      ~is_modified:(fun _ _ -> true)
+                      astate_n
+                | Some (IntoVar _ | IntoIntermediate _ | IntoField _) | None ->
+                    astate_n )
+              fields astate_n )
+    | LogicalVar _ | ProgramVar _ ->
+        astate_n
+  in
   let mark_modified_parameter var default =
     Stack.find_opt var astate
     |> Option.value_map ~default ~f:(fun vo ->
@@ -964,6 +993,7 @@ let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
   in
   List.fold vars ~init:astate_n ~f:(fun astate_n var ->
       let astate_n = mark_modified_parameter var astate_n in
+      let astate_n = mark_copies_outliving_temporary var astate_n in
       (* mark modified copy when [var] is used as source *)
       let astate_n =
         (let open IOption.Let_syntax in
