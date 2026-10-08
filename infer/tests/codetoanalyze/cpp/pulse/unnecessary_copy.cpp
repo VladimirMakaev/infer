@@ -1323,3 +1323,40 @@ void copy_ends_before_source_moved_bad(const std::string& x) {
   std::string other(std::move(s));
   use_string(other);
 }
+
+class Text {
+ public:
+  Text(const Text& other);
+  Text(Text&& other) noexcept;
+  ~Text();
+  bool empty() const;
+
+ private:
+  char* data_;
+  unsigned long size_;
+};
+
+class Document {
+ public:
+  Document(const Document& other);
+  ~Document();
+  Document section(int i) const;
+  const Text& text() const { return text_; }
+
+ private:
+  Text text_;
+};
+
+// the temporary returned by `section` is destroyed at the end of the
+// declaration of `t`: a reference would dangle
+bool copy_from_part_of_temporary_ok(const Document& d) {
+  const Text t = d.section(1).text();
+  return !t.empty();
+}
+
+// the lifetime of the temporary is extended to the one of `s`
+bool copy_from_part_of_lifetime_extended_temporary_bad(const Document& d) {
+  const Document& s = d.section(1);
+  const Text t = s.text();
+  return !t.empty();
+}
