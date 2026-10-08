@@ -231,4 +231,66 @@ char find_in_string_ok(const std::string& s) {
   return 'b';
 }
 
+// a buffer whose storage is null when it is empty
+struct IntBuffer {
+  int* begin_ = nullptr;
+  int* end_ = nullptr;
+
+  IntBuffer(const int* first, const int* last) {
+    auto n = std::distance(first, last);
+    begin_ = n ? new int[n] : nullptr;
+    end_ = begin_;
+    for (; first != last; ++first) {
+      *end_++ = *first;
+    }
+  }
+
+  ~IntBuffer() { delete[] begin_; }
+};
+
+const int* unknown_pointer();
+
+void copy_unknown_range_ok() {
+  IntBuffer buffer(unknown_pointer(), unknown_pointer());
+}
+
+int read_first_of_copied_array_ok() {
+  int a[3] = {1, 2, 3};
+  IntBuffer buffer(a, a + 3);
+  return *buffer.begin_;
+}
+
+int read_first_of_copied_empty_range_bad() {
+  int a[1] = {1};
+  IntBuffer buffer(a, a);
+  return *buffer.begin_;
+}
+
+int distance_of_pointers_bad(int* p) {
+  if (std::distance(p, p + 2) == 2) {
+    int* q = nullptr;
+    return *q;
+  }
+  return 0;
+}
+
+int next_prev_of_pointer_ok(int* p) {
+  if (std::next(p, 2) != p + 2 || std::next(p) != p + 1 || std::prev(p, 2) != p - 2 ||
+      std::prev(p) != p - 1) {
+    int* q = nullptr;
+    return *q;
+  }
+  return 0;
+}
+
+int advance_pointer_ok(int* p) {
+  int* q = p;
+  std::advance(q, 3);
+  if (q != p + 3) {
+    int* r = nullptr;
+    return *r;
+  }
+  return 0;
+}
+
 } // namespace std_algorithm
