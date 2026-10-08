@@ -291,6 +291,72 @@ void fdopen_stdout_continues_bad() {
   }
 }
 
+// unknown: calls to it are assumed to return the same value for the same
+// arguments, but not a value that has been closed since
+int get_descriptor(void);
+
+int close_unknown_descriptors_in_loop_ok(int n) {
+  for (int i = 0; i < n; i++) {
+    int fd = get_descriptor();
+    if (fd < 0) {
+      return -1;
+    }
+    close(fd);
+  }
+  return 0;
+}
+
+int close_unknown_descriptors_in_callee_in_loop_ok(int n) {
+  for (int i = 0; i < n; i++) {
+    int fd = get_descriptor();
+    if (fd < 0) {
+      return -1;
+    }
+    close_fd(fd);
+  }
+  return 0;
+}
+
+int get_descriptor_indirect() { return get_descriptor(); }
+
+void close_unknown_descriptors_one_after_the_other_ok() {
+  int fd1 = get_descriptor_indirect();
+  close(fd1);
+  int fd2 = get_descriptor_indirect();
+  close(fd2);
+}
+
+void double_close_unknown_descriptor_bad() {
+  int fd = get_descriptor();
+  if (fd < 0) {
+    return;
+  }
+  close(fd);
+  close(fd);
+}
+
+void close_unknown_descriptor_in_loop_bad(int n) {
+  int fd = get_descriptor();
+  if (fd < 0) {
+    return;
+  }
+  for (int i = 0; i < n; i++) {
+    close(fd);
+  }
+}
+
+// both calls happen before the first close() so they are still assumed to
+// return the same descriptor
+void FP_close_two_unknown_descriptors_ok() {
+  int fd1 = get_descriptor();
+  int fd2 = get_descriptor();
+  if (fd1 < 0 || fd2 < 0) {
+    return;
+  }
+  close(fd1);
+  close(fd2);
+}
+
 // descriptor numbers are reused by open() and dup(), so constant descriptors
 // such as STDOUT_FILENO or 1, also when stored in a variable, are not tracked
 // as closed

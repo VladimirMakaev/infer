@@ -434,6 +434,11 @@ val declare_unknown_values : t -> t
 
 val set_path_condition : Formula.t -> t -> t
 
+val forget_function_applications_equal_to : AbstractValue.t -> t -> t
+(** unknown functions are assumed to return the same value when called with the same arguments; once
+    the caller releases the value, eg by freeing it or closing it, later calls can return it again
+    as a new resource *)
+
 val init_loop_header_info : Procdesc.Node.id -> t -> t
 
 val remove_loop_header_info : Procdesc.Node.id -> t -> t
