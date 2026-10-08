@@ -727,6 +727,16 @@ let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~as
   match (call_exp : Exp.t) with
   | Const (Cfun pname) | Closure {name= pname} ->
       let astate_n = NonDisjDomain.mark_intermediates_with_shared_source actuals astate_n in
+      (* the paths that reach the end of the scope of the copy may not include this assignment,
+         e.g. when it is in a loop whose condition is an unknown call on the copy, which Pulse
+         assumes returns the same value on every iteration *)
+      let astate_n =
+        match actuals with
+        | (Exp.Lvar pvar, _) :: _ :: _ when Procname.is_cpp_assignment_operator pname ->
+            NonDisjDomain.mark_copies_into_var_as_modified (Var.of_pvar pvar) astate_n
+        | _ ->
+            astate_n
+      in
       continue_fold_map astates ~init:astate_n ~f:(fun astate_n astate ->
           let default = (astate_n, astate) in
           let ( |-> ) = IOption.continue ~default in
