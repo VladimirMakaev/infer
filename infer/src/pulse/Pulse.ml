@@ -106,21 +106,61 @@ let is_copy_cted_into_var from copied_into =
       false
 
 
-let is_in_loop_dls = DLS.new_key (fun () -> lazy (assert false))
+let is_pruned_by_constant_false node =
+  Procdesc.Node.get_instrs node
+  |> Instrs.exists ~f:(fun (instr : Sil.instr) ->
+      match instr with Prune (cond, _, _, _) -> Exp.is_zero cond | _ -> false )
+
+
+(** for each loop of the procedure, its nodes and the program variables declared in it; back edges
+    that a constant false condition cuts, as in [do { ... } while (0)], do not make a loop *)
+let loops_dls = DLS.new_key (fun () -> lazy (assert false))
 
 let () =
   if Config.is_checker_enabled Pulse then
-    AnalysisGlobalState.register_dls_with_proc_desc_and_tenv is_in_loop_dls ~init:(fun pdesc _ ->
+    AnalysisGlobalState.register_dls_with_proc_desc_and_tenv loops_dls ~init:(fun pdesc _ ->
         lazy
-          (let nodes_in_loop = Procdesc.Loop.compute_loop_nodes pdesc in
-           fun node -> Procdesc.NodeSet.mem node nodes_in_loop ) )
+          ( Procdesc.Loop.get_loop_head_to_source_nodes pdesc
+          |> Procdesc.NodeMap.filter_map (fun _ sources ->
+              match List.filter sources ~f:(fun node -> not (is_pruned_by_constant_false node)) with
+              | [] ->
+                  None
+              | sources ->
+                  Some sources )
+          |> Procdesc.Loop.get_loop_head_to_loop_nodes |> Procdesc.NodeMap.bindings
+          |> List.map ~f:(fun (_, loop_nodes) ->
+              let declared =
+                Procdesc.NodeSet.fold
+                  (fun node declared ->
+                    Procdesc.Node.get_instrs node
+                    |> Instrs.fold ~init:declared ~f:(fun declared (instr : Sil.instr) ->
+                        match instr with
+                        | Metadata (VariableLifetimeBegins {pvar}) ->
+                            Pvar.Set.add pvar declared
+                        | _ ->
+                            declared ) )
+                  loop_nodes Pvar.Set.empty
+              in
+              (loop_nodes, declared) ) ) )
 
 
-let is_unnecessary_copy_intermediate_in_loop node copied_into =
-  match (copied_into : Attribute.CopiedInto.t) with
-  | IntoIntermediate _ ->
-      Lazy.force (DLS.get is_in_loop_dls) node
-  | IntoVar _ | IntoField _ ->
+(** Pulse may miss that a copy made in a loop is made again in the next iterations, for instance
+    when it drops the disjuncts that come back to the head of the loop. Do not report copies into
+    intermediates made in a loop, nor copies of a variable into a field made in a loop that the
+    variable outlives, as the next iteration reads the variable again so it cannot be moved from. *)
+let is_unnecessary_copy_in_loop node copied_into source_opt =
+  let loops () =
+    Lazy.force (DLS.get loops_dls)
+    |> List.filter ~f:(fun (loop_nodes, _) -> Procdesc.NodeSet.mem node loop_nodes)
+  in
+  match
+    ((copied_into : Attribute.CopiedInto.t), (source_opt : DecompilerExpr.source_expr option))
+  with
+  | IntoIntermediate _, _ ->
+      not (List.is_empty (loops ()))
+  | IntoField _, Some (PVar pvar, _) ->
+      List.exists (loops ()) ~f:(fun (_, declared) -> not (Pvar.Set.mem pvar declared))
+  | (IntoVar _ | IntoField _), _ ->
       false
 
 
@@ -161,7 +201,7 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
              || Option.value_map ~default:true
                   ~f:(fun typ -> Typ.is_const_reference_on_source typ |> not)
                   source_typ )
-             && not (is_unnecessary_copy_intermediate_in_loop node copied_into)
+             && not (is_unnecessary_copy_in_loop node copied_into source_opt)
            then PulseReport.report analysis_data ~is_suppressed ~latent:false diagnostic )
 
 
