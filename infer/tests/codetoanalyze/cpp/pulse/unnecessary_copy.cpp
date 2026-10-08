@@ -1253,3 +1253,28 @@ bool copy_compared_after_loop_bad(const PathLike& root, PathLike& other) {
   }
   return p != other;
 }
+
+// moving from a reference to `source` would move from an object of the caller
+void copy_and_move_lvalue_ref_ok(std::set<int>& source) {
+  std::set<int> c = source;
+  get_rvalue_ref(std::move(c));
+}
+
+int copy_lvalue_ref_bad(std::set<int>& source) {
+  std::set<int> c = source;
+  return c.size();
+}
+
+struct SetHolder {
+  std::set<int> field;
+
+  void copy_and_move_field_ok() {
+    std::set<int> c = field;
+    get_rvalue_ref(std::move(c));
+  }
+
+  int copy_field_bad() {
+    std::set<int> c = field;
+    return c.size();
+  }
+};

@@ -72,7 +72,7 @@ module type S = sig
 
   val get_source_origin_of_copy : key -> t -> AbstractValue.t option
 
-  val is_copied_from_const_ref : key -> t -> bool
+  val is_copied_from_unmovable_source : key -> t -> bool
 
   val is_must_be_awaited : key -> t -> bool
 
