@@ -876,6 +876,46 @@ module Std = struct
       astate
 end
 
+(** [std::distance], [std::next], [std::prev] and [std::advance] on raw pointers are pointer
+    arithmetic; the iterator classes of the containers have their own models *)
+module PointerIterator = struct
+  let is_function_on_pointers names (_tenv, (proc_name : Procname.t)) name =
+    (* [name] carries the template arguments, e.g. [distance<int_*>] *)
+    let name = String.lsplit2 name ~on:'<' |> Option.value_map ~default:name ~f:fst in
+    List.mem names name ~equal:String.equal
+    &&
+    match proc_name with
+    | C {c_template_args= Template {args= TType typ :: _}} ->
+        Typ.is_pointer typ
+    | _ ->
+        false
+
+
+  let distance ~desc first last : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* n = binop MinusPP last first in
+    assign_ret n
+
+
+  let offset ~desc op iter (n : PulseModelsDSL.aval option) : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* res = match n with Some n -> binop op iter n | None -> binop_int op iter IntLit.one in
+    assign_ret res
+
+
+  let advance ~desc iter_ref n : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* iter = load iter_ref in
+    let* res = binop PlusPI iter n in
+    store ~ref:iter_ref res
+end
+
 module Vector = struct
   let reallocate_internal_array path trace vector vector_f location astate =
     let* astate, array_address =
@@ -2042,6 +2082,22 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "size" $ capt_arg_payload
       $--> GenericArrayBackedCollection.size ~desc:"std::vector::size()"
       |> with_non_disj
+    ; -"std"
+      &::+ PointerIterator.is_function_on_pointers ["distance"]
+      $ capt_arg_payload $+ capt_arg_payload
+      $--> PointerIterator.distance ~desc:"std::distance"
+    ; -"std"
+      &::+ PointerIterator.is_function_on_pointers ["next"]
+      $ capt_arg_payload $+? capt_arg_payload
+      $--> PointerIterator.offset ~desc:"std::next" PlusPI
+    ; -"std"
+      &::+ PointerIterator.is_function_on_pointers ["prev"]
+      $ capt_arg_payload $+? capt_arg_payload
+      $--> PointerIterator.offset ~desc:"std::prev" MinusPI
+    ; -"std"
+      &::+ PointerIterator.is_function_on_pointers ["advance"]
+      $ capt_arg_payload $+ capt_arg_payload
+      $--> PointerIterator.advance ~desc:"std::advance"
     ; -"std" &:: "distance" &--> Basic.nondet ~desc:"std::distance" |> with_non_disj
     ; -"std" &:: "integral_constant" < any_typ &+ capt_int
       >::+ (fun _ name -> String.is_prefix ~prefix:"operator_" name)
