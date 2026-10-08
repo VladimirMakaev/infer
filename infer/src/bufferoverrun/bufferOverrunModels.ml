@@ -496,7 +496,39 @@ module StdArray = struct
     {exec; check= no_check}
 
 
-  let at size {exp= array_exp} {exp= index_exp} = at ~size array_exp index_exp
+  let is_array_typ tenv (typ : Typ.t) =
+    match typ.desc with
+    | Tarray _ ->
+        true
+    | Tstruct typename -> (
+      match BufferOverrunTypModels.dispatch tenv typename with
+      | Some (CArray _) ->
+          true
+      | _ ->
+          false )
+    | _ ->
+        false
+
+
+  let at elt_typ size {exp= array_exp} {exp= index_exp} =
+    let {exec; check} = at ~size array_exp index_exp in
+    let exec ({tenv} as model_env) ~ret:((id, _) as ret) mem =
+      let mem = exec model_env ~ret mem in
+      let elt_v = Dom.Mem.find (Loc.of_id id) mem in
+      let in_array_of_std_array =
+        (* false for the symbolic pointer to a std::array passed by reference *)
+        Dom.Val.get_array_blk elt_v |> ArrayBlk.get_size |> Itv.get_const
+        |> Option.exists ~f:(Z.equal (Z.of_int64 size))
+      in
+      if in_array_of_std_array && is_array_typ tenv elt_typ then
+        (* as for the rows of nested C arrays, an element that is an array is represented by the
+           value of that array *)
+        let elt_arr = Dom.Mem.find_set (Dom.Val.get_all_locs elt_v) mem in
+        Dom.Mem.add_stack (Loc.of_id id) elt_arr mem
+      else mem
+    in
+    {exec; check}
+
 
   let begin_ _size {exp= array_exp} =
     let exec {location; integer_type_widths} ~ret:(id, _) mem =
@@ -2138,14 +2170,14 @@ module Call = struct
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "array" &--> StdArray.constructor
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "size" &--> Container.integer_size
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "max_size" &--> Container.integer_size
-      ; -"std" &:: "array" < any_typ &+ capt_int >:: "at" $ capt_arg $+ capt_arg $!--> StdArray.at
+      ; -"std" &:: "array" < capt_typ &+ capt_int >:: "at" $ capt_arg $+ capt_arg $!--> StdArray.at
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "back" $ capt_arg $!--> StdArray.back
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "begin" $ capt_arg $!--> StdArray.begin_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "cbegin" $ capt_arg $!--> StdArray.begin_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "cend" $ capt_arg $!--> StdArray.end_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "end" $ capt_arg $!--> StdArray.end_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "front" $ capt_arg $!--> StdArray.begin_
-      ; -"std" &:: "array" < any_typ &+ capt_int >:: "operator[]" $ capt_arg $+ capt_arg
+      ; -"std" &:: "array" < capt_typ &+ capt_int >:: "operator[]" $ capt_arg $+ capt_arg
         $!--> StdArray.at
       ; -"std" &:: "array" &::.*--> no_model
       ; -"std" &:: "basic_string" &:: "compare" &--> by_value Dom.Val.Itv.top
