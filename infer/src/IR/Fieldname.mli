@@ -43,6 +43,11 @@ val is_java_synthetic : t -> bool
 val is_internal : t -> bool
 (** Check if the field has the prefix "__" or "_M_" (internal field of std::thread::id) *)
 
+val is_cpp_library_storage : t -> bool
+(** Fields through which C++ smart pointers in libc++ and libstdc++ hold their pointer, such as
+    [__ptr_] in [std::unique_ptr], and the fields that Pulse's C++ models add to library objects to
+    stand for their contents. Messages print the object instead of such fields. *)
+
 (** Set for fieldnames *)
 module Set : PrettyPrintable.PPSet with type elt = t
 
