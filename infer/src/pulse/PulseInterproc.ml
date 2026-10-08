@@ -839,6 +839,51 @@ let add_attributes pre_or_post {PathContext.timestamp} callee_attributes call_st
     callee_attributes call_state
 
 
+(** like [PulseOperations.degrade_mode_exp] for the reads of the caller, do not require the reads of
+    the callee to be initialized in objects that an unknown call may have written to, including
+    their fields and array elements but not the objects they point to, unless the caller knows them
+    to be uninitialized (e.g. because of a later write) *)
+let forget_must_be_initialized_below_unknown_effects call_state =
+  let heap = call_state.callee_pre.BaseDomain.heap in
+  let rec add_with_fields addr below =
+    if AddressSet.mem addr below then below
+    else
+      let below = AddressSet.add addr below in
+      UnsafeMemory.find_opt addr heap
+      |> Option.fold ~init:below ~f:(fun below edges ->
+          UnsafeMemory.Edges.fold edges ~init:below ~f:(fun below (access, (dest, _)) ->
+              match (access : Access.t) with
+              | FieldAccess _ | ArrayAccess _ ->
+                  add_with_fields dest below
+              | Dereference ->
+                  below ) )
+  in
+  let below_unknown_effects =
+    UnsafeMemory.fold
+      (fun addr_pre _ below ->
+        if
+          Option.exists (to_caller_value call_state addr_pre) ~f:(fun (addr_caller, _) ->
+              AddressAttributes.has_unknown_effect addr_caller call_state.astate )
+        then add_with_fields addr_pre below
+        else below )
+      heap AddressSet.empty
+  in
+  if AddressSet.is_empty below_unknown_effects then call_state
+  else
+    let is_uninitialized_in_caller addr_pre =
+      Option.exists (to_caller_value call_state addr_pre) ~f:(fun (addr_caller, _) ->
+          AddressAttributes.is_uninitialized addr_caller call_state.astate )
+    in
+    let attrs =
+      AddressSet.fold
+        (fun addr_pre attrs ->
+          if is_uninitialized_in_caller addr_pre then attrs
+          else UnsafeAttributes.remove_must_be_initialized addr_pre attrs )
+        below_unknown_effects call_state.callee_pre.attrs
+    in
+    {call_state with callee_pre= {call_state.callee_pre with attrs}}
+
+
 let materialize_pre path ~captured_formals ~captured_actuals ~formals ~actuals call_state =
   PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse call pre" ())) ;
   let r =
@@ -850,8 +895,8 @@ let materialize_pre path ~captured_formals ~captured_actuals ~formals ~actuals c
     (* ...then relational arithmetic constraints in the callee's attributes will make sense in
            terms of the caller's values *)
     conjoin_callee_arith (AbductiveDomain.Summary.get_path_condition call_state.callee_summary)
-    >>= materialize_pre_from_array_indices
-    >>| add_attributes `Pre path call_state.callee_pre.attrs
+    >>= materialize_pre_from_array_indices >>| forget_must_be_initialized_below_unknown_effects
+    >>| fun call_state -> add_attributes `Pre path call_state.callee_pre.attrs call_state
   in
   PerfEvent.(log (fun logger -> log_end_event logger ())) ;
   r
