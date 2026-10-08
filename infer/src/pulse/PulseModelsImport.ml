@@ -456,9 +456,6 @@ module Basic = struct
     ; +BuiltinDecl.(match_builtin __cast) <>$ capt_arg_payload $+...$--> id_first_arg ~desc:"cast"
     ; +BuiltinDecl.(match_builtin abort) <>--> early_exit
     ; +BuiltinDecl.(match_builtin exit) <>--> early_exit
-    ; +BuiltinDecl.(match_builtin __infer_initializer_list)
-      <>$ capt_arg_payload
-      $+...$--> id_first_arg ~desc:"infer_init_list"
     ; +BuiltinDecl.(match_builtin __get_array_length) <>--> return_unknown_size ~desc:""
     ; +match_regexp_opt Config.pulse_model_return_nonnull
       &::.*--> return_positive ~desc:"modelled as returning not null due to configuration option"
