@@ -451,3 +451,50 @@ int compared_to_null_after_null_constant_bad() {
   }
   return *p;
 }
+
+struct NullCompared {
+  int x;
+};
+
+NullCompared* get_null_compared();
+void null_compared_fail() __attribute__((noreturn));
+
+template <typename T1, typename T2>
+bool not_equal_ref(const T1& a, const T2& b) {
+  return a != b;
+}
+
+bool not_equal_val(NullCompared* a, decltype(nullptr) b) { return a != b; }
+
+int compare_with_nullptr_ref_ok() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  if (!not_equal_ref(p, nullptr)) {
+    null_compared_fail();
+  }
+  return p->x;
+}
+
+int compare_with_nullptr_ref_bad() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  if (not_equal_ref(p, nullptr)) {
+    return 0;
+  }
+  return p->x;
+}
+
+int compare_with_nullptr_val_ok() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  if (!not_equal_val(p, nullptr)) {
+    null_compared_fail();
+  }
+  return p->x;
+}
+
+int compare_member_pointer_with_nullptr_ref_bad() {
+  int NullCompared::*m = nullptr;
+  int* q = nullptr;
+  if (!not_equal_ref(m, nullptr)) {
+    return *q;
+  }
+  return 0;
+}
