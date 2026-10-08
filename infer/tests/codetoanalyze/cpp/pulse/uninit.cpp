@@ -527,3 +527,93 @@ void FP_pass_defaulted_copy_by_value_ok() {
   take_defaulted_copy_by_value(d);
   d.x = 1;
 }
+
+struct InitializedElsewhere {
+  InitializedElsewhere(); // no definition: the call is unknown
+  int* get() { return p; }
+  int a{0};
+  int* p{nullptr};
+};
+
+struct HasInitializedElsewhereField {
+  int b{};
+  InitializedElsewhere f;
+  int* q{};
+  HasInitializedElsewhereField() { q = f.get(); }
+};
+
+void read_field_in_callee_after_unknown_constructor_ok() {
+  HasInitializedElsewhereField h;
+}
+
+struct LeavesFieldUninitialized {
+  LeavesFieldUninitialized() {}
+  int* get() { return p; }
+  int a;
+  int* p;
+};
+
+void unknown_init_leaves_field_uninitialized(LeavesFieldUninitialized& x);
+
+struct HasFieldInitializedByUnknownCall {
+  int b{};
+  LeavesFieldUninitialized f;
+  int* q{};
+  HasFieldInitializedByUnknownCall() {
+    unknown_init_leaves_field_uninitialized(f);
+    q = f.get();
+  }
+};
+
+void read_field_in_callee_after_unknown_call_ok() {
+  HasFieldInitializedByUnknownCall h;
+}
+
+struct HasUninitializedField {
+  int b{};
+  LeavesFieldUninitialized f;
+  int* q{};
+  HasUninitializedField() { q = f.get(); }
+};
+
+void read_field_in_callee_after_known_constructor_bad() {
+  HasUninitializedField h;
+}
+
+struct PointsToUninitialized {
+  int b{};
+  LeavesFieldUninitialized* ptr{nullptr};
+  int c{};
+};
+
+void unknown_touch(PointsToUninitialized& x);
+
+int* read_pointee_field(PointsToUninitialized& x) { return x.ptr->get(); }
+
+void read_pointee_in_callee_after_unknown_call_bad() {
+  PointsToUninitialized x;
+  unknown_touch(x);
+  LeavesFieldUninitialized l;
+  x.ptr = &l;
+  int* p = read_pointee_field(x);
+}
+
+void reset_to_uninitialized(LeavesFieldUninitialized& x) {
+  LeavesFieldUninitialized t;
+  x = t;
+}
+
+void read_in_callee_after_unknown_call_then_reset_bad() {
+  LeavesFieldUninitialized x;
+  unknown_init_leaves_field_uninitialized(x);
+  reset_to_uninitialized(x);
+  int* p = x.get();
+}
+
+void read_in_callee_after_unknown_call_then_assign_bad() {
+  LeavesFieldUninitialized x;
+  unknown_init_leaves_field_uninitialized(x);
+  LeavesFieldUninitialized t;
+  x = t;
+  int* p = x.get();
+}
