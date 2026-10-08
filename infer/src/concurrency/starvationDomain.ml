@@ -505,6 +505,8 @@ module LockState : sig
 
   val release : Lock.t -> t -> t
 
+  val restore : Lock.t -> t -> t option
+
   val get_acquisitions : t -> Acquisitions.t
 
   val forget_held : t -> t
@@ -651,6 +653,17 @@ end = struct
       else acquisitions
     in
     {held; unlocked; acquisitions}
+
+
+  let restore lock ({unlocked} as lock_state) =
+    UnlockedMap.find_opt lock unlocked
+    |> Option.map ~f:(fun count ->
+        let count = UnlockCount.decrement count in
+        let unlocked =
+          if UnlockCount.is_bottom count then UnlockedMap.remove lock unlocked
+          else UnlockedMap.add lock count unlocked
+        in
+        {lock_state with unlocked} )
 
 
   let integrate_summary ~procname ~callsite ~subst ~other lock_state =
@@ -1127,6 +1140,12 @@ let acquire ~tenv ({lock_state; critical_pairs; null_locs} as astate) ~procname 
           LockState.acquire ~procname ~loc lock acc ) }
 
 
+let acquire_or_restore ~tenv astate ~procname ~loc lock =
+  let astate' = acquire ~tenv astate ~procname ~loc [lock] in
+  LockState.restore lock astate.lock_state
+  |> Option.value_map ~default:astate' ~f:(fun lock_state -> {astate' with lock_state})
+
+
 let make_call_with_event new_event ~loc astate =
   if astate.ignore_blocking_calls then astate
   else
@@ -1204,6 +1223,12 @@ let remove_guard astate guard =
 
 
 let is_guard astate guard = GuardToLockMap.mem guard astate.guard_map
+
+let get_guard_lock astate guard =
+  GuardToLockMap.find_opt guard astate.guard_map
+  |> Option.bind ~f:FlatLocks.get
+  |> Option.bind ~f:(function [lock] -> Some lock | _ -> None)
+
 
 let unlock_guard astate guard =
   GuardToLockMap.find_opt guard astate.guard_map

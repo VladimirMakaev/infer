@@ -13,8 +13,52 @@ module Domain = StarvationDomain
 
 let pname_pp = MF.wrap_monospaced Procname.pp
 
+(* [escaped_formals]: the formals whose value or address the procedure stores in memory or passes
+   to calls other than methods of their own class *)
 type analysis_data =
-  {interproc: StarvationDomain.summary InterproceduralAnalysis.t; formals: FormalMap.t}
+  { interproc: StarvationDomain.summary InterproceduralAnalysis.t
+  ; formals: FormalMap.t
+  ; escaped_formals: Var.Set.t Lazy.t }
+
+let get_escaped_formals proc_desc =
+  let formals = Procdesc.get_pvar_formals proc_desc in
+  let formal_typ pvar = List.Assoc.find formals ~equal:Pvar.equal pvar in
+  let loaded =
+    Procdesc.fold_instrs proc_desc ~init:Ident.Map.empty ~f:(fun loaded _ (instr : Sil.instr) ->
+        match instr with
+        | Load {id; e= Lvar pvar} ->
+            formal_typ pvar
+            |> Option.value_map ~default:loaded ~f:(fun typ -> Ident.Map.add id (pvar, typ) loaded)
+        | _ ->
+            loaded )
+  in
+  let formals_in exp =
+    Sequence.append
+      (Exp.free_vars exp |> Sequence.filter_map ~f:(fun id -> Ident.Map.find_opt id loaded))
+      ( Exp.program_vars exp
+      |> Sequence.filter_map ~f:(fun pvar ->
+          formal_typ pvar |> Option.map ~f:(fun typ -> (pvar, typ)) ) )
+  in
+  let is_method_of callee (_, typ) =
+    Option.equal Typ.Name.equal (Procname.get_class_type_name callee) (Typ.name (Typ.strip_ptr typ))
+  in
+  let add_formals ?(keep = fun _ -> false) escaped exp =
+    formals_in exp
+    |> Sequence.fold ~init:escaped ~f:(fun escaped ((pvar, _) as formal) ->
+        if keep formal then escaped else Var.Set.add (Var.of_pvar pvar) escaped )
+  in
+  Procdesc.fold_instrs proc_desc ~init:Var.Set.empty ~f:(fun escaped _ (instr : Sil.instr) ->
+      match instr with
+      | Store {e2} ->
+          add_formals escaped e2
+      | Call (_, Const (Cfun callee), receiver :: args, _, _) ->
+          let escaped = add_formals ~keep:(is_method_of callee) escaped (fst receiver) in
+          List.fold args ~init:escaped ~f:(fun escaped (arg, _) -> add_formals escaped arg)
+      | Call (_, _, args, _, _) ->
+          List.fold args ~init:escaped ~f:(fun escaped (arg, _) -> add_formals escaped arg)
+      | _ ->
+          escaped )
+
 
 module TransferFunctions (CFG : ProcCfg.S) = struct
   module CFG = CFG
@@ -273,7 +317,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         ; get_mainLooper_summary
         ; get_callee_summary ]
       |> Option.map ~f:(fun summary ->
-          let subst = Lock.make_subst formals actuals in
+          let subst = Lock.make_subst ~guard_lock:(Domain.get_guard_lock astate) formals actuals in
           let callsite = CallSite.make callee loc in
           Domain.integrate_summary ?release_held_locks ~tenv ~procname ~lhs ~subst formals callsite
             astate summary
@@ -315,7 +359,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
       analyze_dependency pname |> AnalysisResult.to_option
       |> Option.map ~f:(fun (summary : Domain.summary) -> summary.lock_state)
     in
-    let lock_in_caller lock = Domain.Lock.(apply_subst (make_subst formals actuals) lock) in
+    let lock_in_caller lock =
+      let guard_lock = Domain.get_guard_lock astate in
+      Domain.Lock.(apply_subst (make_subst ~guard_lock formals actuals) lock)
+    in
     let destructor_releases_one_lock (obj : HilExp.t) =
       match obj with
       | AccessExpression
@@ -489,8 +536,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     astate
 
 
-  let exec_instr (astate : Domain.t) ({interproc= {proc_desc; tenv}; formals} as analysis_data) _ _
-      instr =
+  let exec_instr (astate : Domain.t)
+      ({interproc= {proc_desc; tenv}; formals; escaped_formals} as analysis_data) _ _ instr =
     let open ConcurrencyModels in
     let open StarvationModels in
     let get_lock_path = Domain.Lock.make formals in
@@ -500,6 +547,17 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
       List.filter_map ~f:get_lock_path locks |> Domain.acquire ~tenv astate ~procname ~loc
     in
     let do_unlock locks astate = List.filter_map ~f:get_lock_path locks |> Domain.release astate in
+    (* a guard passed by reference stands for its lock, which callers substitute, unless the
+       guard escapes and may be relocked later, eg by a reverse lock *)
+    let is_guard_parameter (guard : HilExp.t) =
+      match guard with
+      | AccessExpression (Base ((var, _) as base)) ->
+          FormalMap.is_formal base formals
+          && (not (Domain.is_guard astate guard))
+          && not (Var.Set.mem var (Lazy.force escaped_formals))
+      | _ ->
+          false
+    in
     match (instr : Sil.instr) with
     | Metadata metadata ->
         do_metadata metadata astate
@@ -542,6 +600,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
             Domain.lock_guard tenv astate guard ~procname ~loc
         | Lock locks ->
             do_lock locks loc astate
+        | GuardLock guard when is_guard_parameter guard ->
+            get_lock_path guard
+            |> Option.value_map ~default:astate
+                 ~f:(Domain.acquire_or_restore ~tenv astate ~procname ~loc)
         | GuardLock guard ->
             Domain.lock_guard tenv astate guard ~procname ~loc
         | GuardConstruct {guard; locks; acquire_now} ->
@@ -554,6 +616,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
             Domain.unlock_guard astate guard
         | Unlock locks ->
             do_unlock locks astate
+        | GuardUnlock guard when is_guard_parameter guard ->
+            do_unlock [guard] astate
         | GuardUnlock guard ->
             Domain.unlock_guard astate guard
         | GuardDestroy guard ->
@@ -659,7 +723,8 @@ let analyze_procedure ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
   if StarvationModels.should_skip_analysis tenv procname [] then None
   else
     let formals = FormalMap.make (Procdesc.get_attributes proc_desc) in
-    let proc_data = {interproc; formals} in
+    let escaped_formals = lazy (get_escaped_formals proc_desc) in
+    let proc_data = {interproc; formals; escaped_formals} in
     let loc = Procdesc.get_loc proc_desc in
     let locks_for_synchronized_proc =
       if Procdesc.is_java_synchronized proc_desc || Procdesc.is_csharp_synchronized proc_desc then
@@ -1004,8 +1069,8 @@ end
 
 (** whether reporting on [other_pair] of [other_pname] also finds its deadlock with [pair] of the
     current procedure [pname], so that only one of them needs to report it. It searches the
-    procedures of the file of [other_pname] ([file_peers] if [other_pname] is one of them; C/C++/ObjC
-    only) and the methods of the classes on the paths of the locks of [other_pair]. *)
+    procedures of the file of [other_pname] ([file_peers] if [other_pname] is one of them;
+    C/C++/ObjC only) and the methods of the classes on the paths of the locks of [other_pair]. *)
 let is_found_by_other_side tenv ~file_peers pname pair other_pname
     (other_pair : Domain.CriticalPair.t) =
   let open Domain in
