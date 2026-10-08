@@ -355,47 +355,87 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
   |> forget_file_descriptors_owned_by_result |> add_skipped_proc
 
 
-(** the implicit copy and move constructors and assignments of a trivially copyable class copy the
-    bytes of the object, uninitialized fields included *)
-let is_implicit_trivial_copy tenv callee_pname (attrs : ProcAttributes.t) =
-  attrs.is_cpp_implicit
-  && ( attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor || attrs.is_cpp_copy_assignment
-     || String.equal (Procname.get_method callee_pname) "operator=" )
-  && Option.exists (Procname.get_class_type_name callee_pname) ~f:(fun name ->
-      Tenv.is_trivially_copyable tenv (Typ.mk_struct name) )
+type implicit_copy = {class_name: Typ.Name.t; is_trivial: bool}
+
+let is_copy_or_move_assignment pname = String.equal (Procname.get_method pname) "operator="
+
+(** the class of the implicit copy or move constructor or assignment [callee_pname], which copies
+    the fields of the object one by one, uninitialized fields included *)
+let get_implicit_copy tenv callee_pname (attrs : ProcAttributes.t) =
+  if
+    attrs.is_cpp_implicit
+    && ( attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor || attrs.is_cpp_copy_assignment
+       || is_copy_or_move_assignment callee_pname )
+  then
+    Procname.get_class_type_name callee_pname
+    |> Option.map ~f:(fun class_name ->
+        {class_name; is_trivial= Tenv.is_trivially_copyable tenv (Typ.mk_struct class_name)} )
+  else None
 
 
-(** the fields of [dst] whose counterparts in [src] are uninitialized become uninitialized *)
-let copy_uninitialized_fields ~src ~dst astate =
-  let rec visit visited src dst astate =
-    if AbstractValue.Set.mem src visited then astate
-    else
-      let visited = AbstractValue.Set.add src visited in
-      AbductiveDomain.Memory.fold_edges src astate ~init:astate
-        ~f:(fun astate (access, (src_field, _)) ->
-          match (access : Access.t) with
-          | FieldAccess _ -> (
-            match AbductiveDomain.Memory.find_edge_opt dst access astate with
-            | None ->
-                astate
-            | Some (dst_field, _) ->
-                let astate =
+(** whether the copy and move constructors (or assignments if [is_assignment]) of class [name] are
+    implicit *)
+let is_copied_implicitly tenv ~is_assignment name =
+  Tenv.is_trivially_copyable tenv (Typ.mk_struct name)
+  ||
+  let is_user_written_copy_or_move pname =
+    (if is_assignment then is_copy_or_move_assignment pname else Procname.is_constructor pname)
+    &&
+    match IRAttributes.load pname with
+    | None ->
+        not (List.is_empty (Procname.get_parameters pname))
+    | Some attrs ->
+        (not attrs.is_cpp_implicit)
+        && (is_assignment || attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor)
+  in
+  Option.exists (Tenv.lookup tenv name) ~f:(fun {Struct.methods} ->
+      not
+        (List.exists methods ~f:(fun method_ ->
+             is_user_written_copy_or_move (Struct.name_of_tenv_method method_) ) ) )
+
+
+(** the fields of [dst] whose counterparts in [src] are uninitialized become uninitialized, for the
+    fields copied by an implicit copy of class [class_name] and by the implicit copies of its fields
+    and base classes *)
+let copy_uninitialized_fields tenv ~is_assignment class_name ~src ~dst astate =
+  let rec visit class_name ~src ~dst astate =
+    match Tenv.lookup tenv class_name with
+    | None ->
+        astate
+    | Some {fields; supers} ->
+        let astate =
+          List.fold supers ~init:astate ~f:(fun astate super ->
+              if is_copied_implicitly tenv ~is_assignment super then visit super ~src ~dst astate
+              else astate )
+        in
+        List.fold fields ~init:astate ~f:(fun astate {Struct.name= fieldname; typ} ->
+            let access = Access.FieldAccess fieldname in
+            match
+              ( AbductiveDomain.Memory.find_edge_opt src access astate
+              , AbductiveDomain.Memory.find_edge_opt dst access astate )
+            with
+            | Some (src_field, _), Some (dst_field, _)
+              when Typ.Name.equal (Fieldname.get_class_name fieldname) class_name -> (
+              match typ.Typ.desc with
+              | Tstruct field_class ->
+                  if is_copied_implicitly tenv ~is_assignment field_class then
+                    visit field_class ~src:src_field ~dst:dst_field astate
+                  else astate
+              | _ ->
                   AddressAttributes.find_opt `Post src_field astate
                   |> Option.bind ~f:Attributes.get_uninitialized
                   |> Option.value_map ~default:astate ~f:(fun typ ->
-                      AddressAttributes.uninitialize dst_field typ astate )
-                in
-                visit visited src_field dst_field astate )
-          | Dereference | ArrayAccess _ ->
-              astate )
+                      AddressAttributes.uninitialize dst_field typ astate ) )
+            | _ ->
+                astate )
   in
-  visit AbstractValue.Set.empty src dst astate
+  visit class_name ~src ~dst astate
 
 
 let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     ({PathContext.timestamp} as path) callee_proc_name call_loc call_flags callee_exec_state ~ret
-    ~captured_formals ~captured_actuals ~formals ~actuals ~(tb_arg_exps : Exp.t list)
-    ~implicit_trivial_copy astate =
+    ~captured_formals ~captured_actuals ~formals ~actuals ~(tb_arg_exps : Exp.t list) ~implicit_copy
+    astate =
   let open ExecutionDomain in
   let caller_astate = astate in
   let copy_to_caller_return_variable astate return_val_opt =
@@ -423,9 +463,17 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
   let map_call_result callee_summary ~f =
     let callee_summary =
       (* the reads of the fields of the source object are copies, not uses, of their values *)
-      if implicit_trivial_copy then
-        AbductiveDomain.Summary.remove_all_must_be_initialized callee_summary
-      else callee_summary
+      match (implicit_copy, formals) with
+      | Some {is_trivial= true}, _ ->
+          AbductiveDomain.Summary.remove_all_must_be_initialized callee_summary
+      | Some {class_name}, _ :: (src_formal, _) :: _ ->
+          (* the copies of fields of class type and of base classes are calls that check their own
+             reads *)
+          AbductiveDomain.Summary.remove_must_be_initialized_of_fields src_formal
+            ~f:(fun fieldname -> Typ.Name.equal (Fieldname.get_class_name fieldname) class_name)
+            callee_summary
+      | _ ->
+          callee_summary
     in
     (* Clean up the summary before application to improve taint traces. When the calee is a taint
          sink itself with kinds K, we remove all MustNotBeTainted attributes matching K. The reason is
@@ -454,9 +502,11 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     let sat_unsat =
       let** post, return_val_opt, subst, hist_map = sat_unsat in
       let post =
-        match actuals with
-        | ((dst, _), _) :: ((src, _), _) :: _ when implicit_trivial_copy ->
-            copy_uninitialized_fields ~src ~dst post
+        match (implicit_copy, actuals) with
+        | Some {class_name}, ((dst, _), _) :: ((src, _), _) :: _ ->
+            copy_uninitialized_fields tenv
+              ~is_assignment:(is_copy_or_move_assignment callee_proc_name)
+              class_name ~src ~dst post
         | _ ->
             post
       in
@@ -675,7 +725,7 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
       callee_pname ;
   (* we propagate transitive accesses from callee to caller using *)
   let skip_transitive_accesses = PulseTransitiveAccessChecker.should_skip_call tenv callee_pname in
-  let implicit_trivial_copy = is_implicit_trivial_copy tenv callee_pname callee_proc_attrs in
+  let implicit_copy = get_implicit_copy tenv callee_pname callee_proc_attrs in
   let non_disj =
     NonDisjDomain.apply_summary ~callee_pname ~call_loc ~skip_transitive_accesses non_disj_caller
       non_disj_callee
@@ -708,8 +758,8 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
           Timer.check_timeout () ;
           match
             apply_callee analysis_data path callee_pname call_loc call_flags callee_exec_state
-              ~captured_formals ~captured_actuals ~formals ~actuals ~tb_arg_exps
-              ~implicit_trivial_copy ~ret astate
+              ~captured_formals ~captured_actuals ~formals ~actuals ~tb_arg_exps ~implicit_copy ~ret
+              astate
           with
           | Unsat unsat_info, new_contradiction ->
               SatUnsat.log_unsat unsat_info ;
@@ -730,7 +780,7 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
           match
             apply_callee analysis_data path callee_pname call_loc call_flags
               (ContinueProgram callee_astate_over_approx) ~captured_formals ~captured_actuals
-              ~formals ~actuals ~tb_arg_exps ~implicit_trivial_copy ~ret astate
+              ~formals ~actuals ~tb_arg_exps ~implicit_copy ~ret astate
           with
           | Sat (Ok (ContinueProgram post)), _new_contradiction ->
               NonBottom (post, path)
