@@ -91,6 +91,9 @@ val add_parameter : Var.t -> parameter_spec_t -> t -> t
 
 val checked_via_destructor : Var.t -> t -> t
 
+val mark_copies_into_var_as_modified : Var.t -> t -> t
+(** the copies into the variable are modified, e.g. it is assigned to *)
+
 val mark_copy_as_modified :
      ?reached_end:bool
   -> is_modified:(BaseMemory.t -> Timestamp.t -> bool)
