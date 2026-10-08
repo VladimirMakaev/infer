@@ -4059,8 +4059,44 @@ let post_parsing_initialization command_opt =
   Option.value ~default:InferCommand.Run command_opt
 
 
+(** Options that take regular expressions are compiled with OCaml's [Str], which reads PCRE-only
+    syntax literally: [\d] matches the letter "d" and [(?!x)] an optional "(" followed by "!x". *)
+let warn_on_unsupported_regexp_syntax re =
+  let warn syntax =
+    CLOpt.warnf
+      "WARNING: regular expression '%s' uses '%s', which OCaml Str regular expressions do not \
+       support; it will not match as intended.@."
+      re syntax
+  in
+  let len = String.length re in
+  let rec scan i =
+    if i + 1 < len then
+      match (re.[i], re.[i + 1]) with
+      | '\\', (('d' | 'D' | 'w' | 'W' | 's' | 'S') as c) ->
+          warn (Printf.sprintf "\\%c" c)
+      | '\\', _ ->
+          scan (i + 2)
+      | '(', '?' ->
+          warn "(?"
+      | _ ->
+          scan (i + 1)
+  in
+  scan 0
+
+
+let regexp re =
+  warn_on_unsupported_regexp_syntax re ;
+  Str.regexp re
+
+
+let check_regexps res =
+  List.iter res ~f:warn_on_unsupported_regexp_syntax ;
+  res
+
+
 let join_patterns_list patterns =
-  if List.is_empty patterns then None else Some (String.concat ~sep:"\\|" patterns |> Str.regexp)
+  if List.is_empty patterns then None
+  else Some (String.concat ~sep:"\\|" (check_regexps patterns) |> Str.regexp)
 
 
 let join_patterns ~pattern_opt ~pattern_list =
@@ -4170,7 +4206,7 @@ and buck_swift = !buck_swift
 
 and buck_swift_keep_going = !buck_swift_keep_going
 
-and buck_targets_block_list = RevList.to_list !buck_targets_block_list
+and buck_targets_block_list = check_regexps (RevList.to_list !buck_targets_block_list)
 
 and capture = !capture
 
@@ -4195,7 +4231,7 @@ and censor_report =
         when not String.(is_empty issue_type_re || is_empty filename_re || is_empty reason_str) ->
           let polarity_regex re =
             let polarity = not (Char.equal '!' re.[0]) in
-            let regex = Str.regexp (if polarity then re else String.slice re 1 0) in
+            let regex = regexp (if polarity then re else String.slice re 1 0) in
             (polarity, regex)
           in
           (polarity_regex issue_type_re, polarity_regex filename_re, reason_str)
@@ -4233,13 +4269,16 @@ and clang_compound_literal_init_limit = !clang_compound_literal_init_limit
 
 and clang_extra_flags = RevList.to_list !clang_extra_flags
 
-and clang_idirafter_to_override_regex = Option.map ~f:Str.regexp !clang_idirafter_to_override_regex
+and clang_idirafter_to_override_regex = Option.map ~f:regexp !clang_idirafter_to_override_regex
 
-and clang_ignore_regex = Option.map ~f:Str.regexp !clang_ignore_regex
+and clang_ignore_regex = Option.map ~f:regexp !clang_ignore_regex
 
-and clang_isystem_to_override_regex = Option.map ~f:Str.regexp !clang_isystem_to_override_regex
+and clang_isystem_to_override_regex = Option.map ~f:regexp !clang_isystem_to_override_regex
 
-and clang_libcxx_include_to_override_regex = !clang_libcxx_include_to_override_regex
+and clang_libcxx_include_to_override_regex =
+  Option.iter !clang_libcxx_include_to_override_regex ~f:warn_on_unsupported_regexp_syntax ;
+  !clang_libcxx_include_to_override_regex
+
 
 and classpath = !classpath
 
@@ -4254,22 +4293,22 @@ and complete_capture_from = !complete_capture_from
 
 and compute_captured_context = !compute_captured_context
 
-and config_gating_blocklist = RevList.rev_map !config_gating_blocklist ~f:Str.regexp
+and config_gating_blocklist = RevList.rev_map !config_gating_blocklist ~f:regexp
 
-and config_gating_method_patterns = RevList.rev_map !config_gating_method_patterns ~f:Str.regexp
+and config_gating_method_patterns = RevList.rev_map !config_gating_method_patterns ~f:regexp
 
 and config_gating_report_ungated = !config_gating_report_ungated
 
 and config_impact_config_field_patterns =
-  RevList.rev_map !config_impact_config_field_patterns ~f:Str.regexp
+  RevList.rev_map !config_impact_config_field_patterns ~f:regexp
 
 
 and config_impact_config_function_patterns =
-  RevList.rev_map !config_impact_config_function_patterns ~f:Str.regexp
+  RevList.rev_map !config_impact_config_function_patterns ~f:regexp
 
 
 and config_impact_config_param_patterns =
-  RevList.rev_map !config_impact_config_param_patterns ~f:Str.regexp
+  RevList.rev_map !config_impact_config_param_patterns ~f:regexp
 
 
 and config_impact_current = !config_impact_current
@@ -4284,9 +4323,9 @@ and config_impact_previous = !config_impact_previous
 
 and config_impact_strict_mode = !config_impact_strict_mode
 
-and config_impact_strict_mode_paths = RevList.rev_map !config_impact_strict_mode_paths ~f:Str.regexp
+and config_impact_strict_mode_paths = RevList.rev_map !config_impact_strict_mode_paths ~f:regexp
 
-and config_impact_test_paths = RevList.rev_map !config_impact_test_paths ~f:Str.regexp
+and config_impact_test_paths = RevList.rev_map !config_impact_test_paths ~f:regexp
 
 and continue_analysis = !continue_analysis
 
@@ -4554,7 +4593,7 @@ and list_checkers = !list_checkers
 
 and list_issue_types = !list_issue_types
 
-and liveness_block_list_var_regex = Option.map ~f:Str.regexp !liveness_block_list_var_regex
+and liveness_block_list_var_regex = Option.map ~f:regexp !liveness_block_list_var_regex
 
 and liveness_dangerous_classes = !liveness_dangerous_classes
 
@@ -4604,7 +4643,7 @@ and never_returning_null = match never_returning_null with k, r -> (k, !r)
 
 and noescaping_function_list = RevList.to_list !noescaping_function_list
 
-and no_censor_report = RevList.rev_map !no_censor_report ~f:Str.regexp
+and no_censor_report = RevList.rev_map !no_censor_report ~f:regexp
 
 and no_translate_libs = not !headers
 
@@ -4695,7 +4734,7 @@ and project_root = !project_root
 and pulse_balanced_disjuncts_strategy = !pulse_balanced_disjuncts_strategy
 
 and pulse_cut_to_one_path_procedures_pattern =
-  Option.map ~f:Str.regexp !pulse_cut_to_one_path_procedures_pattern
+  Option.map ~f:regexp !pulse_cut_to_one_path_procedures_pattern
 
 
 and pulse_final_types_are_exact = !pulse_final_types_are_exact
@@ -4730,24 +4769,24 @@ and pulse_max_heap = !pulse_max_heap
 
 and pulse_model_abort = RevList.to_list !pulse_model_abort
 
-and pulse_model_alloc_pattern = Option.map ~f:Str.regexp !pulse_model_alloc_pattern
+and pulse_model_alloc_pattern = Option.map ~f:regexp !pulse_model_alloc_pattern
 
 and pulse_model_cheap_copy_type =
   join_patterns ~pattern_opt:pulse_model_cheap_copy_type
     ~pattern_list:pulse_model_cheap_copy_type_list
 
 
-and pulse_model_deep_release_pattern = Option.map ~f:Str.regexp !pulse_model_deep_release_pattern
+and pulse_model_deep_release_pattern = Option.map ~f:regexp !pulse_model_deep_release_pattern
 
-and pulse_model_free_pattern = Option.map ~f:Str.regexp !pulse_model_free_pattern
+and pulse_model_free_pattern = Option.map ~f:regexp !pulse_model_free_pattern
 
-and pulse_model_malloc_pattern = Option.map ~f:Str.regexp !pulse_model_malloc_pattern
+and pulse_model_malloc_pattern = Option.map ~f:regexp !pulse_model_malloc_pattern
 
-and pulse_model_realloc_pattern = Option.map ~f:Str.regexp !pulse_model_realloc_pattern
+and pulse_model_realloc_pattern = Option.map ~f:regexp !pulse_model_realloc_pattern
 
-and pulse_model_release_pattern = Option.map ~f:Str.regexp !pulse_model_release_pattern
+and pulse_model_release_pattern = Option.map ~f:regexp !pulse_model_release_pattern
 
-and pulse_model_return_first_arg = Option.map ~f:Str.regexp !pulse_model_return_first_arg
+and pulse_model_return_first_arg = Option.map ~f:regexp !pulse_model_return_first_arg
 
 and pulse_model_return_nonnull =
   join_patterns ~pattern_opt:pulse_model_return_nonnull
@@ -4759,9 +4798,9 @@ and pulse_model_return_nullable =
     ~pattern_list:pulse_model_return_nullable_list
 
 
-and pulse_model_return_this = Option.map ~f:Str.regexp !pulse_model_return_this
+and pulse_model_return_this = Option.map ~f:regexp !pulse_model_return_this
 
-and pulse_model_returns_copy_pattern = Option.map ~f:Str.regexp !pulse_model_returns_copy_pattern
+and pulse_model_returns_copy_pattern = Option.map ~f:regexp !pulse_model_returns_copy_pattern
 
 and pulse_model_skip_pattern =
   join_patterns ~pattern_opt:pulse_model_skip_pattern ~pattern_list:pulse_model_skip_pattern_list
@@ -4819,7 +4858,7 @@ and pulse_report_flows_from_taint_source = !pulse_report_flows_from_taint_source
 and pulse_report_flows_to_taint_sink = !pulse_report_flows_to_taint_sink
 
 and pulse_report_issues_reachable_from =
-  RevList.rev_map !pulse_report_issues_reachable_from ~f:Str.regexp
+  RevList.rev_map !pulse_report_issues_reachable_from ~f:regexp
 
 
 and pulse_report_issues_for_tests = !pulse_report_issues_for_tests
@@ -4827,12 +4866,12 @@ and pulse_report_issues_for_tests = !pulse_report_issues_for_tests
 and pulse_report_latent_issues = !pulse_report_latent_issues
 
 and pulse_retain_cycle_blocklist_pattern =
-  Option.map ~f:Str.regexp !pulse_retain_cycle_blocklist_pattern
+  Option.map ~f:regexp !pulse_retain_cycle_blocklist_pattern
 
 
 and pulse_sanity_checks = !pulse_sanity_checks
 
-and pulse_skip_procedures = Option.map ~f:Str.regexp !pulse_skip_procedures
+and pulse_skip_procedures = Option.map ~f:regexp !pulse_skip_procedures
 
 and pulse_specialization_abort_if_impossible = !pulse_specialization_abort_if_impossible
 
@@ -5009,9 +5048,9 @@ and report_force_relative_path = !report_force_relative_path
 
 and report_formatter = !report_formatter
 
-and report_path_regex_allow_list = RevList.to_list !report_path_regex_allow_list
+and report_path_regex_allow_list = check_regexps (RevList.to_list !report_path_regex_allow_list)
 
-and report_path_regex_block_list = RevList.to_list !report_path_regex_block_list
+and report_path_regex_block_list = check_regexps (RevList.to_list !report_path_regex_block_list)
 
 and report_previous = !report_previous
 
@@ -5077,7 +5116,7 @@ and skip_duplicated_types = !skip_duplicated_types
 
 and skip_non_capture_clang_commands = !skip_non_capture_clang_commands
 
-and skip_translation_headers = RevList.to_list !skip_translation_headers
+and skip_translation_headers = check_regexps (RevList.to_list !skip_translation_headers)
 
 and source_debug = !source_debug
 
@@ -5200,7 +5239,7 @@ and workspace = !workspace
 
 and write_html = !write_html
 
-and write_html_allow_list_regex = RevList.to_list !write_html_allow_list_regex
+and write_html_allow_list_regex = check_regexps (RevList.to_list !write_html_allow_list_regex)
 
 and write_website = !write_website
 

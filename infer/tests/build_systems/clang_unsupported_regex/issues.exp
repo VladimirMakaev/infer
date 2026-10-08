@@ -1,0 +1,3 @@
+infer exit code: 0
+WARNING: regular expression 'tes\w' uses '\w', which OCaml Str regular expressions do not support; it will not match as intended.
+infer exit code in strict mode: 1
