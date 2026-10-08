@@ -1182,3 +1182,39 @@ void copy_assign_from_pointee_of_local_bad(InfoWithId& out) {
   InfoWithId* p = &local;
   out.id = p->id;
 }
+
+// `local` is `const`: neither a reference nor `std::move` avoids the copy
+void copy_from_const_local_in_mixed_conditional_ok(bool c) {
+  const std::string local = "abc";
+  std::string m = c ? local : "x";
+  use_string(m);
+}
+
+void copy_from_ref_to_const_in_mixed_conditional_ok(bool c) {
+  std::string local = "abc";
+  const std::string& r = local;
+  std::string m = c ? r : "x";
+  use_string(m);
+}
+
+struct WithName {
+  std::string name;
+  const std::string& get_name() const { return name; }
+};
+
+void fill_with_name(WithName* x);
+
+void copy_from_const_accessor_in_mixed_conditional_ok(bool c) {
+  WithName local;
+  fill_with_name(&local);
+  std::string m = c ? local.get_name() : "x";
+  use_string(m);
+}
+
+// `c ? std::move(local.name) : "x"` would avoid the copy
+void copy_from_local_field_in_mixed_conditional_bad(bool c) {
+  WithName local;
+  fill_with_name(&local);
+  std::string m = c ? local.name : "x";
+  use_string(m);
+}
