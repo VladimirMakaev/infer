@@ -1,5 +1,77 @@
 /* @generated */
 digraph cfg {
+"compareWithNullRef#16235672432661.a610ec87926e93c0_1" [label="1: Start compareWithNullRef\nFormals:  p:int* n:int const &\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_1" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_4" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_2" [label="2: Exit compareWithNullRef \n  " color=yellow style=filled]
+	
+
+"compareWithNullRef#16235672432661.a610ec87926e93c0_3" [label="3: + \n  " ]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_3" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_9" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_4" [label="4:  BinaryOperatorStmt: NE \n   n$0=*&p:int* [line 10, column 70]\n  n$1=*&n:int const & [line 10, column 75]\n " shape="box"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_4" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_5" ;
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_4" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_6" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_5" [label="5: Prune (true branch, boolean exp) \n   PRUNE((n$0 != null), true); [line 10, column 70]\n " shape="invhouse"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_5" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_7" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_6" [label="6: Prune (false branch, boolean exp) \n   PRUNE(!(n$0 != null), false); [line 10, column 70]\n " shape="invhouse"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_6" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_8" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_7" [label="7:  ConditionalStmt Branch \n   *&return:_Bool=1 [line 10, column 70]\n " shape="box"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_7" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_3" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_8" [label="8:  ConditionalStmt Branch \n   *&return:_Bool=0 [line 10, column 70]\n " shape="box"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_8" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_3" ;
+"compareWithNullRef#16235672432661.a610ec87926e93c0_9" [label="9:  Return Stmt \n  " shape="box"]
+	
+
+	 "compareWithNullRef#16235672432661.a610ec87926e93c0_9" -> "compareWithNullRef#16235672432661.a610ec87926e93c0_2" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_1" [label="1: Start compareWithNullValue\nFormals:  p:int* n:int\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_1" -> "compareWithNullValue#139551133301.487071b18253cb3a_4" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_2" [label="2: Exit compareWithNullValue \n  " color=yellow style=filled]
+	
+
+"compareWithNullValue#139551133301.487071b18253cb3a_3" [label="3: + \n  " ]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_3" -> "compareWithNullValue#139551133301.487071b18253cb3a_9" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_4" [label="4:  BinaryOperatorStmt: EQ \n   n$0=*&p:int* [line 12, column 65]\n " shape="box"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_4" -> "compareWithNullValue#139551133301.487071b18253cb3a_5" ;
+	 "compareWithNullValue#139551133301.487071b18253cb3a_4" -> "compareWithNullValue#139551133301.487071b18253cb3a_6" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_5" [label="5: Prune (true branch, boolean exp) \n   PRUNE((n$0 == null), true); [line 12, column 65]\n " shape="invhouse"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_5" -> "compareWithNullValue#139551133301.487071b18253cb3a_7" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_6" [label="6: Prune (false branch, boolean exp) \n   PRUNE(!(n$0 == null), false); [line 12, column 65]\n " shape="invhouse"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_6" -> "compareWithNullValue#139551133301.487071b18253cb3a_8" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_7" [label="7:  ConditionalStmt Branch \n   *&return:_Bool=1 [line 12, column 65]\n " shape="box"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_7" -> "compareWithNullValue#139551133301.487071b18253cb3a_3" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_8" [label="8:  ConditionalStmt Branch \n   *&return:_Bool=0 [line 12, column 65]\n " shape="box"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_8" -> "compareWithNullValue#139551133301.487071b18253cb3a_3" ;
+"compareWithNullValue#139551133301.487071b18253cb3a_9" [label="9:  Return Stmt \n  " shape="box"]
+	
+
+	 "compareWithNullValue#139551133301.487071b18253cb3a_9" -> "compareWithNullValue#139551133301.487071b18253cb3a_2" ;
 "getPtr#4816258365355431750.3065f9a978ec924d_1" [label="1: Start getPtr\nFormals: \nLocals:  \n  " color=yellow style=filled]
 	
 
@@ -11,4 +83,19 @@ digraph cfg {
 	
 
 	 "getPtr#4816258365355431750.3065f9a978ec924d_3" -> "getPtr#4816258365355431750.3065f9a978ec924d_2" ;
+"memberPtrFromNull#130971804833996.01727bebc84897e1_1" [label="1: Start memberPtrFromNull\nFormals:  n:int const &\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "memberPtrFromNull#130971804833996.01727bebc84897e1_1" -> "memberPtrFromNull#130971804833996.01727bebc84897e1_3" ;
+"memberPtrFromNull#130971804833996.01727bebc84897e1_2" [label="2: Exit memberPtrFromNull \n  " color=yellow style=filled]
+	
+
+"memberPtrFromNull#130971804833996.01727bebc84897e1_3" [label="3:  Return Stmt \n   n$0=*&n:int const & [line 18, column 73]\n " shape="box"]
+	
+
+	 "memberPtrFromNull#130971804833996.01727bebc84897e1_3" -> "memberPtrFromNull#130971804833996.01727bebc84897e1_4" ;
+"memberPtrFromNull#130971804833996.01727bebc84897e1_4" [label="4:  Return Stmt \n   *&return:void=null [line 18, column 66]\n " shape="box"]
+	
+
+	 "memberPtrFromNull#130971804833996.01727bebc84897e1_4" -> "memberPtrFromNull#130971804833996.01727bebc84897e1_2" ;
 }
