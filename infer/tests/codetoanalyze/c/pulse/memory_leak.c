@@ -362,6 +362,40 @@ const int* FP_pure_call_returning_its_argument_ok() {
   return find_through_const_pointer(p);
 }
 
+int* get_buffer(void);
+
+void free_unknown_buffers_in_loop_ok(int n) {
+  for (int i = 0; i < n; i++) {
+    int* p = get_buffer();
+    if (p == NULL) {
+      return;
+    }
+    *p = 42;
+    free(p);
+  }
+}
+
+void use_unknown_buffer_after_free_bad() {
+  int* p = get_buffer();
+  free(p);
+  int* q = get_buffer();
+  free(q);
+  *p = 42;
+}
+
+char* get_name(const int* obj);
+
+// FN: once the result is freed, the second call is no longer assumed to
+// return it, which is a bug only if the unknown function is a getter
+void FN_free_getter_result_then_use_bad(const int* obj) {
+  char* n = get_name(obj);
+  free(n);
+  char* m = get_name(obj);
+  if (m != NULL) {
+    m[0] = 'a';
+  }
+}
+
 void register_object(void* obj);
 
 struct ptr_holder {
