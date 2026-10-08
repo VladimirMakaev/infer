@@ -804,6 +804,10 @@ let add_attributes pre_or_post {PathContext.timestamp} callee_attributes call_st
           PulseOperations.java_resource_release ~recursive:true addr_caller astate
       | `Post when Attributes.is_csharp_resource_released attrs_caller ->
           PulseOperations.csharp_resource_release ~recursive:true addr_caller astate
+      | `Post
+        when Option.exists (Attributes.get_invalid attrs_caller) ~f:(fun (invalidation, _) ->
+                 Invalidation.releases_resource invalidation ) ->
+          AbductiveDomain.forget_function_applications_equal_to addr_caller astate
       | _ ->
           astate
     in
