@@ -250,7 +250,8 @@ type t =
       ; copied_location: (Procname.t * Location.t) option
       ; location_instantiated: Location.t option
       ; from: PulseAttribute.CopyOrigin.t
-      ; has_no_move_operations: bool }
+      ; has_no_move_operations: bool
+      ; in_conditional_arm: bool }
 [@@deriving compare, equal, yojson_of]
 
 let pp fmt diagnostic =
@@ -339,14 +340,15 @@ let pp fmt diagnostic =
       ; copied_location
       ; from
       ; location_instantiated
-      ; has_no_move_operations } ->
+      ; has_no_move_operations
+      ; in_conditional_arm } ->
       F.fprintf fmt
         "UnnecessaryCopy {@[copied_into=%a;@;\
          typ=%a;@;\
          source_opt=%a;@;\
          location:%a;@;\
          copied_location:%a@;\
-         from=%a;loc_instantiated=%a;has_no_move_operations=%b@]}"
+         from=%a;loc_instantiated=%a;has_no_move_operations=%b;in_conditional_arm=%b@]}"
         PulseAttribute.CopiedInto.pp copied_into
         (Pp.option (Typ.pp_full Pp.text))
         source_typ
@@ -358,7 +360,7 @@ let pp fmt diagnostic =
           | Some (callee, location) ->
               F.fprintf fmt "%a,%a" Procname.pp callee Location.pp location )
         copied_location PulseAttribute.CopyOrigin.pp from (Pp.option Location.pp)
-        location_instantiated has_no_move_operations
+        location_instantiated has_no_move_operations in_conditional_arm
 
 
 let get_location = function
@@ -967,7 +969,8 @@ let get_message_and_suggestion diagnostic =
       ; location
       ; copied_location= None
       ; from
-      ; has_no_move_operations } -> (
+      ; has_no_move_operations
+      ; in_conditional_arm } -> (
       let open PulseAttribute in
       let is_from_const = is_from_const source_typ in
       let get_suggestion_msg_move copied_into source_opt =
@@ -1026,6 +1029,8 @@ let get_message_and_suggestion diagnostic =
               (fun f ->
                 Option.iter FbInternalLinks.bad_pattern_folly_get_default ~f:(fun link ->
                     F.fprintf f " ([[%s | bad patterns]])" link ) )
+        | CopyCtor, IntoVar _ when in_conditional_arm ->
+            "To avoid the copy, move from this arm of the conditional expression with `std::move`"
         | CopyCtor, IntoVar _ ->
             "To avoid the copy, use reference `&`"
         | _, _ -> (
