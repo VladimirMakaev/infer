@@ -1416,6 +1416,21 @@ let join_conditions conditions_lhs conditions_rhs =
   (conditions_join, kill_conditions_lhs, kill_conditions_rhs)
 
 
+let forget_function_applications_equal_to v formula =
+  let v = (Formula.get_repr formula.phi v :> Var.t) in
+  let phi =
+    Formula.term_eqs_fold
+      (fun t v' phi ->
+        match (t : Term.t) with
+        | FunctionApplication _ when Var.equal v v' ->
+            Formula.remove_term_eq t v' phi
+        | _ ->
+            phi )
+      formula.phi formula.phi
+  in
+  if phys_equal phi formula.phi then formula else {formula with phi}
+
+
 (* This relies on the idea that two formulas for the same procedure must be different only because
    the path conditions are different. All other variables not involved in the path conditions are
    the results of being created fresh to hold some intermediate values created by the program and so

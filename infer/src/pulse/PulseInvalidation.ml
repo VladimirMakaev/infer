@@ -246,6 +246,21 @@ let is_same_type invalidation1 invalidation2 =
   Int.equal (Variants.to_rank invalidation1) (Variants.to_rank invalidation2)
 
 
+let releases_resource = function
+  | CFree | CppDelete | CppDeleteArray | FClose _ | HandedOverToStream _ ->
+      true
+  | ComparedToNullInThisProcedure _
+  | ConstantDereference _
+  | EndIterator
+  | GoneOutOfScope _
+  | OptionalEmpty
+  | StdVector _
+  | StdString _
+  | StdContainer _
+  | CppMap _ ->
+      false
+
+
 type must_be_valid_reason =
   | BlockCall
   | InsertionIntoCollectionKey

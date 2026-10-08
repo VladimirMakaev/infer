@@ -119,6 +119,10 @@ val suggest : t -> string option
 val is_same_type : t -> t -> bool
 (** whether both invalidations have are of the same variant case *)
 
+val releases_resource : t -> bool
+(** whether the invalidation gives the memory or file descriptor back to the system, which can then
+    hand out the same value again *)
+
 type must_be_valid_reason =
   | BlockCall
   | InsertionIntoCollectionKey
