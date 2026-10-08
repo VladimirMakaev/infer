@@ -2361,6 +2361,20 @@ module Summary = struct
 
   let remove_all_must_be_initialized = SafeAttributes.remove_all_must_be_initialized
 
+  let remove_must_be_initialized_of_fields pvar ~f summary =
+    let open IOption.Let_syntax in
+    (let* pvar_addr = SafeStack.find_opt `Pre (Var.of_pvar pvar) summary >>| ValueOrigin.value in
+     let+ obj, _ = SafeMemory.find_edge_opt `Pre pvar_addr Dereference summary in
+     SafeMemory.fold_edges `Pre obj summary ~init:summary ~f:(fun summary (access, (field, _)) ->
+         match (access : BaseMemory.Access.t) with
+         | FieldAccess fieldname when f fieldname ->
+             SafeAttributes.map_pre_attrs summary
+               ~f:(BaseAddressAttributes.remove_must_be_initialized field)
+         | _ ->
+             summary ) )
+    |> Option.value ~default:summary
+
+
   let of_post_ (proc_attrs : ProcAttributes.t) location astate0 =
     let open SatUnsat.Import in
     let astate = astate0 in
