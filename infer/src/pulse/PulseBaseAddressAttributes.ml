@@ -269,9 +269,9 @@ let get_source_origin_of_copy address attrs =
   get_attribute Attributes.get_source_origin_of_copy address attrs |> Option.map ~f:fst
 
 
-let is_copied_from_const_ref address attrs =
+let is_copied_from_unmovable_source address attrs =
   get_attribute Attributes.get_source_origin_of_copy address attrs
-  |> Option.exists ~f:(fun (_, is_const_ref) -> is_const_ref)
+  |> Option.exists ~f:(fun (_, is_unmovable_source) -> is_unmovable_source)
 
 
 let get_must_be_valid = get_attribute Attributes.get_must_be_valid
@@ -480,7 +480,7 @@ module type S = sig
 
   val get_source_origin_of_copy : key -> t -> AbstractValue.t option
 
-  val is_copied_from_const_ref : key -> t -> bool
+  val is_copied_from_unmovable_source : key -> t -> bool
 
   val is_must_be_awaited : key -> t -> bool
 

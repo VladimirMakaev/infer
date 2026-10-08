@@ -342,11 +342,11 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       let vs2 = List.sort ~compare:AbstractValue.compare vs2 in
       let vs = List.merge ~compare:AbstractValue.compare vs1 vs2 in
       Some (ReturnedFromUnknown vs)
-  | ( SourceOriginOfCopy {source= source1; is_const_ref= is_const_ref1}
-    , SourceOriginOfCopy {source= source2; is_const_ref= is_const_ref2} ) ->
-      if Bool.equal is_const_ref1 is_const_ref2 then
+  | ( SourceOriginOfCopy {source= source1; is_unmovable_source= unmovable1}
+    , SourceOriginOfCopy {source= source2; is_unmovable_source= unmovable2} ) ->
+      if Bool.equal unmovable1 unmovable2 then
         mk_from_joined_values source1 source2 ~f:(fun source ->
-            SourceOriginOfCopy {source; is_const_ref= is_const_ref1} )
+            SourceOriginOfCopy {source; is_unmovable_source= unmovable1} )
       else None
   | StaticType t1, StaticType t2 ->
       if Typ.Name.equal t1 t2 then Some attr1 else None
