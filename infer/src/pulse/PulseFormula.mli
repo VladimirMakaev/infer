@@ -242,4 +242,8 @@ val pp_conditions_explained : (F.formatter -> Var.t -> unit) -> F.formatter -> t
 
 val pp_formula_explained : (F.formatter -> Var.t -> unit) -> F.formatter -> t -> unit
 
+val forget_function_applications_equal_to : Var.t -> t -> t
+(** forget that [v] is the result of applying some unknown function to some arguments, so that
+    applying the same function to the same arguments again does not yield [v] *)
+
 val join : t -> t -> t

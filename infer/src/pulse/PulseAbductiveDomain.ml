@@ -148,6 +148,10 @@ let set_tree_borrows tree_borrows astate = {astate with tree_borrows}
 
 let set_path_condition path_condition astate = {astate with path_condition}
 
+let forget_function_applications_equal_to v astate =
+  set_path_condition (Formula.forget_function_applications_equal_to v astate.path_condition) astate
+
+
 let init_loop_header_info id ({path_condition; loop_header_info} as astate) =
   let loop_header_info = PulseLoopHeaderInfo.init_loop_info id loop_header_info in
   {astate with path_condition; loop_header_info}
@@ -2824,6 +2828,11 @@ module AddressAttributes = struct
 
 
   let invalidate addr_hist invalidation location astate =
+    let astate =
+      if Invalidation.releases_resource invalidation then
+        forget_function_applications_equal_to (fst addr_hist) astate
+      else astate
+    in
     SafeAttributes.invalidate (CanonValue.canon_fst' astate addr_hist) invalidation location astate
 
 
