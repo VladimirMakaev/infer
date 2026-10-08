@@ -20,6 +20,7 @@ BUILD_SYSTEMS_TESTS += \
   clang_skip_analysis_in_path \
   clang_translation \
   clang_unknown_ext \
+  clang_unsupported_regex \
   clang_with_block_listed_flags \
   clang_with_E_flag \
   clang_with_M_flag \
