@@ -62,6 +62,7 @@ DIRECT_TESTS += \
   c_bufferoverrun \
   c_performance \
   c_pulse \
+  c_pulse-max-blob-size \
   c_pulse-no-nullability-annotations \
   c_pulse-over-only \
   c_pulse-over-only-balanced \

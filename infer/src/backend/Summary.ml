@@ -246,9 +246,14 @@ module OnDisk = struct
       SummaryMetadata.of_full_summary ~is_complete_result summary
     in
     try
+      let stored_payloads, merge_pulse_payload = Payloads.SQLite.serialize ~proc_name payloads in
+      let summary =
+        if phys_equal stored_payloads payloads then summary
+        else {summary with payloads= stored_payloads}
+      in
       DBWriter.store_spec analysis_req ~proc_uid:(Procname.to_unique_id proc_name)
         ~proc_name:(Procname.SQLite.serialize proc_name)
-        ~merge_pulse_payload:(Payloads.SQLite.serialize payloads)
+        ~merge_pulse_payload
         ~merge_report_summary:(ReportSummary.SQLite.serialize report_summary)
         ~merge_summary_metadata:(SummaryMetadata.SQLite.serialize summary_metadata) ;
       (* Make sure the summary in memory is identical to the saved one *)
