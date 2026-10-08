@@ -58,25 +58,25 @@ int deref_makepair_constants1_ok() {
   return p.first;
 }
 
-int FN_deref_pair_null0_bad() {
+int deref_pair_null0_bad() {
   auto p = pairOfZeroNull();
   // Should report an NPE here as p.second is NULL
   return p.first + *p.second;
 }
 
-int FN_deref_pair_null1_bad() {
+int deref_pair_null1_bad() {
   auto p = pairOfZeroNull();
   // Should report an NPE here as p.second is NULL
   return std::get<0>(p) + *std::get<1>(p);
 }
 
-int FN_deref_makepair_null0_bad() {
+int deref_makepair_null0_bad() {
   auto p = pairOfZeroNull2();
   // Should report an NPE here as p.second is NULL
   return p.first + *p.second;
 }
 
-int FN_deref_makepairnull1_bad() {
+int deref_makepairnull1_bad() {
   auto p = pairOfZeroNull2();
   // Should report an NPE here as p.second is NULL
   return std::get<0>(p) + *std::get<1>(p);

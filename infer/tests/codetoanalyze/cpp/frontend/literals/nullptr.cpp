@@ -6,3 +6,13 @@
  */
 
 int* getPtr() { return nullptr; }
+
+bool compareWithNullRef(int* p, const decltype(nullptr)& n) { return p != n; }
+
+bool compareWithNullValue(int* p, decltype(nullptr) n) { return p == n; }
+
+struct WithMember {
+  int f;
+};
+
+int WithMember::*memberPtrFromNull(const decltype(nullptr)& n) { return n; }
