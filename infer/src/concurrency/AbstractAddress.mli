@@ -87,9 +87,10 @@ type subst
 
 val pp_subst : F.formatter -> subst -> unit [@@warning "-unused-value-declaration"]
 
-val make_subst : FormalMap.t -> HilExp.t list -> subst
+val make_subst : ?guard_lock:(HilExp.t -> t option) -> FormalMap.t -> HilExp.t list -> subst
 (** [make_subst formals actuals] maps the position of each actual to its address in terms of the
-    caller's [formals] *)
+    caller's [formals]. If [guard_lock actual] is the lock of a scoped guard, the parameter itself,
+    eg a reference to the guard locked or unlocked by the callee, is mapped to that lock instead. *)
 
 val without_opaque : subst -> subst
 (** maps the actuals that only have an opaque address to [None] *)

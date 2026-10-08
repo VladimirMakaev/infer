@@ -428,10 +428,11 @@ let describe fmt t =
       F.fprintf fmt "%a%a" (MF.wrap_monospaced describe_path) path describe_root t
 
 
-type subst = t option Array.t
+(* [guarded.(i)] is the lock of the scoped guard passed at position [i], if any *)
+type subst = {addresses: t option Array.t; guarded: t option Array.t}
 
-let pp_subst fmt subst =
-  PrettyPrintable.pp_collection fmt ~pp_item:(Pp.option pp) (Array.to_list subst)
+let pp_subst fmt {addresses} =
+  PrettyPrintable.pp_collection fmt ~pp_item:(Pp.option pp) (Array.to_list addresses)
 
 
 (* the address of a local is not opaque: objects on the stack of the caller are not shared *)
@@ -450,13 +451,17 @@ let rec make_opaque (hilexp : HilExp.t) =
       None
 
 
-let make_subst formal_map actuals =
-  Array.of_list_map actuals ~f:(fun actual ->
-      match make formal_map actual with None -> make_opaque actual | address -> address )
+let make_subst ?(guard_lock = fun _ -> None) formal_map actuals =
+  { addresses=
+      Array.of_list_map actuals ~f:(fun actual ->
+          match make formal_map actual with None -> make_opaque actual | address -> address )
+  ; guarded= Array.of_list_map actuals ~f:guard_lock }
 
 
 let without_opaque subst =
-  Array.map subst ~f:(function Some (Opaque _) -> None | address -> address)
+  { subst with
+    addresses=
+      Array.map subst.addresses ~f:(function Some (Opaque _) -> None | address -> address) }
 
 
 let apply_subst (subst : subst) t =
@@ -466,17 +471,19 @@ let apply_subst (subst : subst) t =
   | Parameter {index; path= (var, _), []} -> (
     try
       (* Special case for when the parameter is used without additional accesses, eg [x] as opposed to [x.f[].g]. *)
-      match subst.(index) with
-      | Some (Opaque {path= (_, typ), accesses}) ->
+      match (subst.guarded.(index), subst.addresses.(index)) with
+      | (Some _ as guarded_lock), _ ->
+          guarded_lock
+      | None, Some (Opaque {path= (_, typ), accesses}) ->
           (* print the parameter rather than the caller's temporary *)
           Some (Opaque {path= ((var, typ), accesses)})
-      | address ->
+      | None, address ->
           address
     with Invalid_argument _ -> None )
   | Parameter {index; path} -> (
     try
       (* Here we know that there are additional accesses on the parameter *)
-      match subst.(index) with
+      match subst.addresses.(index) with
       | None ->
           None
       | Some (Class _ as t') as c ->
