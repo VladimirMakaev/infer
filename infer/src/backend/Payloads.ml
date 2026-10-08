@@ -201,13 +201,16 @@ module SQLite = struct
         Some (SafeLazy.make (lazy (Marshal.from_string blob 0)))
 
 
-  (** serialize a payload into the format described in {!deserialize_payload_opt} above *)
+  (** serialize a payload into the format described in {!deserialize_payload_opt} above; raises
+      [SqliteUtils.DataTooBig] if the payload exceeds [Config.sqlite_max_blob_size] *)
   let serialize_payload_opt payload_opt =
     match SafeLazy.force_option payload_opt with
     | None ->
         Sqlite3.Data.NULL
     | Some payload ->
-        Sqlite3.Data.BLOB (Marshal.to_string payload [Closures])
+        let blob = Marshal.to_string payload [Closures] in
+        if String.length blob < Config.sqlite_max_blob_size then Sqlite3.Data.BLOB blob
+        else raise SqliteUtils.DataTooBig
 
 
   let serialize payloads =
@@ -216,24 +219,55 @@ module SQLite = struct
     List.map all_fields ~f:(fun (F {field}) -> Field.get field payloads |> serialize_payload_opt)
 
 
-  let serialize ({pulse} as payloads) =
+  (** like [serialize] but drops the payloads that are too big to be stored *)
+  let serialize_or_drop ~proc_name payloads =
+    let payloads, rev_data =
+      List.fold all_fields ~init:(payloads, [])
+        ~f:(fun (payloads, rev_data) (F {field; payload_id}) ->
+          match Field.get field payloads |> serialize_payload_opt with
+          | data ->
+              (payloads, data :: rev_data)
+          | exception SqliteUtils.DataTooBig ->
+              L.internal_error "%s payload of %a exceeds the blob size limit, dropping it@\n"
+                (PayloadId.Variants.to_name payload_id)
+                Procname.pp proc_name ;
+              (Field.fset field payloads None, Sqlite3.Data.NULL :: rev_data) )
+    in
+    (payloads, List.rev rev_data)
+
+
+  let serialize ~proc_name payloads =
     freeze payloads ;
-    let default = serialize payloads in
-    fun ~old_pulse_payload ->
+    let ({pulse} as stored_payloads), default = serialize_or_drop ~proc_name payloads in
+    (* do not bring back a stored Pulse payload in place of the new one that was dropped *)
+    let pulse_dropped = Option.is_some payloads.pulse && Option.is_none pulse in
+    let serialize_with_pulse pulse_payload =
+      try serialize {stored_payloads with pulse= Some (SafeLazy.from_val pulse_payload)}
+      with SqliteUtils.DataTooBig ->
+        L.internal_error
+          "Pulse payload of %a merged with the stored one exceeds the blob size limit, dropping \
+           the stored one@\n"
+          Procname.pp proc_name ;
+        default
+    in
+    let merge ~old_pulse_payload =
       (* All payloads must be null or blob. *)
       match[@warning "-partial-match"] (old_pulse_payload : Sqlite3.Data.t option) with
       | None | Some NULL ->
           (* No row or no pulse payload is in the DB. *)
           default
+      | Some (BLOB _) when pulse_dropped ->
+          default
       | Some (BLOB blob) -> (
           let old_pulse_payload : PulseSummary.t = Marshal.from_string blob 0 in
           match SafeLazy.force_option pulse with
           | None ->
-              serialize {payloads with pulse= Some (SafeLazy.from_val old_pulse_payload)}
+              serialize_with_pulse old_pulse_payload
           | Some pulse_payload ->
               let res = PulseSummary.merge pulse_payload old_pulse_payload in
-              if phys_equal res pulse_payload then default
-              else serialize {payloads with pulse= Some (SafeLazy.from_val res)} )
+              if phys_equal res pulse_payload then default else serialize_with_pulse res )
+    in
+    (stored_payloads, merge)
 
 
   (** {3 code for lazily loading payloads} *)
