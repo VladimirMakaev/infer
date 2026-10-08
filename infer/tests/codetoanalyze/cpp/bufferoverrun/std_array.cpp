@@ -205,11 +205,63 @@ struct std_array_2d_member {
   std::array<std::array<int, 3>, 2> a;
 };
 
-// Like for local nested std::arrays, the index of the inner std::array is added
-// to the offset in the outer one.
-void FP_std_array_2d_member_local_Good() {
+void std_array_2d_member_local_Good() {
   std_array_2d_member x;
   x.a[1][2] = 0;
+}
+
+void std_array_2d_member_local_inner_Bad() {
+  std_array_2d_member x;
+  x.a[1][3] = 0;
+}
+
+void std_array_2d_member_local_outer_Bad() {
+  std_array_2d_member x;
+  x.a[2][0] = 0;
+}
+
+int std_array_2d_member_loop_Good(std_array_2d_member& x) {
+  for (int i = 0; i < 2; i++) {
+    x.a[i][2] = 1;
+  }
+  return x.a[1][2];
+}
+
+int std_array_2d_member_param_Bad(std_array_2d_member& x) { return x.a[0][3]; }
+
+int std_array_2d_row_ref_Good(std_array_2d_member& x) {
+  std::array<int, 3>& row = x.a[1];
+  return row.front() + row.back() + row.at(2);
+}
+
+int std_array_2d_row_ref_Bad(std_array_2d_member& x) {
+  std::array<int, 3>& row = x.a[1];
+  return row[3];
+}
+
+int std_array_of_c_arrays_Good() {
+  std::array<int[3], 2> a = {};
+  return a[1][2];
+}
+
+int std_array_of_c_arrays_Bad() {
+  std::array<int[3], 2> a = {};
+  return a[1][3];
+}
+
+int std_array_3d_Good() {
+  std::array<std::array<std::array<int, 3>, 2>, 4> a = {};
+  return a[3][1][2];
+}
+
+int std_array_3d_Bad() {
+  std::array<std::array<std::array<int, 3>, 2>, 4> a = {};
+  return a[3][1][3];
+}
+
+// As for a std::array passed by reference, the inner arrays are not found.
+int FN_std_array_2d_ref_param_Bad(std::array<std::array<int, 3>, 2>& a) {
+  return a[0][3];
 }
 
 struct std_array_ref_member {
