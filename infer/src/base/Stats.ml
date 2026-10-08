@@ -230,6 +230,7 @@ type t =
   ; summary_read_from_disk: IntCounter.t Atomic.t
   ; summary_specializations: IntCounter.t Atomic.t
   ; ondemand_procs_analyzed: IntCounter.t Atomic.t
+  ; ondemand_procs_failed: IntCounter.t Atomic.t
   ; ondemand_double_analysis_prevented: IntCounter.t Atomic.t
   ; ondemand_recursion_cycle_restart_limit_hit: IntCounter.t Atomic.t
   ; ondemand_callchain_limit_hit: IntCounter.t Atomic.t
@@ -309,7 +310,7 @@ let pp fmt stats =
   Fields.iter ~summary_file_try_load:(pp_int_field fmt) ~useful_times:(pp_time_counter_field fmt)
     ~longest_proc_duration_heap:(pp_longest_proc_duration_heap fmt)
     ~summary_read_from_disk:(pp_int_field fmt) ~summary_specializations:(pp_int_field fmt)
-    ~ondemand_procs_analyzed:(pp_int_field fmt)
+    ~ondemand_procs_analyzed:(pp_int_field fmt) ~ondemand_procs_failed:(pp_int_field fmt)
     ~ondemand_double_analysis_prevented:(pp_int_field fmt)
     ~ondemand_recursion_cycle_restart_limit_hit:(pp_int_field fmt)
     ~ondemand_callchain_limit_hit:(pp_int_field fmt)
@@ -342,6 +343,7 @@ let pp fmt stats =
 (** machine-readable printing of selected fields, for tests *)
 let log_to_file
     { ondemand_procs_analyzed
+    ; ondemand_procs_failed
     ; pulse_aliasing_contradictions
     ; pulse_args_length_contradictions
     ; pulse_captured_vars_length_contradictions
@@ -365,6 +367,7 @@ let log_to_file
   let fmt = Format.formatter_of_out_channel out_channel in
   F.fprintf fmt "=== global counters ===@\n" ;
   F.fprintf fmt "ondemand_procs_analyzed: %d@\n" (Atomic.get ondemand_procs_analyzed) ;
+  F.fprintf fmt "ondemand_procs_failed: %d@\n" (Atomic.get ondemand_procs_failed) ;
   F.fprintf fmt "pulse_aliasing_contradictions: %d@\n" (Atomic.get pulse_aliasing_contradictions) ;
   F.fprintf fmt "pulse_args_length_contradictions: %d@\n"
     (Atomic.get pulse_args_length_contradictions) ;
@@ -439,6 +442,8 @@ let log_aggregate stats_list =
       log_to_file stats
 
 
+let get_ondemand_procs_failed stats = Atomic.get stats.ondemand_procs_failed
+
 let get () =
   {global_stats with timings= Atomic.make (TimingsStat.serialize (Atomic.get global_stats.timings))}
 
@@ -461,6 +466,8 @@ let incr_summary_read_from_disk () = incr Fields.summary_read_from_disk
 let incr_summary_specializations () = incr Fields.summary_specializations
 
 let incr_ondemand_procs_analyzed () = incr Fields.ondemand_procs_analyzed
+
+let incr_ondemand_procs_failed () = incr Fields.ondemand_procs_failed
 
 let incr_ondemand_double_analysis_prevented () = incr Fields.ondemand_double_analysis_prevented
 
