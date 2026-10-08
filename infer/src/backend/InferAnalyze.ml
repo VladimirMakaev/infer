@@ -287,6 +287,13 @@ let main ~changed_files =
     L.progress "Incremental analysis: Computed %d procedure summaries.@." specs_computed ;
     StatsLogging.log_count ~label:"incremental_analysis.specs_computed" ~value:specs_computed ) ;
   Stats.log_aggregate backend_stats_list ;
+  let procs_failed = List.sum (module Int) backend_stats_list ~f:Stats.get_ondemand_procs_failed in
+  if procs_failed > 0 then
+    L.user_warning
+      "WARNING: the analysis of %d procedure(s) failed with internal errors, their results are \
+       incomplete or missing.@\n\
+       See %s for the errors.@."
+      procs_failed (ResultsDir.get_path Logs) ;
   GCStats.log_aggregate ~prefix:"backend_stats." Analysis gc_stats_list ;
   let analysis_duration = ExecutionDuration.since start in
   L.debug Analysis Quiet "Analysis phase finished in %a@\n" Mtime.Span.pp
