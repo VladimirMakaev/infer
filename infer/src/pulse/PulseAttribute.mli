@@ -169,9 +169,11 @@ type t =
   | AwaitedAwaitable
   | PropagateTaintFrom of taint_propagation_reason * taint_in list
   | ReturnedFromUnknown of AbstractValue.t list
-  | SourceOriginOfCopy of {source: PulseAbstractValue.t; is_const_ref: bool}
+  | SourceOriginOfCopy of {source: PulseAbstractValue.t; is_unmovable_source: bool}
       (** records the source value for a given copy to lookup the appropriate heap in non-disj
-          domain *)
+          domain; [is_unmovable_source] when the source is a reference to [const] or is not owned by
+          the procedure, so that moving from the copy cannot be replaced by moving from the source
+      *)
   | StaticType of Typ.Name.t
       (** type gotten or inferred from types in SIL instructions (only for Hack frontend)*)
   | StdMoved
