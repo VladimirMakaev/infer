@@ -20,6 +20,9 @@ val incr_summary_specializations : unit -> unit
 
 val incr_ondemand_procs_analyzed : unit -> unit
 
+val incr_ondemand_procs_failed : unit -> unit
+(** the analysis of a procedure raised an exception that [--keep-going] ignored *)
+
 val incr_ondemand_double_analysis_prevented : unit -> unit
 
 val incr_ondemand_recursion_cycle_restart_limit_hit : unit -> unit
@@ -86,6 +89,8 @@ val get : unit -> t
 
 val log_aggregate : t list -> unit
 (** log aggregated stats to infer's log file and to stats *)
+
+val get_ondemand_procs_failed : t -> int
 
 val add_cache_hit : name:string -> unit
 

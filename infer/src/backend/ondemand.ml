@@ -312,6 +312,7 @@ let run_proc_analysis tenv analysis_req specialization_context ?caller_pname cal
                 (Exn.to_string exn) ;
               DLS.set logged_error true ) ;
             not Config.keep_going ) ;
+    Stats.incr_ondemand_procs_failed () ;
     L.internal_error "@\nERROR RUNNING BACKEND: %a %s@\n@\nBACK TRACE@\n%s@?" Procname.pp
       callee_pname (Exn.to_string exn) backtrace ;
     log_error_and_continue initial_callee_summary
