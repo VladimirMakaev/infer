@@ -352,7 +352,7 @@ module AddressAttributes : sig
 
   val get_written_to : AbstractValue.t -> t -> (Timestamp.t * Trace.t) option
 
-  val is_copied_from_const_ref : AbstractValue.t -> t -> bool
+  val is_copied_from_unmovable_source : AbstractValue.t -> t -> bool
 
   val is_std_moved : AbstractValue.t -> t -> bool
 

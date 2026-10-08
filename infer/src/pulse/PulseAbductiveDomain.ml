@@ -731,8 +731,8 @@ module Internal = struct
       BaseAddressAttributes.get_written_to addr (astate.post :> base_domain).attrs
 
 
-    let is_copied_from_const_ref addr astate =
-      BaseAddressAttributes.is_copied_from_const_ref addr (astate.post :> base_domain).attrs
+    let is_copied_from_unmovable_source addr astate =
+      BaseAddressAttributes.is_copied_from_unmovable_source addr (astate.post :> base_domain).attrs
 
 
     let is_std_moved addr astate =
@@ -2988,8 +2988,8 @@ module AddressAttributes = struct
 
   let get_written_to v astate = SafeAttributes.get_written_to (CanonValue.canon' astate v) astate
 
-  let is_copied_from_const_ref v astate =
-    SafeAttributes.is_copied_from_const_ref (CanonValue.canon' astate v) astate
+  let is_copied_from_unmovable_source v astate =
+    SafeAttributes.is_copied_from_unmovable_source (CanonValue.canon' astate v) astate
 
 
   let is_std_moved v astate = SafeAttributes.is_std_moved (CanonValue.canon' astate v) astate
