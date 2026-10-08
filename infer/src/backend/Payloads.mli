@@ -48,8 +48,11 @@ val has_payload : PayloadId.t -> t -> bool
 val analysis_request_of_field : _ Field.t -> AnalysisRequest.t
 
 module SQLite : sig
-  val serialize : t -> old_pulse_payload:Sqlite3.Data.t option -> Sqlite3.Data.t list
-  (** serialize payloads, but gets an old Pulse's payload to merge, which was pre-existing in DB *)
+  val serialize :
+    proc_name:Procname.t -> t -> t * (old_pulse_payload:Sqlite3.Data.t option -> Sqlite3.Data.t list)
+  (** serialize payloads, but gets an old Pulse's payload to merge, which was pre-existing in DB.
+      Payloads that exceed [Config.sqlite_max_blob_size] are dropped: the returned payloads are the
+      ones that get stored. *)
 
   val lazy_load : proc_uid:string -> t
   (** load each payload lazily *)
