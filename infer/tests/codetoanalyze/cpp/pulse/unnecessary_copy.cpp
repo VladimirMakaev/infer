@@ -1278,3 +1278,48 @@ struct SetHolder {
     return c.size();
   }
 };
+
+struct NameAndHash {
+  std::string name;
+  std::string hash;
+};
+
+void use_name_and_hash(const NameAndHash& x);
+
+// a reference to `s` would see it moved from
+void copy_then_source_moved_ok(const std::string& x) {
+  std::string s = x + "a";
+  const std::string c = s;
+  std::string other(std::move(s));
+  use_string(other);
+  use_string(c);
+}
+
+// a reference to `info.hash` would see it moved from
+void copy_of_field_then_owner_moved_ok(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  const std::string c = info.hash;
+  NameAndHash other(std::move(info));
+  use_name_and_hash(other);
+  use_string(c);
+}
+
+void copy_of_field_then_other_field_moved_bad(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  const std::string c = info.hash;
+  std::string other(std::move(info.name));
+  use_string(other);
+  use_string(c);
+}
+
+void copy_ends_before_source_moved_bad(const std::string& x) {
+  std::string s = x + "a";
+  {
+    const std::string c = s;
+    use_string(c);
+  }
+  std::string other(std::move(s));
+  use_string(other);
+}

@@ -732,6 +732,42 @@ let add_copied_return node path location pname actuals (astate_n, astate) =
   else None
 
 
+let is_alive_variable var astate =
+  Stack.find_opt var astate
+  |> Option.exists ~f:(fun vo ->
+      AddressAttributes.find_opt `Post (ValueOrigin.value vo) astate
+      |> Option.for_all ~f:(fun attrs -> Option.is_none (Attributes.get_invalid attrs)) )
+
+
+(* A reference to the source of a copy would see the source moved from, also when the moved object
+   contains the source. *)
+let mark_copies_of_moved_sources path location pname actuals (astate_n, astate) =
+  let open IOption.Let_syntax in
+  match actuals with
+  | [(arg, _)] when Procname.is_std_move pname ->
+      let+ astate, moved = try_eval path location arg astate in
+      let moved_objects =
+        AbductiveDomain.reachable_addresses_from (Seq.return moved)
+          ~edge_filter:(function FieldAccess _ -> true | ArrayAccess _ | Dereference -> false)
+          astate `Post
+      in
+      let astate_n =
+        AbstractValue.Set.fold
+          (fun source astate_n ->
+            match AddressAttributes.get_copied_into source astate with
+            | Some (IntoVar {copied_var} as copied_into) when is_alive_variable copied_var astate ->
+                NonDisjDomain.mark_copy_as_modified ~copied_into ~source_addr_opt:(Some source)
+                  ~is_modified:(fun _ _ -> true)
+                  astate_n
+            | Some (IntoVar _ | IntoIntermediate _ | IntoField _) | None ->
+                astate_n )
+          moved_objects astate_n
+      in
+      (astate_n, astate)
+  | _ ->
+      None
+
+
 let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~astates_before astates
     astate_n =
   match (call_exp : Exp.t) with
@@ -752,7 +788,8 @@ let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~as
           let ( |-> ) = IOption.continue ~default in
           add_copies integer_type_widths tenv proc_desc node path loc pname actuals ~astates_before
             default
-          |-> add_copied_return node path loc pname actuals )
+          |-> add_copied_return node path loc pname actuals
+          |-> mark_copies_of_moved_sources path loc pname actuals )
   | _ ->
       (astate_n, astates)
 
