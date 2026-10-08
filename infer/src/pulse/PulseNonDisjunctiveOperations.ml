@@ -476,11 +476,20 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
           let astate' =
             Option.value_map source_addr_typ_opt ~default:astate
               ~f:(fun (source_addr, _, source_typ) ->
+                let is_unmovable_source =
+                  Typ.is_const_reference_on_source source_typ
+                  ||
+                  match (copy_into, source_opt) with
+                  | Attribute.CopiedInto.IntoVar _, Some _ ->
+                      is_copied_from_address_reachable_from_unowned ~is_captured_by_ref
+                        ~is_reached_through_pointer ~is_intermediate:true source_addr_typ_opt ~from
+                        proc_lvalue_ref_parameters ~astates_before
+                  | _ ->
+                      false
+                in
                 AddressAttributes.add_one source_addr (CopiedInto copy_into) astate
                 |> AddressAttributes.add_one copy_addr
-                     (SourceOriginOfCopy
-                        { source= source_addr
-                        ; is_const_ref= Typ.is_const_reference_on_source source_typ } ) )
+                     (SourceOriginOfCopy {source= source_addr; is_unmovable_source}) )
           in
           ( NonDisjDomain.add_var copy_into
               ~source_addr_opt:(Option.map source_addr_typ_opt ~f:fst3)
@@ -512,7 +521,7 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
                     |> AddressAttributes.add_one copy_addr
                          (SourceOriginOfCopy
                             { source= source_addr
-                            ; is_const_ref= Typ.is_const_reference_on_source source_typ } )
+                            ; is_unmovable_source= Typ.is_const_reference_on_source source_typ } )
                   , Some source_addr
                   , match (source : DecompilerExpr.t) with
                     | SourceExpr (source_expr, _) ->
@@ -700,7 +709,8 @@ let add_copied_return node path location pname actuals (astate_n, astate) =
           let astate =
             AddressAttributes.remove_copied_return ret_addr astate
             |> AddressAttributes.add_one source (CopiedInto into)
-            |> AddressAttributes.add_one ret_addr (SourceOriginOfCopy {source; is_const_ref})
+            |> AddressAttributes.add_one ret_addr
+                 (SourceOriginOfCopy {source; is_unmovable_source= is_const_ref})
           in
           let astate_n =
             NonDisjDomain.add_var into ~source_addr_opt:(Some source)
@@ -817,7 +827,7 @@ let is_modified_since_detected addr ~is_param ~get_repr ~current_heap astate ~co
         else
           let visited = AbstractValue.Set.add addr visited in
           let is_moved =
-            (is_param || AddressAttributes.is_copied_from_const_ref addr astate)
+            (is_param || AddressAttributes.is_copied_from_unmovable_source addr astate)
             && AddressAttributes.is_std_moved addr astate
           in
           is_moved || is_written_after_copy addr
