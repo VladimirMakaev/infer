@@ -243,6 +243,10 @@ val acquire : tenv:Tenv.t -> t -> procname:Procname.t -> loc:Location.t -> Lock.
 val release : t -> Lock.t list -> t
 (** simultaneously release a number of locks, no-op if list is empty *)
 
+val acquire_or_restore : tenv:Tenv.t -> t -> procname:Procname.t -> loc:Location.t -> Lock.t -> t
+(** acquire a lock that cannot be held twice, eg through a guard: if it was released without being
+    held, this only cancels the release *)
+
 val blocking_call : callee:Procname.t -> loc:Location.t -> t -> t
 
 val ipc : callee:Procname.t -> loc:Location.t -> t -> t
@@ -274,6 +278,9 @@ val lock_guard : procname:Procname.t -> loc:Location.t -> Tenv.t -> t -> HilExp.
 
 val is_guard : t -> HilExp.t -> bool
 (** Whether a guard was constructed on the expression and not destroyed yet. *)
+
+val get_guard_lock : t -> HilExp.t -> Lock.t option
+(** The lock of the guard constructed on the expression, if it has exactly one. *)
 
 val remove_guard : t -> HilExp.t -> t
 (** Destroy the guard and release its locks. *)
