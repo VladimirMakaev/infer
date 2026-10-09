@@ -9,7 +9,8 @@ CLANG_OPTIONS = -x c++ -std=c++14 -nostdinc++ -isystem$(CLANG_INCLUDES)/c++/v1/ 
 # single class names rather than JSON lists
 INFER_OPTIONS = --liveness-only --debug-exceptions --project-root $(TESTS_DIR) \
   --cxx-scope-guards liveness_options::Guard \
-  --liveness-dangerous-classes liveness_options::Dangerous
+  --liveness-dangerous-classes liveness_options::Dangerous \
+  --liveness-ignored-constant=-1 --liveness-ignored-constant=7
 INFERPRINT_OPTIONS = --issues-tests
 
 SOURCES = $(wildcard *.cpp)
