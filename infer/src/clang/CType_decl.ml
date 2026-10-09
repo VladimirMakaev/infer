@@ -117,7 +117,17 @@ module BuildMethodSignature = struct
             List.exists decl_info.di_attributes ~f:(function `UnusedAttr _ -> true | _ -> false)
           in
           let annot =
-            let annot = CAst_utils.sil_annot_of_type qt in
+            let fd_ownership =
+              if
+                List.exists decl_info.di_attributes ~f:(function
+                  | `AnnotateAttr (_, annotation) ->
+                      String.equal annotation Annotations.takes_fd_ownership
+                  | _ ->
+                      false )
+              then [{Annot.class_name= Annotations.takes_fd_ownership; parameters= []}]
+              else []
+            in
+            let annot = fd_ownership @ CAst_utils.sil_annot_of_type qt in
             if
               (not (Annotations.ia_is_nonnull annot))
               && CType.is_pointer_type qt

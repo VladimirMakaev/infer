@@ -31,6 +31,10 @@ val nonnull_parameter : string
 (** a parameter of a C function or C++ method that must not be null because of a [nonnull] attribute
     or of nullability written in a typedef, rather than of a [_Nonnull] type *)
 
+val takes_fd_ownership : string
+(** A Clang parameter annotation declaring transfer of a by-value file descriptor on normal return.
+*)
+
 val performance_critical : string
 
 val prop : string
