@@ -111,6 +111,33 @@ let add_access_source v (access : Access.t) ~src decompiler =
       Map.add v (base, access_of_memory_access decompiler access :: accesses) decompiler
 
 
+let add_iterator_source v call ~src ~is_reference_receiver decompiler =
+  let+ decompiler in
+  match Map.find src decompiler with
+  | Unknown _ ->
+      decompiler
+  | SourceExpr ((base, accesses), _) ->
+      let accesses =
+        match accesses with
+        | DecompilerExpr.Dereference :: rest when is_reference_receiver ->
+            (* Loading a source reference binds the object, not a pointer receiver. *)
+            rest
+        | _ ->
+            accesses
+      in
+      let accesses = DecompilerExpr.MethodCall call :: accesses in
+      let accesses =
+        match (call : CallEvent.t) with
+        | (Call procname | ModelName procname | SkippedKnownCall procname)
+          when String.equal (Procname.get_method procname) "operator->" ->
+            (* The arrow operator returns a pointer; its member access must use [->]. *)
+            DecompilerExpr.Dereference :: accesses
+        | _ ->
+            accesses
+      in
+      Map.add v (base, accesses) decompiler
+
+
 let replace_getter_call_with_property_access procname v call actuals decompiler =
   if List.is_empty actuals then Map.add v (ReturnValue call, []) decompiler
   else

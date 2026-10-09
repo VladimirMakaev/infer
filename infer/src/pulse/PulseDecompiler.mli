@@ -34,4 +34,8 @@ val add_call_source :
 
 val add_access_source : key -> Access.t -> src:key -> t -> t
 
+val add_iterator_source : key -> CallEvent.t -> src:key -> is_reference_receiver:bool -> t -> t
+(** Record an iterator's modeled dereference/operator call instead of exposing its synthetic array
+    and position. Unknown receivers retain their existing provenance. *)
+
 val find : AbstractValue.t -> t -> DecompilerExpr.t
