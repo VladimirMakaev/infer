@@ -61,11 +61,27 @@ let strip_wildcard_swift_field_name name =
         name )
 
 
+let strip_generated_field_name name =
+  let is_letter c =
+    Char.between c ~low:'a' ~high:'z' || Char.between c ~low:'A' ~high:'Z' || Char.equal c '_'
+  in
+  match String.chop_prefix name ~prefix:"__fbthrift_field_" with
+  | Some source_name
+    when String.length source_name > 0
+         && is_letter source_name.[0]
+         && String.for_all source_name ~f:(fun c -> is_letter c || Char.is_digit c) ->
+      (* Strip only the recognized prefix once; the source name may itself resemble another
+         generated naming pattern. *)
+      source_name
+  | _ ->
+      strip_wildcard_swift_field_name name
+
+
 let pp_field fmt field =
   if Fieldname.is_capture_field_in_closure field then Fieldname.pp fmt field
   else
     let name = Fieldname.get_field_name field in
-    let stripped = strip_wildcard_swift_field_name name in
+    let stripped = strip_generated_field_name name in
     if String.equal stripped name then Fieldname.pp fmt field else F.fprintf fmt "%s" stripped
 
 
