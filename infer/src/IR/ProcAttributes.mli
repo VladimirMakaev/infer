@@ -48,6 +48,7 @@ type t =
         (** name, type, and annotation of formal parameters *)
   ; const_formals: int list  (** list of indices of formals that are const-qualified *)
   ; reference_formals: int list  (** list of indices of formals that are passed by reference *)
+  ; unused_formals: int list  (** list of indices of formals declared with attribute [unused] *)
   ; is_abstract: bool  (** the procedure is abstract *)
   ; is_bridge_method: bool  (** the procedure is a bridge method *)
   ; is_cpp_const_member_fun: bool  (** true if the procedure is a const function *)

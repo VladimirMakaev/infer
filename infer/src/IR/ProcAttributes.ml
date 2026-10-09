@@ -89,6 +89,7 @@ type t =
   ; formals: (Mangled.t * Typ.t * Annot.Item.t) list  (** name and type of formal parameters *)
   ; const_formals: int list  (** list of indices of formals that are const-qualified *)
   ; reference_formals: int list  (** list of indices of formals that are passed by reference *)
+  ; unused_formals: int list  (** list of indices of formals declared with attribute [unused] *)
   ; is_abstract: bool  (** the procedure is abstract *)
   ; is_bridge_method: bool  (** the procedure is a bridge method *)
   ; is_cpp_const_member_fun: bool  (** true if the procedure is a const function *)
@@ -185,6 +186,7 @@ let default translation_unit proc_name =
   ; formals= []
   ; const_formals= []
   ; reference_formals= []
+  ; unused_formals= []
   ; is_abstract= false
   ; is_bridge_method= false
   ; is_cpp_const_member_fun= false
@@ -240,6 +242,7 @@ let pp f
      ; formals
      ; const_formals
      ; reference_formals
+     ; unused_formals
      ; is_abstract
      ; is_bridge_method
      ; is_cpp_const_member_fun
@@ -305,6 +308,10 @@ let pp f
     F.fprintf f "; reference_formals= [@[%a@]]@,"
       (Pp.semicolon_seq ~print_env:Pp.text_break F.pp_print_int)
       reference_formals ;
+  if not ([%equal: int list] default.unused_formals unused_formals) then
+    F.fprintf f "; unused_formals= [@[%a@]]@,"
+      (Pp.semicolon_seq ~print_env:Pp.text_break F.pp_print_int)
+      unused_formals ;
   pp_bool_default ~default:default.is_abstract "is_abstract" is_abstract f () ;
   pp_bool_default ~default:default.is_bridge_method "is_bridge_method" is_bridge_method f () ;
   pp_bool_default ~default:default.is_cpp_const_member_fun "is_cpp_const_member_fun "

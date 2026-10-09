@@ -224,6 +224,11 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
   in
   let const_formals = get_const_params_indices all_params in
   let reference_formals = get_reference_indices all_params in
+  let unused_formals =
+    List.filter_mapi all_params
+      ~f:(fun index ({is_declared_unused} : CMethodSignature.param_type) ->
+        if is_declared_unused then Some index else None )
+  in
   let source_range = ms.CMethodSignature.loc in
   let loc_start =
     CLocation.location_of_source_range trans_unit_ctx.CFrontend_config.source_file source_range
@@ -238,6 +243,7 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
   ; formals
   ; const_formals
   ; reference_formals
+  ; unused_formals
   ; has_added_return_param
   ; is_ret_type_pod= ms.CMethodSignature.is_ret_type_pod
   ; is_ret_constexpr= ms.CMethodSignature.is_ret_constexpr
