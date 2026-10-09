@@ -1872,6 +1872,10 @@ module PulseTransferFunctions = struct
               | Lfield ({exp}, fieldname, _) when Language.curr_language_is Python ->
                   let+* astate, ref = PulseOperations.eval path Read loc exp astate in
                   PulseOperations.write_field path loc ~ref fieldname ~obj:(rhs_addr, hist) astate
+              | _ when PulseModelsCpp.InitializerList.is_type typ ->
+                  Sat
+                    (PulseModelsCpp.InitializerList.copy_value path loc ~src:(rhs_addr, hist)
+                       ~dst:lhs_addr_hist astate )
               | _ ->
                   Sat
                     (PulseOperations.write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, hist)

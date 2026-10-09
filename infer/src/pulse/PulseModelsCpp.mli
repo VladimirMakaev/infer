@@ -8,10 +8,23 @@
 open! IStd
 open PulseModelsImport
 open PulseBasicInterface
+open PulseDomainInterface
 
 val abort_matchers : matcher list
 
 val matchers : matcher list
+
+module InitializerList : sig
+  val is_type : Typ.t -> bool
+
+  val copy_value :
+       PathContext.t
+    -> Location.t
+    -> src:AbstractValue.t * ValueHistory.t
+    -> dst:AbstractValue.t * ValueHistory.t
+    -> AbductiveDomain.t
+    -> AbductiveDomain.t AccessResult.t
+end
 
 module Vector : sig
   val at :
