@@ -97,7 +97,7 @@ module BuildMethodSignature = struct
     let open Clang_ast_t in
     let par_to_ms_par index par =
       match par with
-      | ParmVarDecl (_, name_info, qt, var_decl_info) ->
+      | ParmVarDecl (decl_info, name_info, qt, var_decl_info) ->
           let method_decl_info = Clang_ast_proj.get_decl_tuple method_decl in
           let _, name =
             CGeneral_utils.get_var_name_mangled method_decl_info name_info var_decl_info
@@ -113,6 +113,9 @@ module BuildMethodSignature = struct
           let is_pointer_to_const = CType.is_pointer_to_const qt in
           let is_reference = CType.is_reference_type qt in
           let is_no_escape_block_arg = CAst_utils.is_no_escape_block_arg par in
+          let is_declared_unused =
+            List.exists decl_info.di_attributes ~f:(function `UnusedAttr _ -> true | _ -> false)
+          in
           let annot =
             let annot = CAst_utils.sil_annot_of_type qt in
             if
@@ -123,7 +126,7 @@ module BuildMethodSignature = struct
             else annot
           in
           CMethodSignature.mk_param_type name typ ~is_pointer_to_const ~is_reference ~annot
-            ~is_no_escape_block_arg
+            ~is_no_escape_block_arg ~is_declared_unused
       | _ ->
           raise CFrontend_errors.Invalid_declaration
     in
