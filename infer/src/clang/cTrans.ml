@@ -4712,7 +4712,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       match (mode : CapturedVar.capture_mode) with
       | ByReference -> (
         match typ.Typ.desc with
-        | Tptr (_, Typ.Pk_lvalue_reference) ->
+        | Tptr (_, (Typ.Pk_lvalue_reference | Typ.Pk_rvalue_reference)) ->
+            (* Named rvalue references also capture the referred object, not the reference slot. *)
             let trans_result, captured_var = translate_captured_var_assign var_exp pvar typ mode in
             (trans_result :: trans_results_acc, captured_var :: captured_vars_acc)
         | _ when Pvar.is_this pvar ->
