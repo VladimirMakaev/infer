@@ -14,6 +14,157 @@ module L = Logging
 module VarSet = AbstractDomain.FiniteSet (Var)
 module Domain = VarSet
 
+module LocalAliases = struct
+  module Target = struct
+    type t = Local of Pvar.t | Unknown [@@deriving compare]
+
+    let pp f = function
+      | Local pvar ->
+          Pvar.pp_value f pvar
+      | Unknown ->
+          F.pp_print_string f "unknown"
+  end
+
+  module Targets = AbstractDomain.FiniteSet (Target)
+  module Domain = AbstractDomain.Map (Var) (Targets)
+
+  let unknown = Targets.singleton Target.Unknown
+
+  let get aliases var = Option.value (Domain.find_opt var aliases) ~default:unknown
+
+  let rec address aliases exp =
+    match Exp.ignore_cast exp with
+    | Exp.Lvar pvar ->
+        Targets.singleton (Target.Local pvar)
+    | Exp.Var id ->
+        get aliases (Var.of_id id)
+    | Exp.Lindex (exp, Const (Cint offset))
+    | Exp.BinOp ((PlusPI | MinusPI), exp, Const (Cint offset))
+      when IntLit.iszero offset ->
+        address aliases exp
+    | Exp.Lfield ({exp}, _, _) | Exp.Lindex (exp, _) | Exp.BinOp ((PlusPI | MinusPI), exp, _) ->
+        (* An offset may designate only part of a variable, so it cannot justify a strong kill. *)
+        Targets.add Target.Unknown (address aliases exp)
+    | _ ->
+        unknown
+
+
+  let load aliases exp =
+    Targets.fold
+      (fun target acc ->
+        match target with
+        | Target.Local pvar ->
+            Targets.union acc (get aliases (Var.of_pvar pvar))
+        | Target.Unknown ->
+            Targets.add Target.Unknown acc )
+      (address aliases exp) Targets.empty
+
+
+  let locals targets =
+    Targets.fold
+      (fun target acc ->
+        match target with
+        | Target.Local pvar ->
+            VarSet.add (Var.of_pvar pvar) acc
+        | Target.Unknown ->
+            acc )
+      targets VarSet.empty
+
+
+  let reachable aliases targets =
+    let rec visit todo seen =
+      match VarSet.choose_opt todo with
+      | None ->
+          seen
+      | Some var ->
+          let todo = VarSet.remove var todo in
+          if VarSet.mem var seen then visit todo seen
+          else visit (VarSet.union todo (locals (get aliases var))) (VarSet.add var seen)
+    in
+    visit (locals targets) VarSet.empty
+
+
+  let singleton_local targets =
+    if Int.equal (Targets.cardinal targets) 1 then
+      match Targets.choose_opt targets with Some (Target.Local pvar) -> Some pvar | _ -> None
+    else None
+
+
+  let store_escapes aliases escaped lhs =
+    let rec root exp =
+      match Exp.ignore_cast exp with
+      | Exp.Lfield ({exp}, _, _) | Exp.Lindex (exp, _) | Exp.BinOp ((PlusPI | MinusPI), exp, _) ->
+          root exp
+      | exp ->
+          exp
+    in
+    let lhs = root lhs in
+    let targets = address aliases lhs in
+    (match lhs with Exp.Lvar pvar -> Pvar.is_global pvar || Pvar.is_return pvar | _ -> false)
+    || Targets.mem Target.Unknown targets
+    || VarSet.exists (fun var -> VarSet.mem var escaped) (locals targets)
+
+
+  let initial proc_desc =
+    let pointer_names =
+      List.filter_map (Procdesc.get_locals proc_desc) ~f:(fun local ->
+          Option.some_if (Typ.is_pointer local.ProcAttributes.typ) local.ProcAttributes.name )
+      @ List.filter_map (Procdesc.get_formals proc_desc) ~f:(fun (name, typ, _) ->
+          Option.some_if (Typ.is_pointer typ) name )
+      |> Mangled.Set.of_list
+    in
+    let add_var aliases var =
+      match Var.get_pvar var with
+      | None ->
+          Domain.add var unknown aliases
+      | Some pvar
+        when (not (Pvar.is_global pvar)) && Mangled.Set.mem (Pvar.get_name pvar) pointer_names ->
+          Domain.add var unknown aliases
+      | Some _ ->
+          (* Aggregate fields are not pointer cells: do not merge their contents into the object. *)
+          aliases
+    in
+    (* Seed every key with unknown, so a branch that leaves a pointer untouched is not lost at join. *)
+    Procdesc.fold_instrs proc_desc ~init:Domain.empty ~f:(fun aliases _ instr ->
+        let expressions, aliases =
+          match instr with
+          | Sil.Load {id; typ= {desc= Tptr _}} ->
+              (Sil.exps_of_instr instr, Domain.add (Var.of_id id) unknown aliases)
+          | Store {typ= {desc= Tptr _}} ->
+              (Sil.exps_of_instr instr, aliases)
+          | Call ((id, typ), _, actuals, _, _) ->
+              let aliases =
+                match typ.Typ.desc with
+                | Tptr _ ->
+                    Domain.add (Var.of_id id) unknown aliases
+                | _ ->
+                    aliases
+              in
+              ( List.filter_map actuals ~f:(fun (exp, typ) ->
+                    match typ.Typ.desc with Tptr _ -> Some exp | _ -> None )
+              , aliases )
+          | _ ->
+              ([], aliases)
+        in
+        List.fold expressions ~init:aliases ~f:(fun aliases exp ->
+            Var.get_all_vars_in_exp exp |> Sequence.fold ~init:aliases ~f:add_var ) )
+
+
+  let store aliases lhs rhs typ =
+    let value = match typ.Typ.desc with Tptr _ -> address aliases rhs | _ -> unknown in
+    let targets = address aliases lhs in
+    match singleton_local targets with
+    | Some pvar when Domain.mem (Var.of_pvar pvar) aliases ->
+        Domain.add (Var.of_pvar pvar) value aliases
+    | Some _ | None ->
+        VarSet.fold
+          (fun var aliases ->
+            if Domain.mem var aliases then
+              Domain.add var (Targets.union (get aliases var) value) aliases
+            else aliases )
+          (locals targets) aliases
+end
+
 module Exn = struct
   module CExn = AbstractDomain.Map (Int) (VarSet)
 
@@ -255,7 +406,6 @@ module TransferFunctions (LConfig : LivenessConfig) (CFG : ProcCfg.S) = struct
 end
 
 module CFG = ProcCfg.OneInstrPerNode (ProcCfg.Backward (ProcCfg.Exceptional))
-module CheckerAnalyzer = AbstractInterpreter.MakeRPO (TransferFunctions (CheckerMode) (CFG))
 module PreAnalysisTransferFunctions = TransferFunctions (PreAnalysisMode)
 module BackwardCfg = ProcCfg.Backward (ProcCfg.Exceptional)
 module Iter = AbstractInterpreter.MakeBackwardRPO (PreAnalysisTransferFunctions (BackwardCfg))
@@ -294,22 +444,29 @@ let matcher_scope_guard =
 
 module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
   module CFG = CFG
-  module Domain = VarSet
+  module RefDomain = AbstractDomain.PairWithBottom (LocalAliases.Domain) (VarSet)
+  module Domain = AbstractDomain.PairWithBottom (RefDomain) (VarSet)
 
   type analysis_data = unit
 
-  let add_if_lvar expr astate =
+  let add_actual aliases expr escaped =
+    VarSet.union escaped (LocalAliases.reachable aliases (LocalAliases.address aliases expr))
+
+
+  let add_direct expr vars =
     match Exp.ignore_cast expr with
     | Exp.Lvar pvar ->
-        (* passed or captured by reference, add *)
-        Domain.add (Var.of_pvar pvar) astate
+        VarSet.add (Var.of_pvar pvar) vars
     | _ ->
-        (* passed or captured by value or init-capture, skip *)
-        astate
+        vars
 
 
   let proc_name_of_expr expr =
     match (expr : Exp.t) with Const (Cfun proc_name) -> Some proc_name | _ -> None
+
+
+  let is_skip expr =
+    proc_name_of_expr expr |> Option.exists ~f:(Procname.equal BuiltinDecl.__infer_skip)
 
 
   let is_dangerous expr =
@@ -317,9 +474,15 @@ module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
     proc_name_of_expr expr |> Option.exists ~f:CheckerMode.is_dangerous_proc_name
 
 
-  let exec_instr astate () _ _ (instr : Sil.instr) =
-    let astate =
+  let exec_instr ((aliases, passed_by_ref), escaped) () _ _ (instr : Sil.instr) =
+    let passed_by_ref, escaped =
       match instr with
+      | Call (_, f, actuals, _, _) when is_skip f ->
+          (* Explicit value-use markers do not read pointees or let addresses escape. Preserve
+             their existing direct-variable reporting suppression separately from real escapes. *)
+          ( List.fold actuals ~init:passed_by_ref ~f:(fun passed_by_ref (exp, _) ->
+                add_direct exp passed_by_ref )
+          , escaped )
       | Call (_ret, f, actuals, _loc, _flags) when not (is_dangerous f) ->
           let actuals =
             if Option.exists (proc_name_of_expr f) ~f:Procname.is_constructor then
@@ -331,25 +494,143 @@ module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
               List.tl actuals |> Option.value ~default:[]
             else actuals
           in
-          List.fold actuals ~init:astate ~f:(fun astate (actual, _typ) -> add_if_lvar actual astate)
+          let targets =
+            List.fold actuals ~init:VarSet.empty ~f:(fun targets (actual, _typ) ->
+                add_actual aliases actual targets )
+          in
+          (VarSet.union passed_by_ref targets, VarSet.union escaped targets)
+      | Store {e1; e2; _} when LocalAliases.store_escapes aliases escaped e1 ->
+          (add_actual aliases e2 passed_by_ref, add_actual aliases e2 escaped)
       | _ ->
-          astate
+          (passed_by_ref, escaped)
     in
-    List.fold (Sil.exps_of_instr instr) ~init:astate ~f:(fun astate exp ->
-        Exp.fold_captured exp ~f:(fun astate exp -> add_if_lvar exp astate) astate )
+    let captured =
+      List.fold (Sil.exps_of_instr instr) ~init:VarSet.empty ~f:(fun captured exp ->
+          (* Copying a pointer into a closure does not read its pointee. Keep the existing direct
+             reference-capture handling; closure fields and body summaries are outside these facts. *)
+          Exp.fold_captured exp ~f:(fun captured exp -> add_direct exp captured) captured )
+    in
+    let passed_by_ref = VarSet.union passed_by_ref captured in
+    let escaped = VarSet.union escaped captured in
+    let aliases =
+      match instr with
+      | Load {id; e; typ} ->
+          if LocalAliases.Domain.mem (Var.of_id id) aliases then
+            let value =
+              match typ.Typ.desc with
+              | Tptr _ ->
+                  LocalAliases.load aliases e
+              | _ ->
+                  LocalAliases.unknown
+            in
+            LocalAliases.Domain.add (Var.of_id id) value aliases
+          else aliases
+      | Store {e1; e2; typ} ->
+          LocalAliases.store aliases e1 e2 typ
+      | Call (_, f, _, _, _) when is_skip f ->
+          aliases
+      | Call ((id, _), _, _, _, _) ->
+          (* A call can change pointer cells whose addresses escaped, including earlier calls. *)
+          VarSet.fold
+            (fun var aliases ->
+              if LocalAliases.Domain.mem var aliases then
+                LocalAliases.Domain.add var LocalAliases.unknown aliases
+              else aliases )
+            escaped aliases
+          |> fun aliases ->
+          if LocalAliases.Domain.mem (Var.of_id id) aliases then
+            LocalAliases.Domain.add (Var.of_id id) LocalAliases.unknown aliases
+          else aliases
+      | _ ->
+          aliases
+    in
+    ((aliases, passed_by_ref), escaped)
 
 
   let pp_session_name _node fmt = F.pp_print_string fmt "passed by reference"
 end
 
-module PassedByRefAnalyzer =
-  AbstractInterpreter.MakeRPO (PassedByRefTransferFunctions (ProcCfg.Exceptional))
+module AliasCFG = ProcCfg.OneInstrPerNode (ProcCfg.Exceptional)
+module RefTransferFunctions = PassedByRefTransferFunctions (AliasCFG)
+module PassedByRefAnalyzer = AbstractInterpreter.MakeRPO (RefTransferFunctions)
 
 let get_passed_by_ref_invariant_map proc_desc =
-  let cfg = ProcCfg.Exceptional.from_pdesc proc_desc in
-  PassedByRefAnalyzer.exec_cfg cfg () ~initial:VarSet.empty
+  let cfg = AliasCFG.from_pdesc proc_desc in
+  PassedByRefAnalyzer.exec_cfg cfg ()
+    ~initial:((LocalAliases.initial proc_desc, VarSet.empty), VarSet.empty)
 
 
+let alias_node_id (node, backward_index) =
+  let index = max 0 (Instrs.count (Procdesc.Node.get_instrs node) - 1 - backward_index) in
+  (Procdesc.Node.get_id node, index)
+
+
+module CheckerTransferFunctions = struct
+  module Base = TransferFunctions (CheckerMode) (CFG)
+  include Base
+
+  type analysis_data = Procdesc.t * PassedByRefAnalyzer.invariant_map
+
+  let exec_instr astate (proc_desc, aliases_map) node index (instr : Sil.instr) =
+    let aliases, escaped =
+      PassedByRefAnalyzer.extract_pre (alias_node_id node) aliases_map
+      |> Option.value_map ~default:(LocalAliases.Domain.empty, VarSet.empty)
+           ~f:(fun ((aliases, _), escaped) -> (aliases, escaped) )
+    in
+    let astate =
+      match (instr : Sil.instr) with
+      | Store {e1= Lvar _} ->
+          (* The base transfer already kills direct stores. *)
+          astate
+      | Store {e1; typ} -> (
+        match LocalAliases.singleton_local (LocalAliases.address aliases e1) with
+        | Some pvar when not (is_always_in_scope proc_desc pvar) ->
+            let name = Pvar.get_name pvar in
+            let same_type =
+              List.exists (Procdesc.get_locals proc_desc) ~f:(fun local ->
+                  Mangled.equal name local.ProcAttributes.name
+                  && Typ.equal typ local.ProcAttributes.typ )
+              || List.exists (Procdesc.get_formals proc_desc) ~f:(fun (formal, formal_typ, _) ->
+                  Mangled.equal name formal && Typ.equal typ formal_typ )
+            in
+            if same_type then Domain.remove (Var.of_pvar pvar) astate else astate
+        | _ ->
+            astate )
+      | _ ->
+          astate
+    in
+    let astate = Base.exec_instr astate proc_desc node index instr in
+    let add_pointees exp astate =
+      VarSet.fold Domain.add (LocalAliases.locals (LocalAliases.address aliases exp)) astate
+    in
+    let add_reachable exp astate =
+      VarSet.fold Domain.add
+        (LocalAliases.reachable aliases (LocalAliases.address aliases exp))
+        astate
+    in
+    match instr with
+    | Load {id; e} when not (Ident.is_none id) ->
+        add_pointees e astate
+    | Call (_, call_exp, actuals, _, {CallFlags.cf_assign_last_arg})
+      when not (RefTransferFunctions.is_dangerous call_exp || RefTransferFunctions.is_skip call_exp)
+      ->
+        let actuals =
+          if cf_assign_last_arg then
+            match IList.split_last_rev actuals with
+            | Some ((Exp.Lvar pvar, _), rest) when not (is_always_in_scope proc_desc pvar) ->
+                rest
+            | _ ->
+                actuals
+          else actuals
+        in
+        List.fold actuals ~init:astate ~f:(fun astate (exp, _) -> add_reachable exp astate)
+    | Store {e1; e2; _} when LocalAliases.store_escapes aliases escaped e1 ->
+        add_reachable e2 astate
+    | _ ->
+        astate
+end
+
+module CheckerAnalyzer = AbstractInterpreter.MakeRPO (CheckerTransferFunctions)
 module IntLitSet = Stdlib.Set.Make (IntLit)
 
 let ignored_constants =
@@ -484,7 +765,11 @@ let names_read_by_closures proc_desc =
 let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   let passed_by_ref_invariant_map = get_passed_by_ref_invariant_map proc_desc in
   let cfg = CFG.from_pdesc proc_desc in
-  let invariant_map = CheckerAnalyzer.exec_cfg cfg proc_desc ~initial:ExtendedDomain.bottom in
+  let invariant_map =
+    CheckerAnalyzer.exec_cfg cfg
+      (proc_desc, passed_by_ref_invariant_map)
+      ~initial:ExtendedDomain.bottom
+  in
   (* Integer negation uses the captured target widths: unsigned values wrap, while signed
      overflow stays unknown. *)
   let integer_widths =
@@ -628,13 +913,9 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   in
   let report_on_node node =
     let passed_by_ref_vars =
-      match
-        PassedByRefAnalyzer.extract_post
-          (ProcCfg.Exceptional.Node.id (CFG.Node.underlying_node node))
-          passed_by_ref_invariant_map
-      with
-      | Some post ->
-          post
+      match PassedByRefAnalyzer.extract_post (alias_node_id node) passed_by_ref_invariant_map with
+      | Some ((_, passed_by_ref), _) ->
+          passed_by_ref
       | None ->
           VarSet.empty
     in
