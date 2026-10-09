@@ -916,14 +916,54 @@ module PointerIterator = struct
     store ~ref:iter_ref res
 end
 
-(** The frontend translates [{a, b, c}] into [__infer_initializer_list(&arr)] where [arr] holds the
-    elements. The list's elements and length are kept in model fields of the list object, which is
-    [arr] itself when the list is passed directly to a function. A local variable holding the list
-    is another object, whose fields are unknown. *)
+(** The frontend translates [{a, b, c}] into [__infer_initializer_list(&arr)]. The return value
+    carries the list's begin/size fields; stores and constructors copy those fields onto the actual
+    list object, whose begin pointer still refers to the shared backing array. *)
 module InitializerList = struct
   let begin_field = Fieldname.make PulseOperations.pulse_model_type "__infer_init_list_begin"
 
   let size_field = Fieldname.make PulseOperations.pulse_model_type "__infer_init_list_size"
+
+  let is_type =
+    let dispatch : (unit, bool, unit) ProcnameDispatcher.TypName.dispatcher =
+      let open ProcnameDispatcher.TypName in
+      make_dispatcher [-"std" &:: "initializer_list" &--> true]
+    in
+    fun typ ->
+      match typ.Typ.desc with
+      | Tstruct (CppClass _ as name) ->
+          Option.value (dispatch () name) ~default:false
+      | _ ->
+          false
+
+
+  let copy_value path location ~src ~dst astate =
+    let* astate, begin_value =
+      PulseOperations.eval_deref_access path Read location src (FieldAccess begin_field) astate
+    in
+    let* astate, size_value =
+      PulseOperations.eval_deref_access path Read location src (FieldAccess size_field) astate
+    in
+    let* astate =
+      PulseOperations.write_deref_field path location ~ref:dst begin_field ~obj:begin_value astate
+    in
+    PulseOperations.write_deref_field path location ~ref:dst size_field ~obj:size_value astate
+
+
+  let copy_constructor this source ~desc : model_no_non_disj =
+   fun {path; location; ret= ret_id, _} astate ->
+    let<+> astate = copy_value path location ~src:source ~dst:this astate in
+    PulseOperations.write_id ret_id (fst this, Hist.add_call path location desc (snd this)) astate
+
+
+  let default_constructor this ~desc : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* first = null in
+    let* zero = int 0 in
+    store_field ~ref:this begin_field first @@> store_field ~ref:this size_field zero
+
 
   let make ({FuncArg.arg_payload= arr; typ} : PulseModelsDSL.aval FuncArg.t) : model =
     let open PulseModelsDSL.Syntax in
@@ -2153,6 +2193,16 @@ let simple_matchers =
       $--> PointerIterator.advance ~desc:"std::advance"
     ; +BuiltinDecl.(match_builtin __infer_initializer_list)
       <>$ capt_arg $+...$--> InitializerList.make
+    ; -"std" &:: "initializer_list" &:: "initializer_list" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> InitializerList.copy_constructor ~desc:"std::initializer_list::initializer_list(copy)"
+      |> with_non_disj
+    ; -"std" &:: "initializer_list" &:: "operator=" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> InitializerList.copy_constructor ~desc:"std::initializer_list::operator=()"
+      |> with_non_disj
+    ; -"std" &:: "initializer_list" &:: "initializer_list" <>$ capt_arg_payload
+      $--> InitializerList.default_constructor ~desc:"std::initializer_list::initializer_list()"
     ; -"std" &:: "initializer_list" &:: "size" <>$ capt_arg_payload
       $--> InitializerList.size ~desc:"std::initializer_list::size()"
     ; -"std" &:: "initializer_list" &:: "begin" <>$ capt_arg_payload
