@@ -191,6 +191,19 @@ module SharedIntermediates = AbstractDomain.FiniteSet (Var)
 module Locked = AbstractDomain.BooleanOr
 module TrackedLoc = AbstractDomain.FiniteMultiMap (Location) (Timestamp)
 
+module CapturedSource = struct
+  type t = {source: AbstractValue.t; location: Location.t; timestamp: Timestamp.t}
+  [@@deriving compare]
+
+  let pp fmt {source; location; timestamp} =
+    F.fprintf fmt "%a at %a (timestamp: %d)" AbstractValue.pp source Location.pp location
+      (timestamp :> int)
+end
+
+module CapturedSources = AbstractDomain.FiniteSet (CapturedSource)
+module ClosureCaptures = AbstractDomain.FiniteMultiMap (AbstractValue) (CapturedSource)
+module EscapedCopies = AbstractDomain.FiniteSet (CopyVar)
+
 (** The value domain [Val] is conceptually a collection, i.e. a set or a map, that has a bottom
     value and an element can be added to it, e.g. using [f_add_v] in the [add] function. *)
 module MakeMapToCollection
@@ -222,6 +235,10 @@ module Loads = struct
 
 
   let get_all ident (ident_to_vars, _) = IdentToVars.find_all ident ident_to_vars
+
+  let add_use loc timestamp var (ident_to_vars, loaded_vars) =
+    (ident_to_vars, LoadedVars.add var loc timestamp loaded_vars)
+
 
   let is_loaded var (_, loaded_vars) = LoadedVars.mem var loaded_vars
 
@@ -298,6 +315,9 @@ module IntraDomElt = struct
     ; parameter_map: ParameterMap.t
     ; destructor_checked: DestructorChecked.t
     ; captured: Captured.t
+    ; closure_captures: ClosureCaptures.t
+    ; escaped_sources: CapturedSources.t
+    ; escaped_copies: EscapedCopies.t
     ; locked: Locked.t
     ; loads: Loads.t
     ; stores: Stores.t
@@ -311,6 +331,9 @@ module IntraDomElt = struct
       ; parameter_map
       ; destructor_checked
       ; captured
+      ; closure_captures
+      ; escaped_sources
+      ; escaped_copies
       ; locked
       ; loads
       ; passed_to
@@ -319,10 +342,12 @@ module IntraDomElt = struct
     F.fprintf fmt
       "@[@[copy map: %a@],@ @[parameter map: %a@],@ @[destructor checked: %a@],@ @[captured: \
        %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@],@ @[shared \
-       intermediates: %a@]@]"
+       intermediates: %a@],@ @[closure captures: %a@],@ @[escaped sources: %a@],@ @[escaped \
+       copies: %a@]@]"
       CopyMap.pp copy_map ParameterMap.pp parameter_map DestructorChecked.pp destructor_checked
       Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to ReachedEnd.pp
-      reached_end SharedIntermediates.pp shared_intermediates
+      reached_end SharedIntermediates.pp shared_intermediates ClosureCaptures.pp closure_captures
+      CapturedSources.pp escaped_sources EscapedCopies.pp escaped_copies
 
 
   let bottom =
@@ -330,6 +355,9 @@ module IntraDomElt = struct
     ; parameter_map= ParameterMap.empty
     ; destructor_checked= DestructorChecked.empty
     ; captured= Captured.bottom
+    ; closure_captures= ClosureCaptures.bottom
+    ; escaped_sources= CapturedSources.empty
+    ; escaped_copies= EscapedCopies.empty
     ; locked= Locked.bottom
     ; loads= Loads.bottom
     ; stores= Stores.bottom
@@ -343,6 +371,9 @@ module IntraDomElt = struct
       ; parameter_map
       ; destructor_checked
       ; captured
+      ; closure_captures
+      ; escaped_sources
+      ; escaped_copies
       ; locked
       ; loads
       ; stores
@@ -355,6 +386,9 @@ module IntraDomElt = struct
     && DestructorChecked.is_bottom destructor_checked
     && Captured.is_bottom captured && Locked.is_bottom locked && Loads.is_bottom loads
     && Stores.is_bottom stores && PassedTo.is_bottom passed_to
+    && ClosureCaptures.is_bottom closure_captures
+    && CapturedSources.is_bottom escaped_sources
+    && EscapedCopies.is_bottom escaped_copies
 
 
   let mark_copy_as_modified ?(reached_end = false) ~is_modified ~copied_into ~source_addr_opt
@@ -429,8 +463,9 @@ module IntraDomElt = struct
     {astate_n with destructor_checked= DestructorChecked.add var astate_n.destructor_checked}
 
 
-  let is_never_used_after_copy_into_intermediate_or_field pvar (copied_location : Location.t)
-      (copied_timestamp : Timestamp.t) {passed_to; loads; stores} =
+  let is_never_used_after_copy_into_intermediate_or_field copy_var pvar
+      (copied_location : Location.t) (copied_timestamp : Timestamp.t)
+      {passed_to; loads; stores; escaped_copies} =
     let is_after_copy =
       TrackedLoc.exists (fun location timestamp ->
           SourceFile.equal copied_location.file location.file
@@ -449,7 +484,9 @@ module IntraDomElt = struct
     in
     let is_loaded_after_copy = Loads.get_loaded_locations source_var loads |> is_after_copy in
     let is_stored_after_copy = Stores.find pvar stores |> is_after_copy in
-    not (is_loaded_after_copy || is_stored_after_copy || is_passed_to_non_destructor_after_copy)
+    not
+      ( EscapedCopies.mem copy_var escaped_copies
+      || is_loaded_after_copy || is_stored_after_copy || is_passed_to_non_destructor_after_copy )
 
 
   module CopiedSet = PrettyPrintable.MakePPSet (Attribute.CopiedInto)
@@ -514,8 +551,8 @@ module IntraDomElt = struct
               (* Note: We should NOT use [copied_location] here, because which is highly liked a
                     location of another procedure, so is unhelpful to reason about intra-procedrual
                     order. *)
-              is_never_used_after_copy_into_intermediate_or_field pvar location copied_timestamp
-                astate_n
+              is_never_used_after_copy_into_intermediate_or_field copy_var pvar location
+                copied_timestamp astate_n
             then
               (* if source var is never used later on, we can still suggest removing the copy even though the copy is modified *)
               (copied_into, source_typ, source_opt, node, location, copied_location, from) :: acc
@@ -629,6 +666,175 @@ module IntraDomElt = struct
         astate_n
 
 
+  (* Address identity follows closure copies and reference/pointer aliases in the heap, without
+     retaining an old binding when a pointer is reassigned. Do not follow reference captures here:
+     they are the sources of uses, not additional closures passed as arguments. *)
+  let captured_sources_of_addresses ?(filter = fun _ -> true) addresses astate {closure_captures} =
+    if ClosureCaptures.is_bottom closure_captures then CapturedSources.empty
+    else
+      let reachable =
+        AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq addresses)
+          ~edge_filter:(function
+            | Access.FieldAccess field ->
+                not (Fieldname.is_capture_field_in_closure_by_ref field)
+            | Dereference | ArrayAccess _ ->
+                true )
+          astate `Post
+      in
+      let get_repr = Formula.get_var_repr astate.AbductiveDomain.path_condition in
+      ClosureCaptures.fold
+        (fun closure captured sources ->
+          if AbstractValue.Set.mem (get_repr closure) reachable && filter closure then
+            CapturedSources.add captured sources
+          else sources )
+        closure_captures CapturedSources.empty
+
+
+  let record_capture_uses loc (timestamp : Timestamp.t) ~escapes sources astate
+      ({copy_map; loads; escaped_copies} as astate_n) =
+    if CapturedSources.is_bottom sources then astate_n
+    else
+      let roots =
+        CapturedSources.fold
+          (fun {CapturedSource.source; timestamp= captured_timestamp} roots ->
+            if (captured_timestamp :> int) <= (timestamp :> int) then source :: roots else roots )
+          sources []
+      in
+      let reachable =
+        AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq roots) astate `Post
+      in
+      let get_repr = Formula.get_var_repr astate.AbductiveDomain.path_condition in
+      let loads, escaped_copies =
+        CopyMap.fold
+          (fun ({CopyVar.source_addr_opt} as copy_var) (spec : CopySpec.t) (loads, escaped_copies)
+             ->
+            match (source_addr_opt, spec) with
+            | ( Some source
+              , ( Copied {source_opt= Some (PVar pvar, _)}
+                | Modified {source_opt= Some (PVar pvar, _)} ) )
+              when AbstractValue.Set.mem (get_repr source) reachable ->
+                ( Loads.add_use loc timestamp (Var.of_pvar pvar) loads
+                , if escapes then EscapedCopies.add copy_var escaped_copies else escaped_copies )
+            | _ ->
+                (loads, escaped_copies) )
+          copy_map (loads, escaped_copies)
+      in
+      {astate_n with loads; escaped_copies}
+
+
+  (* An opaque callback consumer may retain a pointee it sees now, even if a captured pointer is
+     later reassigned. Preserve the reachable addresses at the escape as well as the capture. *)
+  let freeze_escaped_sources loc timestamp sources astate =
+    CapturedSources.fold
+      (fun {CapturedSource.source} frozen ->
+        let reachable = AbductiveDomain.reachable_addresses_from (Seq.return source) astate `Post in
+        AbstractValue.Set.fold
+          (fun source frozen ->
+            CapturedSources.add {CapturedSource.source; location= loc; timestamp} frozen )
+          reachable frozen )
+      sources CapturedSources.empty
+
+
+  let record_closure_store loc timestamp ~rhs_addr ~is_escape astate astate_n =
+    let is_cpp_closure =
+      Option.exists (Formula.get_dynamic_type rhs_addr astate.AbductiveDomain.path_condition)
+        ~f:(fun {Formula.typ} ->
+          match typ.Typ.desc with Tstruct (CppClass _) -> true | _ -> false )
+    in
+    let astate_n =
+      if is_cpp_closure && not (ClosureCaptures.mem rhs_addr astate_n.closure_captures) then
+        let closure_captures =
+          AbductiveDomain.Memory.fold_edges rhs_addr astate ~init:astate_n.closure_captures
+            ~f:(fun captures (access, (source, _)) ->
+              match access with
+              | Access.FieldAccess field when Fieldname.is_capture_field_in_closure_by_ref field ->
+                  AbductiveDomain.Memory.find_edge_opt source Dereference astate
+                  |> Option.value_map ~default:captures ~f:(fun (source, _) ->
+                      ClosureCaptures.add rhs_addr
+                        {CapturedSource.source; location= loc; timestamp}
+                        captures )
+              | _ ->
+                  captures )
+        in
+        {astate_n with closure_captures}
+      else astate_n
+    in
+    let sources = captured_sources_of_addresses [rhs_addr] astate astate_n in
+    if CapturedSources.is_bottom sources || not (is_escape ()) then astate_n
+    else
+      let sources = freeze_escaped_sources loc timestamp sources astate in
+      let escaped_sources = CapturedSources.join astate_n.escaped_sources sources in
+      record_capture_uses loc timestamp ~escapes:true escaped_sources astate
+        {astate_n with escaped_sources}
+
+
+  let record_closure_load ~src ~dst astate astate_n =
+    let sources = captured_sources_of_addresses [src] astate astate_n in
+    if CapturedSources.is_bottom sources then astate_n
+    else
+      let closure_captures =
+        CapturedSources.fold
+          (fun captured captures -> ClosureCaptures.add dst captured captures)
+          sources astate_n.closure_captures
+      in
+      {astate_n with closure_captures}
+
+
+  let record_closure_call loc timestamp ~callee ~actuals ~has_new_unknown_effect astate astate_n =
+    if
+      ClosureCaptures.is_bottom astate_n.closure_captures
+      && CapturedSources.is_bottom astate_n.escaped_sources
+    then astate_n
+    else
+      let is_lambda_constructor =
+        Option.exists callee ~f:(fun pname ->
+            Procname.is_constructor pname && Procname.is_lambda pname )
+      in
+      (* Generated lambda constructors copy their reference captures without reading the sources.
+         Their bodies are not always captured, so retain this relation independently of a summary. *)
+      let astate_n =
+        match actuals with
+        | target :: source :: _ when is_lambda_constructor ->
+            record_closure_load ~src:source ~dst:target astate astate_n
+        | _ ->
+            astate_n
+      in
+      let is_copy_or_alias =
+        is_lambda_constructor
+        || Option.exists callee ~f:(fun pname ->
+            Procname.is_destructor pname || Procname.is_std_move pname
+            (* A discarded expression evaluates its address through this pure frontend builtin;
+               it neither invokes nor retains the callback. *)
+            || Procname.equal pname BuiltinDecl.__infer_skip
+            || Option.exists (IRAttributes.load pname) ~f:(fun attrs ->
+                attrs.ProcAttributes.is_cpp_copy_ctor || attrs.ProcAttributes.is_cpp_copy_assignment
+                || attrs.ProcAttributes.is_cpp_move_ctor ) )
+      in
+      let sources =
+        if is_copy_or_alias then CapturedSources.empty
+        else captured_sources_of_addresses actuals astate astate_n
+      in
+      (* A known invocation uses its captures now. An opaque callee can also keep the callback and
+       invoke it after subsequent copies, so its reference sources carry an escape obligation. *)
+      let is_opaque =
+        Option.value_map callee ~default:true ~f:(fun pname ->
+            (not (Procname.is_cpp_lambda pname))
+            && not
+                 (Option.exists (IRAttributes.load pname) ~f:(fun attrs ->
+                      attrs.ProcAttributes.is_defined ) ) )
+      in
+      let escaping_sources =
+        if is_copy_or_alias then CapturedSources.empty
+        else if is_opaque then sources
+        else captured_sources_of_addresses ~filter:has_new_unknown_effect actuals astate astate_n
+      in
+      let escaping_sources = freeze_escaped_sources loc timestamp escaping_sources astate in
+      let escaped_sources = CapturedSources.join astate_n.escaped_sources escaping_sources in
+      let astate_n = {astate_n with escaped_sources} in
+      record_capture_uses loc timestamp ~escapes:false sources astate astate_n
+      |> record_capture_uses loc timestamp ~escapes:true escaped_sources astate
+
+
   let set_locked astate_n = {astate_n with locked= true}
 
   let is_locked {locked} = locked
@@ -725,6 +931,17 @@ module IntraDom = struct
   let is_checked_via_destructor var = get ~default:true (IntraDomElt.is_checked_via_destructor var)
 
   let set_captured_variables exp = map (IntraDomElt.set_captured_variables exp)
+
+  let record_closure_store loc timestamp ~rhs_addr ~is_escape astate =
+    map (IntraDomElt.record_closure_store loc timestamp ~rhs_addr ~is_escape astate)
+
+
+  let record_closure_load ~src ~dst astate = map (IntraDomElt.record_closure_load ~src ~dst astate)
+
+  let record_closure_call loc timestamp ~callee ~actuals ~has_new_unknown_effect astate =
+    map
+      (IntraDomElt.record_closure_call loc timestamp ~callee ~actuals ~has_new_unknown_effect astate)
+
 
   let set_locked = map IntraDomElt.set_locked
 
@@ -933,6 +1150,17 @@ let add_parameter parameter_var res = map_intra (IntraDom.add_parameter paramete
 let is_checked_via_destructor var {intra} = IntraDom.is_checked_via_destructor var intra
 
 let set_captured_variables exp = map_intra (IntraDom.set_captured_variables exp)
+
+let record_closure_store loc timestamp ~rhs_addr ~is_escape astate =
+  map_intra (IntraDom.record_closure_store loc timestamp ~rhs_addr ~is_escape astate)
+
+
+let record_closure_load ~src ~dst astate = map_intra (IntraDom.record_closure_load ~src ~dst astate)
+
+let record_closure_call loc timestamp ~callee ~actuals ~has_new_unknown_effect astate =
+  map_intra
+    (IntraDom.record_closure_call loc timestamp ~callee ~actuals ~has_new_unknown_effect astate)
+
 
 let set_locked = map_intra IntraDom.set_locked
 
