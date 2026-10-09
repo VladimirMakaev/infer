@@ -68,8 +68,8 @@ int begin_end_of_local_list_ok() {
   return 0;
 }
 
-// the length of a list held in a local variable is unknown
-int FP_size_of_local_list_ok() {
+// a materialized list retains the length of its backing array
+int size_of_local_list_ok() {
   std::initializer_list<int> list = {1, 2, 3};
   if (list.size() != 3) {
     int* q = nullptr;
