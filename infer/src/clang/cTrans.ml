@@ -3037,7 +3037,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let switch_cases, (_ : trans_result) =
       SwitchCase.in_switch_body ~f:(instruction inner_trans_state) body
     in
-    let is_all_enum_cases_covered = switch_stmt_info.Clang_ast_t.ssi_is_all_enum_cases_covered in
+    (* The exporter proves coverage of the value domain, not just the named enumerators. *)
+    let is_all_enum_values_covered = switch_stmt_info.Clang_ast_t.ssi_is_all_enum_values_covered in
     let link_up_switch_cases (curr_succ_nodes, is_last_case) case =
       L.debug Capture Verbose "switch: curr_succ_nodes=[%a], linking case %a@\n"
         (Pp.semicolon_seq Procdesc.Node.pp)
@@ -3061,7 +3062,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                 res_trans_case_const.control.instrs sil_loc Sil.Ik_switch
             in
             Procdesc.node_set_succs context.procdesc true_prune_node ~normal:root_nodes ~exn:[] ;
-            if is_last_case && is_all_enum_cases_covered then
+            if is_last_case && is_all_enum_values_covered then
               (* return only the true branch as next roots because the false branch is infeasible *)
               [true_prune_node]
             else
@@ -3089,7 +3090,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           | {SwitchCase.condition= Case _} ->
               false )
       in
-      if is_all_enum_cases_covered then
+      if is_all_enum_values_covered then
         (* when all enum cases covered, the default case is infeasible *)
         cases
       else default @ cases
