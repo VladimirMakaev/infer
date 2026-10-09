@@ -391,10 +391,33 @@ module Iterator = struct
 
 
   let operator_star ~desc iter : model_no_non_disj =
-   fun {path; location; ret} astate ->
+   fun {path; location; ret; callee_procname; analysis_data= {proc_desc}} astate ->
     let event = Hist.call_event path location desc in
     let<+> astate, pointer, _, (elem, _) =
       to_elem_pointed_by_iterator path Read location iter astate
+    in
+    (* The backing array and position are model details, not source-level array indexing. *)
+    let is_reference_receiver =
+      match Decompiler.find (fst iter) astate with
+      | DecompilerExpr.SourceExpr ((PVar pvar, [Dereference]), _) ->
+          let name = Pvar.get_name pvar in
+          let is_reference (typ : Typ.t) =
+            match typ.desc with
+            | Tptr (_, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+                true
+            | _ ->
+                false
+          in
+          List.exists (Procdesc.get_formals proc_desc) ~f:(fun (formal, typ, _) ->
+              Mangled.equal name formal && is_reference typ )
+          || List.exists (Procdesc.get_locals proc_desc) ~f:(fun local ->
+              Mangled.equal name local.ProcAttributes.name && is_reference local.ProcAttributes.typ )
+      | _ ->
+          false
+    in
+    let astate =
+      Decompiler.add_iterator_source elem (ModelName callee_procname) ~src:(fst iter)
+        ~is_reference_receiver astate
     in
     PulseOperations.write_id (fst ret) (elem, Hist.add_event event (snd pointer)) astate
 
