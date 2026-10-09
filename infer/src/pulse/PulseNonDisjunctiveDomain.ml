@@ -11,6 +11,7 @@ module IRAttributes = Attributes
 open PulseBasicInterface
 module AbductiveDomain = PulseAbductiveDomain
 module BaseMemory = PulseBaseMemory
+module BaseStack = PulseBaseStack
 module DecompilerExpr = PulseDecompilerExpr
 module ExecutionDomain = PulseExecutionDomain
 module PathContext = PulsePathContext
@@ -588,46 +589,63 @@ module IntraDomElt = struct
 
   let remove_var var astate_n = {astate_n with copy_map= CopyMap.remove_var var astate_n.copy_map}
 
+  let has_intermediate_copies {copy_map} =
+    CopyMap.fold
+      (fun CopyVar.{copied_into; source_addr_opt} _ found ->
+        found
+        ||
+        match (copied_into, source_addr_opt) with
+        | IntoIntermediate _, Some _ ->
+            true
+        | _ ->
+            false )
+      copy_map false
+
+
   (* The order of evaluation of the arguments of a call is unspecified, so a variable that is copied
      into an intermediate for one argument and also used by another argument cannot be moved. *)
-  let mark_intermediates_with_shared_source actuals ({copy_map; loads} as astate_n) =
-    let intermediate_source_of pvar =
+  let mark_intermediates_with_shared_source actuals astate ({copy_map} as astate_n) =
+    let get_repr = Formula.get_var_repr astate.AbductiveDomain.path_condition in
+    let equal_address left right = AbstractValue.equal (get_repr left) (get_repr right) in
+    let intermediates_of (actual, actual_addr_opt) =
       CopyMap.fold
-        (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
-          match (copied_into, copy_spec) with
-          | ( IntoIntermediate {copied_var= ProgramVar tmp}
-            , ( Copied {source_opt= Some (PVar source, _)}
-              | Modified {source_opt= Some (PVar source, _)} ) )
-            when Pvar.equal tmp pvar ->
-              Some source
-          | _ ->
-              acc )
-        copy_map None
-    in
-    let intermediates, used =
-      List.fold actuals ~init:([], []) ~f:(fun (intermediates, used) ((actual : Exp.t), _) ->
-          match actual with
-          | Lvar pvar -> (
-            match intermediate_source_of pvar with
-            | Some source ->
-                ((pvar, source) :: intermediates, source :: used)
-            | None ->
-                (intermediates, pvar :: used) )
-          | Var ident ->
-              let loaded =
-                List.filter_map (Loads.get_all ident loads) ~f:(fun (var : Var.t) ->
-                    match var with ProgramVar pvar -> Some pvar | LogicalVar _ -> None )
+        (fun CopyVar.{copied_into; source_addr_opt} _ intermediates ->
+          match (copied_into, source_addr_opt) with
+          | IntoIntermediate {copied_var}, Some source ->
+              let is_actual =
+                match (actual : Exp.t) with
+                | Lvar pvar when Var.equal copied_var (Var.of_pvar pvar) ->
+                    true
+                | _ ->
+                    Option.exists actual_addr_opt ~f:(fun actual_addr ->
+                        BaseStack.find_opt copied_var
+                          (astate.AbductiveDomain.post :> PulseBaseDomain.t).stack
+                        |> Option.exists ~f:(fun target ->
+                            equal_address actual_addr (ValueOrigin.value target) ) )
               in
-              (intermediates, loaded @ used)
+              if is_actual then (copied_var, source) :: intermediates else intermediates
           | _ ->
-              (intermediates, used) )
+              intermediates )
+        copy_map []
     in
-    List.fold intermediates ~init:astate_n ~f:(fun astate_n (tmp, source) ->
-        if List.count used ~f:(Pvar.equal source) > 1 then
-          { astate_n with
-            shared_intermediates=
-              SharedIntermediates.add (Var.of_pvar tmp) astate_n.shared_intermediates }
-        else astate_n )
+    let actuals =
+      List.mapi actuals ~f:(fun index ((_, address) as actual) ->
+          (index, address, intermediates_of actual) )
+    in
+    List.fold actuals ~init:astate_n ~f:(fun astate_n (index, _, intermediates) ->
+        List.fold intermediates ~init:astate_n ~f:(fun astate_n (copied_var, source) ->
+            let shared =
+              List.exists actuals ~f:(fun (other_index, address, copies) ->
+                  (not (Int.equal index other_index))
+                  && ( Option.exists address ~f:(equal_address source)
+                     || List.exists copies ~f:(fun (_, other_source) ->
+                         equal_address source other_source ) ) )
+            in
+            if shared then
+              { astate_n with
+                shared_intermediates=
+                  SharedIntermediates.add copied_var astate_n.shared_intermediates }
+            else astate_n ) )
 
 
   let add_field copied_field ~source_addr_opt res astate_n =
@@ -918,8 +936,10 @@ module IntraDom = struct
 
   let remove_var var = map (IntraDomElt.remove_var var)
 
-  let mark_intermediates_with_shared_source actuals =
-    map (IntraDomElt.mark_intermediates_with_shared_source actuals)
+  let has_intermediate_copies = get ~default:false IntraDomElt.has_intermediate_copies
+
+  let mark_intermediates_with_shared_source actuals astate =
+    map (IntraDomElt.mark_intermediates_with_shared_source actuals astate)
 
 
   let add_field copied_field ~source_addr_opt res =
@@ -1137,8 +1157,10 @@ let add_var copied_into ~source_addr_opt res =
 
 let remove_var var = map_intra (IntraDom.remove_var var)
 
-let mark_intermediates_with_shared_source actuals =
-  map_intra (IntraDom.mark_intermediates_with_shared_source actuals)
+let has_intermediate_copies {intra} = IntraDom.has_intermediate_copies intra
+
+let mark_intermediates_with_shared_source actuals astate =
+  map_intra (IntraDom.mark_intermediates_with_shared_source actuals astate)
 
 
 let add_field copied_field ~source_addr_opt res =
