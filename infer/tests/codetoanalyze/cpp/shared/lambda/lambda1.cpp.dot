@@ -748,7 +748,7 @@ digraph cfg {
 "operator()#lambda_lambda1.cpp:114.1f0b0894318c1d25_2" [label="2: Exit lambda_lambda1.cpp:114_8f63c59e::operator() \n  " color=yellow style=filled]
 	
 
-"operator()#lambda_lambda1.cpp:114.1f0b0894318c1d25_3" [label="3:  Return Stmt \n   n$0=*&x:SomeStruct& [line 114, column 33]\n  n$1=*n$0.f:int [line 114, column 33]\n  n$2=*&xref:SomeStruct& [line 114, column 39]\n  n$3=*n$2.f:int [line 114, column 39]\n " shape="box"]
+"operator()#lambda_lambda1.cpp:114.1f0b0894318c1d25_3" [label="3:  Return Stmt \n   n$0=*&x:SomeStruct const & [line 114, column 33]\n  n$1=*n$0.f:int [line 114, column 33]\n  n$2=*&xref:SomeStruct const & [line 114, column 39]\n  n$3=*n$2.f:int [line 114, column 39]\n " shape="box"]
 	
 
 	 "operator()#lambda_lambda1.cpp:114.1f0b0894318c1d25_3" -> "operator()#lambda_lambda1.cpp:114.1f0b0894318c1d25_4" ;
@@ -804,7 +804,7 @@ digraph cfg {
 "operator()#lambda_lambda1.cpp:131.386c7c9c833b5f1f_2" [label="2: Exit lambda_lambda1.cpp:131_815acded::operator() \n  " color=yellow style=filled]
 	
 
-"operator()#lambda_lambda1.cpp:131.386c7c9c833b5f1f_3" [label="3:  Return Stmt \n   n$0=*&xlambda:SomeStruct& [line 132, column 12]\n  n$1=*n$0.f:int [line 132, column 12]\n  n$2=*&xreflambda:SomeStruct& [line 132, column 24]\n  n$3=*n$2.f:int [line 132, column 24]\n " shape="box"]
+"operator()#lambda_lambda1.cpp:131.386c7c9c833b5f1f_3" [label="3:  Return Stmt \n   n$0=*&xlambda:SomeStruct const & [line 132, column 12]\n  n$1=*n$0.f:int [line 132, column 12]\n  n$2=*&xreflambda:SomeStruct const & [line 132, column 24]\n  n$3=*n$2.f:int [line 132, column 24]\n " shape="box"]
 	
 
 	 "operator()#lambda_lambda1.cpp:131.386c7c9c833b5f1f_3" -> "operator()#lambda_lambda1.cpp:131.386c7c9c833b5f1f_4" ;
@@ -860,7 +860,7 @@ digraph cfg {
 "operator()#lambda_lambda1.cpp:149.e56558b00a930083_2" [label="2: Exit lambda_lambda1.cpp:149_9404e6fd::operator() \n  " color=yellow style=filled]
 	
 
-"operator()#lambda_lambda1.cpp:149.e56558b00a930083_3" [label="3:  Return Stmt \n   n$0=*&a:int[2*4](&) [line 149, column 27]\n  n$1=*n$0[0]:int [line 149, column 27]\n  n$2=*&a:int[2*4](&) [line 149, column 34]\n  n$3=*n$2[1]:int [line 149, column 34]\n " shape="box"]
+"operator()#lambda_lambda1.cpp:149.e56558b00a930083_3" [label="3:  Return Stmt \n   n$0=*&a:int[2*4] const (&) [line 149, column 27]\n  n$1=*n$0[0]:int [line 149, column 27]\n  n$2=*&a:int[2*4] const (&) [line 149, column 34]\n  n$3=*n$2[1]:int [line 149, column 34]\n " shape="box"]
 	
 
 	 "operator()#lambda_lambda1.cpp:149.e56558b00a930083_3" -> "operator()#lambda_lambda1.cpp:149.e56558b00a930083_4" ;
@@ -1024,7 +1024,7 @@ digraph cfg {
 "operator()#lambda_lambda1.cpp:77_.e3498e1de6f7f400_2" [label="2: Exit lambda_lambda1.cpp:77_53b2556e::operator() \n  " color=yellow style=filled]
 	
 
-"operator()#lambda_lambda1.cpp:77_.e3498e1de6f7f400_3" [label="3:  Return Stmt \n   n$0=*&x:SomeStruct& [line 77, column 30]\n  n$1=*n$0.f:int [line 77, column 30]\n  n$2=*&y:SomeStruct& [line 77, column 36]\n  n$3=*n$2.f:int [line 77, column 36]\n " shape="box"]
+"operator()#lambda_lambda1.cpp:77_.e3498e1de6f7f400_3" [label="3:  Return Stmt \n   n$0=*&x:SomeStruct const & [line 77, column 30]\n  n$1=*n$0.f:int [line 77, column 30]\n  n$2=*&y:SomeStruct const & [line 77, column 36]\n  n$3=*n$2.f:int [line 77, column 36]\n " shape="box"]
 	
 
 	 "operator()#lambda_lambda1.cpp:77_.e3498e1de6f7f400_3" -> "operator()#lambda_lambda1.cpp:77_.e3498e1de6f7f400_4" ;
