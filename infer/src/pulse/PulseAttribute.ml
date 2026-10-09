@@ -215,6 +215,9 @@ module Attribute = struct
           |> Option.bind ~f:(fun (md1, md2) -> Option.some_if (Metadata.equal md1 md2) md1) )
   end
 
+  type lookup_key = KnownInteger of IntLit.t | SymbolicInteger of AbstractValue.t
+  [@@deriving compare, equal, yojson_of]
+
   type t =
     | AddressOfCppTemporary of Var.t * ValueHistory.t
     | AddressOfStackVariable of Var.t * Location.t * ValueHistory.t
@@ -267,6 +270,7 @@ module Attribute = struct
     | UnreachableAt of Location.t
     | UsedAsBranchCond of Procname.t * Location.t * Trace.t
     | WrittenTo of Timestamp.t * Trace.t
+    | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -312,6 +316,8 @@ module Attribute = struct
   let java_resource_released_rank = Variants.javaresourcereleased.rank
 
   let last_lookup_rank = Variants.lastlookup.rank
+
+  let last_lookup_value_rank = Variants.lastlookupvalue.rank
 
   let awaited_awaitable_rank = Variants.awaitedawaitable.rank
 
@@ -402,6 +408,15 @@ module Attribute = struct
           trace
     | LastLookup value ->
         F.fprintf f "LastLookup(%a)" AbstractValue.pp value
+    | LastLookupValue {key; first_key; known_present} ->
+        let pp_key f = function
+          | KnownInteger value ->
+              IntLit.pp f value
+          | SymbolicInteger value ->
+              AbstractValue.pp f value
+        in
+        F.fprintf f "LastLookupValue(%a, first=%a, present=%b)" pp_key key (Pp.option pp_key)
+          first_key known_present
     | MustBeAwaited ->
         F.fprintf f "MustBeAwaited"
     | MustBeInitialized (timestamp, trace) ->
@@ -493,6 +508,7 @@ module Attribute = struct
     | Initialized
     | JavaResourceReleased
     | LastLookup _
+    | LastLookupValue _
     | CSharpResourceReleased
     | AwaitedAwaitable
     | HackBuilder _ (* TODO: right choice? Planning on doing on the outside in pulse call/return *)
@@ -543,6 +559,7 @@ module Attribute = struct
     | Invalid _
     | JavaResourceReleased
     | LastLookup _
+    | LastLookupValue _
     | CSharpResourceReleased
     | AwaitedAwaitable
     | HackBuilder _ (* TODO: right choice again? *)
@@ -588,6 +605,7 @@ module Attribute = struct
     | Invalid _
     | JavaResourceReleased
     | LastLookup _
+    | LastLookupValue _
     | CSharpResourceReleased
     | AwaitedAwaitable
     | HackBuilder _
@@ -625,6 +643,16 @@ module Attribute = struct
         Allocated (proc_name, add_call_to_trace trace)
     | ConfigUsage (StringParam {v; config_type}) ->
         ConfigUsage (StringParam {v= subst v; config_type})
+    | LastLookupValue {key; first_key; known_present} ->
+        let subst_key key =
+          match key with
+          | KnownInteger _ ->
+              key
+          | SymbolicInteger value ->
+              SymbolicInteger (subst value)
+        in
+        LastLookupValue
+          {key= subst_key key; first_key= Option.map first_key ~f:subst_key; known_present}
     | ContentsOverwritten hist ->
         ContentsOverwritten (add_call_to_history hist)
     | CopiedReturn {source; is_const_ref; from; copied_location} ->
@@ -827,6 +855,7 @@ module Attribute = struct
       | Invalid _
       | JavaResourceReleased
       | LastLookup _
+      | LastLookupValue _
       | MustBeAwaited
       | MustBeInitialized _
       | MustBeNonNull _
@@ -1091,6 +1120,11 @@ module Attributes = struct
   let get_last_lookup =
     get_by_rank Attribute.last_lookup_rank ~dest:(function[@warning "-partial-match"]
         | LastLookup value -> value )
+
+
+  let get_last_lookup_value =
+    get_by_rank Attribute.last_lookup_value_rank ~dest:(function[@warning "-partial-match"]
+        | LastLookupValue {key; first_key; known_present} -> (key, first_key, known_present) )
 
 
   let is_modified attrs =

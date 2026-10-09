@@ -32,7 +32,34 @@ let add_one addr attribute attrs =
   | None ->
       Graph.add addr (Attributes.singleton attribute) attrs
   | Some old_attrs ->
-      let new_attrs = Attributes.add old_attrs attribute in
+      let old_attrs =
+        match (attribute : Attribute.t) with
+        | UnknownEffect _ | ContentsOverwritten _ -> (
+          match Attributes.get_last_lookup_value old_attrs with
+          | Some (key, first_key, true) ->
+              Attributes.update
+                (Attribute.LastLookupValue {key; first_key; known_present= false})
+                old_attrs
+          | _ ->
+              old_attrs )
+        | _ ->
+            old_attrs
+      in
+      let new_attrs =
+        match attribute with
+        | Attribute.LastLookupValue {key; known_present; _} ->
+            (* LastLookup keeps the first source; preserve its value fingerprint as well. *)
+            let first_key =
+              match Attributes.get_last_lookup_value old_attrs with
+              | Some (_, first_key, _) ->
+                  first_key
+              | None ->
+                  Some key
+            in
+            Attributes.update (Attribute.LastLookupValue {key; first_key; known_present}) old_attrs
+        | _ ->
+            Attributes.add old_attrs attribute
+      in
       Graph.add addr new_attrs attrs
 
 
