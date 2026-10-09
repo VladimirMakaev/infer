@@ -241,6 +241,8 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | UsedAsBranchCond _
   | WrittenTo _ ->
       Some attr
+  | LastLookupValue {key; first_key; _} ->
+      Some (Attribute.LastLookupValue {key; first_key; known_present= false})
   | AddressOfCppTemporary _
   | AddressOfStackVariable _
   | ConfigUsage _
@@ -321,6 +323,31 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       else None
   | LastLookup v1, LastLookup v2 ->
       mk_from_joined_values v1 v2 ~f:(fun v -> LastLookup v)
+  | ( LastLookupValue {key= key1; first_key= first1; known_present= present1}
+    , LastLookupValue {key= key2; first_key= first2; known_present= present2} ) -> (
+      let known_present = present1 && present2 in
+      let make (key : Attribute.lookup_key) : Attribute.t =
+        let first_key =
+          match (first1, first2) with
+          | Some left, Some right when Attribute.equal_lookup_key left right ->
+              Some left
+          | Some (SymbolicInteger left), Some (SymbolicInteger right) ->
+              Subst.find_opt (Some left, Some right) join_state.subst
+              |> Option.map ~f:(fun value -> Attribute.SymbolicInteger value)
+          | _ ->
+              None
+        in
+        Attribute.LastLookupValue {key; first_key; known_present}
+      in
+      match (key1, key2) with
+      | KnownInteger left, KnownInteger right when IntLit.equal left right ->
+          Some (make key1)
+      | SymbolicInteger left, SymbolicInteger right when AbstractValue.equal left right ->
+          Some (make key1)
+      | SymbolicInteger left, SymbolicInteger right ->
+          mk_from_joined_values left right ~f:(fun value -> make (SymbolicInteger value))
+      | _ ->
+          None )
   | MustBeInitialized _, MustBeInitialized _ ->
       (* doesn't really matter which branch is doing the reading for now *) Some attr1
   | MustBeNonNull _, MustBeNonNull _ ->

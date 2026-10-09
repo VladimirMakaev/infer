@@ -127,6 +127,9 @@ module ConstKeys : sig
   val inter : t -> t -> t
 end
 
+type lookup_key = KnownInteger of IntLit.t | SymbolicInteger of AbstractValue.t
+[@@deriving compare, equal, yojson_of]
+
 type t =
   | AddressOfCppTemporary of Var.t * ValueHistory.t
   | AddressOfStackVariable of Var.t * Location.t * ValueHistory.t
@@ -193,6 +196,7 @@ type t =
           reporting leaks *)
   | UsedAsBranchCond of Procname.t * Location.t * Trace.t
   | WrittenTo of Timestamp.t * Trace.t
+  | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -297,6 +301,8 @@ module Attributes : sig
   val get_std_vector_erased : t -> Trace.t option
 
   val get_last_lookup : t -> AbstractValue.t option
+
+  val get_last_lookup_value : t -> (lookup_key * lookup_key option * bool) option
 
   val get_uninitialized : t -> UninitializedTyp.t option
 
