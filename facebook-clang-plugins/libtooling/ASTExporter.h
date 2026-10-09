@@ -28,7 +28,10 @@
  */
 
 #pragma once
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <set>
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -283,6 +286,7 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   void dumpName(const NamedDecl &decl);
   void dumpInputKind(const InputKind kind);
   void dumpIntegerTypeWidths(const TargetInfo &info);
+  bool isAllEnumValuesCovered(const SwitchStmt *Node) const;
   void dumpVarDeclInfo(const VarDecl *D);
 
   bool alwaysEmitParent(const Decl *D);
@@ -3082,6 +3086,7 @@ int ASTExporter<ATDWriter>::SwitchStmtTupleSize() {
 //@atd   cond : pointer;
 //@atd   body : pointer;
 //@atd   ~is_all_enum_cases_covered : bool;
+//@atd   ~is_all_enum_values_covered : bool;
 //@atd } <ocaml field_prefix="ssi_">
 template <class ATDWriter>
 void ASTExporter<ATDWriter>::VisitSwitchStmt(const SwitchStmt *Node) {
@@ -3089,7 +3094,10 @@ void ASTExporter<ATDWriter>::VisitSwitchStmt(const SwitchStmt *Node) {
   const Stmt *Init = Node->getInit();
   const DeclStmt *CondVar = Node->getConditionVariableDeclStmt();
   const bool IsAllEnumCasesCovered = Node->isAllEnumCasesCovered();
-  ObjectScope Scope(OF, 2 + (bool)Init + (bool)CondVar + IsAllEnumCasesCovered);
+  const bool IsAllEnumValuesCovered = isAllEnumValuesCovered(Node);
+  ObjectScope Scope(OF,
+                    2 + (bool)Init + (bool)CondVar + IsAllEnumCasesCovered +
+                        IsAllEnumValuesCovered);
   if (Init) {
     OF.emitTag("init");
     dumpPointer(Init);
@@ -3103,6 +3111,62 @@ void ASTExporter<ATDWriter>::VisitSwitchStmt(const SwitchStmt *Node) {
   OF.emitTag("body");
   dumpPointer(Node->getBody());
   OF.emitFlag("is_all_enum_cases_covered", IsAllEnumCasesCovered);
+  OF.emitFlag("is_all_enum_values_covered", IsAllEnumValuesCovered);
+}
+
+template <class ATDWriter>
+bool ASTExporter<ATDWriter>::isAllEnumValuesCovered(
+    const SwitchStmt *Node) const {
+  if (!Node->isAllEnumCasesCovered())
+    return false;
+
+  const auto *EnumTy =
+      Node->getCond()->IgnoreParenImpCasts()->getType()->getAs<EnumType>();
+  if (!EnumTy)
+    return false;
+  const EnumDecl *Enum = EnumTy->getDecl()->getDefinition();
+  if (!Enum || Enum->getIntegerType().isNull())
+    return false;
+
+  unsigned DomainBits;
+  if (Context.getLangOpts().CPlusPlus && !Enum->isFixed()) {
+    // A non-fixed C++ enum has the range of the smallest bit-field holding
+    // every enumerator. Negative values require a sign bit.
+    unsigned PositiveBits = 0, NegativeBits = 0;
+    for (const EnumConstantDecl *Constant : Enum->enumerators()) {
+      const llvm::APSInt &Value = Constant->getInitVal();
+      if (Value.isNegative())
+        NegativeBits = std::max(NegativeBits, Value.getSignificantBits());
+      else
+        PositiveBits = std::max(PositiveBits, Value.getActiveBits());
+    }
+    // Zero needs no value bits when a sign bit already represents it, as in
+    // {-1, 0}; an unsigned bit-field still needs at least one bit.
+    DomainBits = NegativeBits ? std::max(NegativeBits, PositiveBits + 1)
+                              : std::max(1u, PositiveBits);
+  } else {
+    // Fixed C++ enums (and C enums) have the full underlying type's domain.
+    // bool has two values, regardless of its storage size.
+    DomainBits = Enum->getIntegerType()->isBooleanType()
+                     ? 1
+                     : Context.getIntWidth(Enum->getIntegerType());
+  }
+  if (DomainBits >= 64)
+    return false; // No realizable enumerator list covers such a large domain.
+  const uint64_t DomainSize = uint64_t{1} << DomainBits;
+  if (static_cast<uint64_t>(std::distance(Enum->enumerator_begin(),
+                                          Enum->enumerator_end())) < DomainSize)
+    return false;
+
+  // Aliases must not count as additional values. APSInt comparison also
+  // handles enumerators whose initializer types have different widths.
+  auto Less = [](const llvm::APSInt &Left, const llvm::APSInt &Right) {
+    return llvm::APSInt::compareValues(Left, Right) < 0;
+  };
+  std::set<llvm::APSInt, decltype(Less)> Values(Less);
+  for (const EnumConstantDecl *Constant : Enum->enumerators())
+    Values.insert(Constant->getInitVal());
+  return Values.size() == DomainSize;
 }
 
 template <class ATDWriter>
