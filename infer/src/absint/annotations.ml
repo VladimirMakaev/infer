@@ -39,6 +39,8 @@ let nonnull = "Nonnull"
 
 let nonnull_parameter = "NonnullParameter"
 
+let takes_fd_ownership = "infer_takes_fd_ownership"
+
 let no_allocation = "NoAllocation"
 
 let nullable = "Nullable"
