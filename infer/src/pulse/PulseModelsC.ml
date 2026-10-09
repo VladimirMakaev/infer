@@ -879,6 +879,21 @@ include struct
     @@> assign_ret (* pretend [snprintf] always succeeds *) @= fresh_nonneg ()
 
 
+  let snprintf str size format args =
+    start_model
+    @@ fun () ->
+    disj
+      [ prune_eq_zero (to_aval size) @@> check_valid format @@> assign_ret @= fresh_nonneg ()
+      ; prune_ne_zero (to_aval size) @@> lift_to_monad (sprintf str format args) ]
+
+
+  let vsnprintf str size =
+    start_model
+    @@ fun () ->
+    disj [prune_eq_zero (to_aval size); prune_ne_zero (to_aval size) @@> check_valid str]
+    @@> assign_ret @= fresh ()
+
+
   let fputs s stream =
     start_model
     @@ fun () ->
@@ -1412,7 +1427,7 @@ let matchers : matcher list =
   ; -"setvbuf" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $+ any_arg
     $--> compose2 setbuf (ignore_args2 non_det_ret)
   ; -"shmget" <>$ any_arg $+ any_arg $+ any_arg $--> shmget
-  ; -"snprintf" <>$ capt_arg_payload $+ any_arg (* size *) $+ capt_arg_payload $+++$--> sprintf
+  ; -"snprintf" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload $+++$--> snprintf
   ; -"socket" <>$ any_arg $+ any_arg $+ any_arg $--> open_
   ; -"socketpair" <>$ any_arg $+ any_arg $+ any_arg
     $+ capt_arg_payload_of_prim_typ int_ptr_typ
@@ -1469,7 +1484,7 @@ let matchers : matcher list =
   ; -"vfscanf" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> vfscanf
   ; -"vprintf" <>$ capt_arg_payload $+...$--> compose1 valid_arg (ignore_arg non_det_ret)
   ; -"vscanf" <>$ capt_arg_payload $+ any_arg $--> vscanf
-  ; -"vsnprintf" <>$ capt_arg_payload $+...$--> compose1 valid_arg (ignore_arg non_det_ret)
+  ; -"vsnprintf" <>$ capt_arg_payload $+ capt_arg_payload $+...$--> vsnprintf
   ; -"vsprintf" <>$ capt_arg_payload $+...$--> compose1 valid_arg (ignore_arg non_det_ret)
   ; -"vsscanf" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> vfscanf
   ; -"write" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload $--> write_fd
