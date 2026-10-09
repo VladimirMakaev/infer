@@ -81,9 +81,12 @@ val add_var :
 
 val remove_var : Var.t -> t -> t
 
-val mark_intermediates_with_shared_source : (Exp.t * Typ.t) list -> t -> t
-(** the copies into the intermediates passed to a call whose source variable is also used by another
-    argument of the call are not reported *)
+val has_intermediate_copies : t -> bool
+
+val mark_intermediates_with_shared_source :
+  (Exp.t * AbstractValue.t option) list -> AbductiveDomain.t -> t -> t
+(** Do not report intermediate copies whose source object is also used by another argument of the
+    same call. Addresses are evaluated in the state before applying the callee. *)
 
 val add_field : Fieldname.t -> source_addr_opt:AbstractValue.t option -> copy_spec_t -> t -> t
 

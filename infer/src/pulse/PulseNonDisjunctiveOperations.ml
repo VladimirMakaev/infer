@@ -796,7 +796,28 @@ let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~as
     astate_n =
   match (call_exp : Exp.t) with
   | Const (Cfun pname) | Closure {name= pname} ->
-      let astate_n = NonDisjDomain.mark_intermediates_with_shared_source actuals astate_n in
+      let astate_n =
+        if List.length actuals < 2 || not (NonDisjDomain.has_intermediate_copies astate_n) then
+          astate_n
+        else
+          List.fold astates_before ~init:astate_n ~f:(fun astate_n astate ->
+              let astate, addresses =
+                List.fold actuals ~init:(astate, []) ~f:(fun (astate, addresses) (actual, typ) ->
+                    let astate, address =
+                      match typ.Typ.desc with
+                      | Tptr _ -> (
+                        match try_eval path loc actual astate with
+                        | Some (astate, address) ->
+                            (astate, Some address)
+                        | None ->
+                            (astate, None) )
+                      | _ ->
+                          (astate, None)
+                    in
+                    (astate, (actual, address) :: addresses) )
+              in
+              NonDisjDomain.mark_intermediates_with_shared_source addresses astate astate_n )
+      in
       (* the paths that reach the end of the scope of the copy may not include this assignment,
          e.g. when it is in a loop whose condition is an unknown call on the copy, which Pulse
          assumes returns the same value on every iteration *)
