@@ -984,7 +984,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         {res_trans with control= {res_trans.control with initd_exps= [fst var_exp_typ]}}
 
 
-  and var_deref_trans trans_state stmt_info (decl_ref : Clang_ast_t.decl_ref) =
+  and var_deref_trans ?expr_info trans_state stmt_info (decl_ref : Clang_ast_t.decl_ref) =
     let context = trans_state.context in
     let _, decl_ptr, ast_qual_type = CAst_utils.get_info_from_decl_ref decl_ref in
     let ast_typ = CType_decl.qual_type_to_sil_type context.tenv ast_qual_type in
@@ -1026,7 +1026,19 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         let pvar_name = Pvar.get_name pvar in
         List.find (Procdesc.get_captured context.procdesc) ~f:(fun {CapturedVar.pvar= captured} ->
             Mangled.equal (Pvar.get_name captured) pvar_name )
-        |> Option.value_map ~f:(fun {CapturedVar.typ} -> typ) ~default:typ
+        |> Option.value_map
+             ~f:(fun {CapturedVar.typ} ->
+               (* A by-value capture is const when read in a non-mutable lambda, although its
+                  declaration and the type stored for the capture need not be const. Keep the
+                  expression's qualification without changing the synthetic reference used to
+                  access the capture, or the pointee of a captured pointer. *)
+               if
+                 Procname.is_cpp_lambda procname
+                 && Option.exists expr_info ~f:(fun {Clang_ast_t.ei_qual_type} ->
+                     ei_qual_type.qt_is_const )
+               then if Typ.is_reference typ then Typ.set_ptr_to_const typ else Typ.set_to_const typ
+               else typ )
+             ~default:typ
       else typ
     in
     let return =
@@ -1057,7 +1069,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     res_trans
 
 
-  and decl_ref_trans ?(is_constructor_init = false) ?(is_member_of_const = false)
+  and decl_ref_trans ?expr_info ?(is_constructor_init = false) ?(is_member_of_const = false)
       ?(is_implicit_self = false) ~context trans_state stmt_info decl_ref =
     let decl_kind = decl_ref.Clang_ast_t.dr_kind in
     match (decl_kind, context) with
@@ -1071,7 +1083,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       | Some binding_expr ->
           instruction {trans_state with var_exp_typ= None} binding_expr
       | None ->
-          var_deref_trans trans_state stmt_info decl_ref )
+          var_deref_trans ?expr_info trans_state stmt_info decl_ref )
     | (`Field | `ObjCIvar), MemberOrIvar pre_trans_result ->
         field_deref_trans trans_state ~is_implicit_self stmt_info pre_trans_result decl_ref
           ~is_constructor_init ~is_member_of_const
@@ -1088,9 +1100,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           decl_kind decl_ref.Clang_ast_t.dr_decl_pointer
 
 
-  and declRefExpr_trans trans_state stmt_info decl_ref_expr_info =
+  and declRefExpr_trans trans_state stmt_info expr_info decl_ref_expr_info =
     let decl_ref = Option.value_exn decl_ref_expr_info.Clang_ast_t.drti_decl_ref in
-    decl_ref_trans ~context:DeclRefExpr trans_state stmt_info decl_ref
+    decl_ref_trans ~expr_info ~context:DeclRefExpr trans_state stmt_info decl_ref
 
 
   (** evaluates an enum constant *)
@@ -5801,8 +5813,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         binaryOperator_trans trans_state binary_operator_info stmt_info expr_info stmt_list
     | `DeclStmt (stmt_info, _, decl_list) ->
         declStmt_trans trans_state decl_list stmt_info
-    | `DeclRefExpr (stmt_info, _, _, decl_ref_expr_info) ->
-        declRefExpr_trans trans_state stmt_info decl_ref_expr_info
+    | `DeclRefExpr (stmt_info, _, expr_info, decl_ref_expr_info) ->
+        declRefExpr_trans trans_state stmt_info expr_info decl_ref_expr_info
     | `ObjCPropertyRefExpr (_, stmt_list, _, property_ref_expr) ->
         objCPropertyRefExpr_trans trans_state stmt_list property_ref_expr
     | `CXXThisExpr (stmt_info, _, expr_info) ->

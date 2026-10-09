@@ -386,6 +386,20 @@ let is_const_source_expr proc_desc ((base, rev_accesses) : DecompilerExpr.source
       false
 
 
+(* Moving from a const by-value capture still copies. Unlike a local declaration, its implicit
+   const qualification cannot be removed without changing the lambda's call operator. *)
+let is_const_captured_source proc_desc source_typ (source_expr : DecompilerExpr.t) =
+  Typ.is_pointer_to_const source_typ
+  &&
+  match source_expr with
+  | SourceExpr ((PVar pvar, _), _) ->
+      List.exists (Procdesc.get_captured proc_desc)
+        ~f:(fun {CapturedVar.pvar= captured; capture_mode} ->
+          Pvar.equal pvar captured && CapturedVar.equal_capture_mode capture_mode ByValue )
+  | SourceExpr _ | Unknown _ ->
+      false
+
+
 (* When the arms of [?:] do not have the same type and value category, the result is a prvalue that
    one arm copy-constructs: binding a reference to it would still copy, only moving from the arm
    avoids the copy. *)
@@ -469,6 +483,14 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
               (* case 5: analogous to case 2 but source is returned from a call that is known to create a copy into a non-global *)
               Some (IntoIntermediate {copied_var}, Some source_expr)
       in
+      let copy_into_source_opt =
+        Option.filter copy_into_source_opt ~f:(fun (copy_into, _) ->
+            match (copy_into : Attribute.CopiedInto.t) with
+            | IntoVar _ ->
+                true
+            | IntoField _ | IntoIntermediate _ ->
+                not (is_const_captured_source proc_desc source_typ source_expr) )
+      in
       Option.map copy_into_source_opt ~f:(fun (copy_into, source_opt) ->
           let copy_addr =
             Option.value_exn (Stack.find_opt copied_var astate) |> ValueOrigin.value
@@ -507,6 +529,8 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
             is_copied_from_address_reachable_from_unowned ~is_captured_by_ref
               ~is_reached_through_pointer ~is_intermediate:false source_addr_typ_opt ~from
               proc_lvalue_ref_parameters ~astates_before
+            || Option.exists source_addr_typ_opt ~f:(fun (_, source_expr, source_typ) ->
+                is_const_captured_source proc_desc source_typ source_expr )
             || is_unmovable_copy_into_conditional_result ~is_captured_by_ref
                  ~is_reached_through_pointer tenv proc_desc node from source_typ source_addr_typ_opt
                  proc_lvalue_ref_parameters ~astates_before
