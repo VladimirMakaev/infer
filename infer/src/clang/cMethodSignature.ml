@@ -14,6 +14,7 @@ module F = Format
 
 type param_type =
   { annot: Annot.Item.t
+  ; is_declared_unused: bool
   ; is_no_escape_block_arg: bool
   ; is_pointer_to_const: bool
   ; is_reference: bool
@@ -21,8 +22,8 @@ type param_type =
   ; typ: Typ.t }
 
 let mk_param_type ?(is_pointer_to_const = false) ?(is_reference = false) ?(annot = Annot.Item.empty)
-    ?(is_no_escape_block_arg = false) name typ =
-  {name; typ; is_pointer_to_const; is_reference; annot; is_no_escape_block_arg}
+    ?(is_no_escape_block_arg = false) ?(is_declared_unused = false) name typ =
+  {name; typ; is_pointer_to_const; is_reference; annot; is_no_escape_block_arg; is_declared_unused}
 
 
 type t =

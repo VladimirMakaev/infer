@@ -12,6 +12,7 @@ open! IStd
 
 type param_type =
   { annot: Annot.Item.t
+  ; is_declared_unused: bool
   ; is_no_escape_block_arg: bool
   ; is_pointer_to_const: bool
   ; is_reference: bool
@@ -85,6 +86,7 @@ val mk_param_type :
   -> ?is_reference:bool
   -> ?annot:Annot.Item.t
   -> ?is_no_escape_block_arg:bool
+  -> ?is_declared_unused:bool
   -> Mangled.t
   -> Typ.t
   -> param_type
