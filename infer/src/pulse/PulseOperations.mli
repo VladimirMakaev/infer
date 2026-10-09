@@ -245,6 +245,15 @@ val write_deref :
   -> t AccessResult.t
 (** write the edge [ref --*--> obj] *)
 
+val write_deref_with_origin :
+     PathContext.t
+  -> Location.t
+  -> ref:ValueOrigin.t
+  -> obj:AbstractValue.t * ValueHistory.t
+  -> t
+  -> t AccessResult.t
+(** Like [write_deref], preserving indexed stores' backing-location initialization effect. *)
+
 (** the way that was used to get to the invalidated address in the state; this is used to record the
     invalidation point in its history in addition to inside the [Invalid] attribute *)
 type invalidation_access =

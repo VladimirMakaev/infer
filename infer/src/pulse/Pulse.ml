@@ -1810,9 +1810,11 @@ module PulseTransferFunctions = struct
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
             in
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
-            let** astate, ((lhs_addr, _) as lhs_addr_hist) =
-              PulseOperations.eval path Write loc lhs_exp astate
+            let** astate, lhs_value_origin =
+              PulseOperations.eval_to_value_origin path Write loc lhs_exp astate
             in
+            let lhs_addr = ValueOrigin.value lhs_value_origin in
+            let lhs_addr_hist = ValueOrigin.addr_hist lhs_value_origin in
             let is_escape () =
               match lhs_exp with
               | Lvar pvar ->
@@ -1878,8 +1880,8 @@ module PulseTransferFunctions = struct
                        ~dst:lhs_addr_hist astate )
               | _ ->
                   Sat
-                    (PulseOperations.write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, hist)
-                       astate )
+                    (PulseOperations.write_deref_with_origin path loc ~ref:lhs_value_origin
+                       ~obj:(rhs_addr, hist) astate )
             in
             let* astate =
               PulseRetainCycleChecker.check_retain_cycles_store tenv loc (rhs_addr, hist) astate
