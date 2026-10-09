@@ -798,3 +798,200 @@ void folly_fastmap_try_emplace_key_only_bad() {
   map.try_emplace(4);
   const auto valueCopy = valueRef;
 }
+
+namespace f14_local_keyeq {
+using Map = folly::F14FastMap<int, int>;
+
+static int copy_key(int value) { return value; }
+void mutate_key(int*);
+void mutate_map(Map&);
+
+int same_source_ok(Map& map, int key) {
+  int& value = map[key];
+  (void)map[key];
+  return value;
+}
+
+int equal_values_ok(Map& map, int key, int other) {
+  if (key != other)
+    return 0;
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int equal_cells_ok(Map& map) {
+  int key = 7;
+  int other = 7;
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int equal_literals_ok(Map& map) {
+  int& value = map[7];
+  (void)map[7];
+  return value;
+}
+
+int zero_literals_ok(Map& map) {
+  int& value = map[0];
+  (void)map[0];
+  return value;
+}
+
+int returned_key_ok(Map& map, int key) {
+  int& value = map[key];
+  int other = copy_key(key);
+  (void)map[other];
+  return value;
+}
+
+int saved_key_after_write_ok(Map& map, int key) {
+  int saved = key;
+  int& value = map[key];
+  key = 9;
+  (void)map[saved];
+  return value;
+}
+
+int arithmetic_key_ok(Map& map, int key) {
+  int& value = map[key];
+  int other = key + 0;
+  (void)map[other];
+  return value;
+}
+
+int bool_key_ok(folly::F14FastMap<bool, int>& map) {
+  bool key = true;
+  bool other = true;
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int wide_key_ok(folly::F14FastMap<unsigned long long, int>& map) {
+  unsigned long long key = 0xffffffffffffffffULL;
+  unsigned long long other = 0xffffffffffffffffULL;
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int return_to_first_key_ok(Map& map) {
+  int first = 7;
+  int second = 9;
+  (void)map[first];
+  (void)map[second];
+  const int& value = map.at(second);
+  (void)map[first];
+  return value;
+}
+
+int other_key_bad(Map& map, int key, int other) {
+  if (key == other)
+    return 0;
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int changed_key_bad(Map& map) {
+  int key = 7;
+  int& value = map[key];
+  key = 9;
+  (void)map[key];
+  return value;
+}
+
+int unknown_key_bad(Map& map, int key, int other) {
+  int& value = map[key];
+  (void)map[other];
+  return value;
+}
+
+int mutated_key_bad(Map& map) {
+  int key = 7;
+  int& value = map[key];
+  mutate_key(&key);
+  (void)map[key];
+  return value;
+}
+
+int rehash_then_equal_bad(Map& map, int key) {
+  int& value = map[key];
+  map.rehash(100);
+  int other = key;
+  (void)map[other];
+  return value;
+}
+
+int reserve_then_equal_bad(Map& map, int key) {
+  int& value = map[key];
+  map.reserve(100);
+  int other = key;
+  (void)map[other];
+  return value;
+}
+
+int insert_then_equal_bad(Map& map, int key) {
+  int& value = map[key];
+  map.insert({77, 3});
+  int other = key;
+  (void)map[other];
+  return value;
+}
+
+int clear_removes_cached_key_bad(Map& map) {
+  int key = 7;
+  (void)map[key];
+  map.clear();
+  map.insert({3, 1});
+  const int& value = map.at(3);
+  int other = 7;
+  (void)map[other];
+  return value;
+}
+
+int assignment_removes_cached_key_bad(Map& map) {
+  int key = 7;
+  (void)map[key];
+  Map other_map = {{3, 1}};
+  map = other_map;
+  const int& value = map.at(3);
+  int other = 7;
+  (void)map[other];
+  return value;
+}
+
+int swap_removes_cached_key_bad(Map& map) {
+  int key = 7;
+  (void)map[key];
+  Map other_map = {{3, 1}};
+  map.swap(other_map);
+  const int& value = map.at(3);
+  int other = 7;
+  (void)map[other];
+  return value;
+}
+
+int unknown_map_change_bad(Map& map) {
+  int key = 7;
+  (void)map[key];
+  mutate_map(map);
+  const int& value = map.at(3);
+  int other = 7;
+  (void)map[other];
+  return value;
+}
+
+int absent_query_copy_bad(Map& map) {
+  const int& value = map.at(3);
+  int key = 7;
+  if (!map.contains(key)) {
+    int other = 7;
+    (void)map[other];
+  }
+  return value;
+}
+} // namespace f14_local_keyeq
