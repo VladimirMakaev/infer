@@ -266,8 +266,8 @@ void assign_array_tricky_ok() {
   *(int*)arr = 123;
 }
 
-// Currently the frontend does not translate the casting of pointers to float.
-void FP_assign_array_tricky2_ok() {
+// The array escapes through the global alias, so the casted store must not be reported as dead.
+void assign_array_tricky2_ok() {
   char arr[1];
   global = arr;
   *(float*)arr = 1.0;
