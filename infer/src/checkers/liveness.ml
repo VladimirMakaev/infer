@@ -485,6 +485,50 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   let passed_by_ref_invariant_map = get_passed_by_ref_invariant_map proc_desc in
   let cfg = CFG.from_pdesc proc_desc in
   let invariant_map = CheckerAnalyzer.exec_cfg cfg proc_desc ~initial:ExtendedDomain.bottom in
+  (* Integer negation uses the captured target widths: unsigned values wrap, while signed
+     overflow stays unknown. *)
+  let integer_widths =
+    lazy (IntegerWidths.load (Procdesc.get_attributes proc_desc).translation_unit)
+  in
+  let integer_constant_of_type typ constant =
+    match typ.Typ.desc with
+    | Tint IBool ->
+        Some (if IntLit.iszero constant then IntLit.zero else IntLit.one)
+    | Tint kind ->
+        let open IOption.Let_syntax in
+        let* widths = Lazy.force integer_widths in
+        if Typ.ikind_is_unsigned kind then
+          let bits = IntegerWidths.width_of_ikind widths kind in
+          Some (IntLit.of_big_int (Z.extract (IntLit.to_big_int constant) 0 bits))
+        else
+          let lower, upper = IntegerWidths.range_of_ikind widths kind in
+          let value = IntLit.to_big_int constant in
+          Option.some_if (Z.leq lower value && Z.leq value upper) constant
+    | _ ->
+        None
+  in
+  let rec integer_constant = function
+    | Exp.Const (Cint constant) ->
+        Some constant
+    | Exp.Cast (typ, exp) ->
+        Option.bind (integer_constant exp) ~f:(integer_constant_of_type typ)
+    | Exp.UnOp (Neg, exp, Some ({Typ.desc= Tint kind} as typ)) when not (Typ.equal_ikind kind IBool)
+      ->
+        let open IOption.Let_syntax in
+        let* constant = integer_constant exp in
+        let* constant = integer_constant_of_type typ constant in
+        integer_constant_of_type typ (IntLit.neg constant)
+    | _ ->
+        None
+  in
+  let rec contains_negation = function
+    | Exp.Cast (_, exp) ->
+        contains_negation exp
+    | Exp.UnOp (Neg, _, _) ->
+        true
+    | _ ->
+        false
+  in
   (* we don't want to report in harmless cases like int i = 0; if (...) { i = ... } else { i = ... }
      that create an intentional dead store as an attempt to imitate default value semantics.
      use dead stores to a "sentinel" value as a heuristic for ignoring this case *)
@@ -501,6 +545,14 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
           false )
     | _ ->
         false
+  in
+  let is_sentinel_exp ~typ exp =
+    (* The stored type also matters when a conversion is implicit in the SIL store. *)
+    is_sentinel_exp exp
+    || contains_negation exp
+       && Option.exists
+            (Option.bind (integer_constant exp) ~f:(integer_constant_of_type typ))
+            ~f:(fun constant -> IntLitSet.mem constant ignored_constants)
   in
   let rec is_scope_guard = function
     | {Typ.desc= Tstruct name} ->
@@ -557,7 +609,8 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   in
   let report_dead_store live_vars passed_by_ref_vars = function
     | Sil.Store {e1= Lvar pvar; typ; e2= rhs_exp; loc}
-      when should_report pvar typ live_vars passed_by_ref_vars && not (is_sentinel_exp rhs_exp) ->
+      when should_report pvar typ live_vars passed_by_ref_vars && not (is_sentinel_exp ~typ rhs_exp)
+      ->
         log_report pvar typ loc
     | Sil.Call (_, e_fun, ((arg, typ) :: _ as actuals), loc, _) -> (
       match (Exp.ignore_cast e_fun, Exp.ignore_cast arg) with
