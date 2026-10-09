@@ -124,6 +124,27 @@ val is_checked_via_destructor : Var.t -> t -> bool
 
 val set_captured_variables : Exp.t -> t -> t
 
+val record_closure_store :
+     Location.t
+  -> Timestamp.t
+  -> rhs_addr:AbstractValue.t
+  -> is_escape:(unit -> bool)
+  -> AbductiveDomain.t
+  -> t
+  -> t
+
+val record_closure_load : src:AbstractValue.t -> dst:AbstractValue.t -> AbductiveDomain.t -> t -> t
+
+val record_closure_call :
+     Location.t
+  -> Timestamp.t
+  -> callee:Procname.t option
+  -> actuals:AbstractValue.t list
+  -> has_new_unknown_effect:(AbstractValue.t -> bool)
+  -> AbductiveDomain.t
+  -> t
+  -> t
+
 val set_locked : t -> t
 
 val is_locked : t -> bool
