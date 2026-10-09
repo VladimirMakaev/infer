@@ -19,3 +19,7 @@ let add_call_source v call actuals astate =
 
 
 let find v {AbductiveDomain.decompiler} = Decompiler.find v decompiler
+
+let add_iterator_source v call ~src ~is_reference_receiver astate =
+  AbductiveDomain.map_decompiler astate ~f:(fun decompiler ->
+      Decompiler.add_iterator_source v call ~src ~is_reference_receiver decompiler )
