@@ -5557,7 +5557,29 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     in
     PriorityNode.force_sequential sil_loc ReturnStmt trans_state stmt_info
       ~mk_first_opt:(fun trans_state stmt_info ->
-        let args = Option.to_list operand_opt @ Option.to_list promise_call_opt in
+        let args =
+          match promise_call_opt with
+          | None ->
+              Option.to_list operand_opt
+          | Some promise_call ->
+              (* [return_value] already contains the operand. A void operand is evaluated
+                 separately because [return_void] takes no argument. *)
+              let separate_operand =
+                Option.filter operand_opt ~f:(fun operand ->
+                    match Clang_ast_proj.get_expr_tuple operand with
+                    | Some (_, _, expr_info) -> (
+                      match
+                        (CType_decl.get_type_from_expr_info expr_info trans_state.context.tenv).desc
+                      with
+                      | Tvoid ->
+                          true
+                      | _ ->
+                          false )
+                    | None ->
+                        true )
+              in
+              Option.to_list separate_operand @ [promise_call]
+        in
         Some
           (call_function_with_args Procdesc.Node.ReturnStmt BuiltinDecl.__builtin_cxx_co_return
              trans_state stmt_info StdTyp.void args ) )

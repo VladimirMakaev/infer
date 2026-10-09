@@ -1,0 +1,333 @@
+/* @generated */
+digraph cfg {
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_1" [label="1: Start coroutine_once::direct_await\nFormals:  __return_param:coroutine_once::Task*\nLocals:  0$?%__sil_tmp__temp_return_n$8:coroutine_once::Task __promise:coroutine_once::Task::promise_type \n  " color=yellow style=filled]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_1" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_10" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_2" [label="2: Exit coroutine_once::direct_await \n  " color=yellow style=filled]
+	
+
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::Task* [line 58, column 21]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_3" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_4" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 58, column 6]\n  n$3=_fun_coroutine_once::Task::promise_type::get_return_object(&__promise:coroutine_once::Task::promise_type&,n$0:coroutine_once::Task*) assign_last [line 58, column 6]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_4" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_5" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_5" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_2" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_6" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_2" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::Task* [line 58, column 23]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_7" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_8" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::Task=n$5 [line 58, column 23]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_8" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_2" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 58, column 23]\n  n$9=_fun_coroutine_once::source(&0$?%__sil_tmp__temp_return_n$8:coroutine_once::Task*) assign_last [line 58, column 42]\n  n$10=_fun___builtin_cxx_co_await(&0$?%__sil_tmp__temp_return_n$8:coroutine_once::Task) [line 58, column 33]\n  n$11=_fun_coroutine_once::Task::promise_type::return_value(&__promise:coroutine_once::Task::promise_type&,n$10:int) [line 58, column 23]\n  n$12=_fun___builtin_cxx_co_return(n$11:void) [line 58, column 23]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_9" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_7" ;
+"direct_await#coroutine_once#52622.ab8c428de7d5d81a_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::Task::promise_type); [line 58, column 6]\n  n$13=_fun_coroutine_once::Task::promise_type::promise_type(&__promise:coroutine_once::Task::promise_type*) [line 58, column 6]\n " shape="box"]
+	
+
+	 "direct_await#coroutine_once#52622.ab8c428de7d5d81a_10" -> "direct_await#coroutine_once#52622.ab8c428de7d5d81a_9" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_1" [label="1: Start coroutine_once::empty_return\nFormals:  __return_param:coroutine_once::VoidTask*\nLocals:  __promise:coroutine_once::VoidTask::promise_type \n  " color=yellow style=filled]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_1" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_10" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_2" [label="2: Exit coroutine_once::empty_return \n  " color=yellow style=filled]
+	
+
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::VoidTask* [line 68, column 25]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_3" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_4" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::VoidTask::promise_type [line 68, column 10]\n  n$3=_fun_coroutine_once::VoidTask::promise_type::get_return_object(&__promise:coroutine_once::VoidTask::promise_type&,n$0:coroutine_once::VoidTask*) assign_last [line 68, column 10]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_4" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_5" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_5" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_2" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_6" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_2" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::VoidTask* [line 68, column 27]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_7" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_8" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::VoidTask=n$5 [line 68, column 27]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_8" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_2" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::VoidTask::promise_type [line 68, column 27]\n  n$7=_fun_coroutine_once::VoidTask::promise_type::return_void(&__promise:coroutine_once::VoidTask::promise_type&) [line 68, column 27]\n  n$8=_fun___builtin_cxx_co_return(n$7:void) [line 68, column 27]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_9" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_7" ;
+"empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::VoidTask::promise_type); [line 68, column 10]\n  n$9=_fun_coroutine_once::VoidTask::promise_type::promise_type(&__promise:coroutine_once::VoidTask::promise_type*) [line 68, column 10]\n " shape="box"]
+	
+
+	 "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_10" -> "empty_return#coroutine_once#97391.9ad6d4fb4d9b08b5_9" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_1" [label="1: Start coroutine_once::increment_effect\nFormals:  count:int& __return_param:coroutine_once::Task*\nLocals:  __promise:coroutine_once::Task::promise_type \n  " color=yellow style=filled]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_1" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_10" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_2" [label="2: Exit coroutine_once::increment_effect \n  " color=yellow style=filled]
+	
+
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::Task* [line 65, column 35]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_3" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_4" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 65, column 6]\n  n$3=_fun_coroutine_once::Task::promise_type::get_return_object(&__promise:coroutine_once::Task::promise_type&,n$0:coroutine_once::Task*) assign_last [line 65, column 6]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_4" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_5" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_5" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_2" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_6" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_2" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::Task* [line 65, column 37]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_7" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_8" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::Task=n$5 [line 65, column 37]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_8" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_2" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 65, column 37]\n  n$7=*&count:int& [line 65, column 47]\n  n$8=*n$7:int [line 65, column 47]\n  *n$7:int=(n$8 + 1) [line 65, column 47]\n  n$9=_fun_coroutine_once::Task::promise_type::return_value(&__promise:coroutine_once::Task::promise_type&,n$8:int) [line 65, column 37]\n  n$10=_fun___builtin_cxx_co_return(n$9:void) [line 65, column 37]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_9" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_7" ;
+"increment_effect#coroutine_once#4.54e6c02c3d57ddcc_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::Task::promise_type); [line 65, column 6]\n  n$11=_fun_coroutine_once::Task::promise_type::promise_type(&__promise:coroutine_once::Task::promise_type*) [line 65, column 6]\n " shape="box"]
+	
+
+	 "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_10" -> "increment_effect#coroutine_once#4.54e6c02c3d57ddcc_9" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_1" [label="1: Start coroutine_once::split_await\nFormals:  __return_param:coroutine_once::Task*\nLocals:  value:int 0$?%__sil_tmp__temp_return_n$11:coroutine_once::Task __promise:coroutine_once::Task::promise_type \n  " color=yellow style=filled]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_1" -> "split_await#coroutine_once#602541.920ff4b16c061f41_11" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_2" [label="2: Exit coroutine_once::split_await \n  " color=yellow style=filled]
+	
+
+"split_await#coroutine_once#602541.920ff4b16c061f41_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::Task* [line 59, column 20]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_3" -> "split_await#coroutine_once#602541.920ff4b16c061f41_4" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 59, column 6]\n  n$3=_fun_coroutine_once::Task::promise_type::get_return_object(&__promise:coroutine_once::Task::promise_type&,n$0:coroutine_once::Task*) assign_last [line 59, column 6]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_4" -> "split_await#coroutine_once#602541.920ff4b16c061f41_5" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_5" -> "split_await#coroutine_once#602541.920ff4b16c061f41_2" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_6" -> "split_await#coroutine_once#602541.920ff4b16c061f41_2" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::Task* [line 61, column 3]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_7" -> "split_await#coroutine_once#602541.920ff4b16c061f41_8" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::Task=n$5 [line 61, column 3]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_8" -> "split_await#coroutine_once#602541.920ff4b16c061f41_2" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 61, column 3]\n  n$7=*&value:int [line 61, column 13]\n  n$8=_fun_coroutine_once::Task::promise_type::return_value(&__promise:coroutine_once::Task::promise_type&,n$7:int) [line 61, column 3]\n  n$9=_fun___builtin_cxx_co_return(n$8:void) [line 61, column 3]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_9" -> "split_await#coroutine_once#602541.920ff4b16c061f41_7" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(value:int); [line 60, column 3]\n  n$12=_fun_coroutine_once::source(&0$?%__sil_tmp__temp_return_n$11:coroutine_once::Task*) assign_last [line 60, column 24]\n  n$13=_fun___builtin_cxx_co_await(&0$?%__sil_tmp__temp_return_n$11:coroutine_once::Task) [line 60, column 15]\n  *&value:int=n$13 [line 60, column 3]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_10" -> "split_await#coroutine_once#602541.920ff4b16c061f41_9" ;
+"split_await#coroutine_once#602541.920ff4b16c061f41_11" [label="11:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::Task::promise_type); [line 59, column 6]\n  n$14=_fun_coroutine_once::Task::promise_type::promise_type(&__promise:coroutine_once::Task::promise_type*) [line 59, column 6]\n " shape="box"]
+	
+
+	 "split_await#coroutine_once#602541.920ff4b16c061f41_11" -> "split_await#coroutine_once#602541.920ff4b16c061f41_10" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_1" [label="1: Start coroutine_once::throwing_effect\nFormals:  __return_param:coroutine_once::Task*\nLocals:  __promise:coroutine_once::Task::promise_type \n  " color=yellow style=filled]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_1" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_10" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_2" [label="2: Exit coroutine_once::throwing_effect \n  " color=yellow style=filled]
+	
+
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::Task* [line 63, column 24]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_3" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_4" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 63, column 6]\n  n$3=_fun_coroutine_once::Task::promise_type::get_return_object(&__promise:coroutine_once::Task::promise_type&,n$0:coroutine_once::Task*) assign_last [line 63, column 6]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_4" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_5" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_5" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_2" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_6" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_2" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::Task* [line 63, column 26]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_7" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_8" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::Task=n$5 [line 63, column 26]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_8" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_2" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 63, column 26]\n  n$7=_fun_coroutine_once::always_throw() [line 63, column 36]\n  n$8=_fun_coroutine_once::Task::promise_type::return_value(&__promise:coroutine_once::Task::promise_type&,n$7:int) [line 63, column 26]\n  n$9=_fun___builtin_cxx_co_return(n$8:void) [line 63, column 26]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_9" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_7" ;
+"throwing_effect#coroutine_once#11.0e0c0346540c1215_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::Task::promise_type); [line 63, column 6]\n  n$10=_fun_coroutine_once::Task::promise_type::promise_type(&__promise:coroutine_once::Task::promise_type*) [line 63, column 6]\n " shape="box"]
+	
+
+	 "throwing_effect#coroutine_once#11.0e0c0346540c1215_10" -> "throwing_effect#coroutine_once#11.0e0c0346540c1215_9" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_1" [label="1: Start coroutine_once::value_effect\nFormals:  __return_param:coroutine_once::Task*\nLocals:  __promise:coroutine_once::Task::promise_type \n  " color=yellow style=filled]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_1" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_10" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_2" [label="2: Exit coroutine_once::value_effect \n  " color=yellow style=filled]
+	
+
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::Task* [line 64, column 21]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_3" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_4" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 64, column 6]\n  n$3=_fun_coroutine_once::Task::promise_type::get_return_object(&__promise:coroutine_once::Task::promise_type&,n$0:coroutine_once::Task*) assign_last [line 64, column 6]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_4" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_5" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_5" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_2" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_6" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_2" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::Task* [line 64, column 23]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_7" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_8" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::Task=n$5 [line 64, column 23]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_8" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_2" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_9" [label="9:  Return Stmt \n   _=*&__promise:coroutine_once::Task::promise_type [line 64, column 23]\n  n$7=_fun_coroutine_once::next_value() [line 64, column 33]\n  n$8=_fun_coroutine_once::Task::promise_type::return_value(&__promise:coroutine_once::Task::promise_type&,n$7:int) [line 64, column 23]\n  n$9=_fun___builtin_cxx_co_return(n$8:void) [line 64, column 23]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_9" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_7" ;
+"value_effect#coroutine_once#11557.d58fa75b16659b3f_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::Task::promise_type); [line 64, column 6]\n  n$10=_fun_coroutine_once::Task::promise_type::promise_type(&__promise:coroutine_once::Task::promise_type*) [line 64, column 6]\n " shape="box"]
+	
+
+	 "value_effect#coroutine_once#11557.d58fa75b16659b3f_10" -> "value_effect#coroutine_once#11557.d58fa75b16659b3f_9" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_1" [label="1: Start coroutine_once::void_await\nFormals:  __return_param:coroutine_once::VoidTask*\nLocals:  0$?%__sil_tmp__temp_return_n$7:coroutine_once::VoidTask __promise:coroutine_once::VoidTask::promise_type \n  " color=yellow style=filled]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_1" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_10" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_2" [label="2: Exit coroutine_once::void_await \n  " color=yellow style=filled]
+	
+
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::VoidTask* [line 66, column 23]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_3" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_4" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::VoidTask::promise_type [line 66, column 10]\n  n$3=_fun_coroutine_once::VoidTask::promise_type::get_return_object(&__promise:coroutine_once::VoidTask::promise_type&,n$0:coroutine_once::VoidTask*) assign_last [line 66, column 10]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_4" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_5" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_5" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_2" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_6" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_2" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::VoidTask* [line 66, column 25]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_7" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_8" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::VoidTask=n$5 [line 66, column 25]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_8" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_2" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_9" [label="9:  Return Stmt \n   n$8=_fun_coroutine_once::void_source(&0$?%__sil_tmp__temp_return_n$7:coroutine_once::VoidTask*) assign_last [line 66, column 44]\n  n$9=_fun___builtin_cxx_co_await(&0$?%__sil_tmp__temp_return_n$7:coroutine_once::VoidTask) [line 66, column 35]\n  _=*&__promise:coroutine_once::VoidTask::promise_type [line 66, column 25]\n  n$11=_fun_coroutine_once::VoidTask::promise_type::return_void(&__promise:coroutine_once::VoidTask::promise_type&) [line 66, column 25]\n  n$12=_fun___builtin_cxx_co_return(n$9:void,n$11:void) [line 66, column 25]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_9" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_7" ;
+"void_await#coroutine_once#2122385.3b529d829ceaea1a_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::VoidTask::promise_type); [line 66, column 10]\n  n$13=_fun_coroutine_once::VoidTask::promise_type::promise_type(&__promise:coroutine_once::VoidTask::promise_type*) [line 66, column 10]\n " shape="box"]
+	
+
+	 "void_await#coroutine_once#2122385.3b529d829ceaea1a_10" -> "void_await#coroutine_once#2122385.3b529d829ceaea1a_9" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_1" [label="1: Start coroutine_once::void_effect\nFormals:  __return_param:coroutine_once::VoidTask*\nLocals:  __promise:coroutine_once::VoidTask::promise_type \n  " color=yellow style=filled]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_1" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_10" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_2" [label="2: Exit coroutine_once::void_effect \n  " color=yellow style=filled]
+	
+
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_3" [label="3:  Return Stmt \n   n$0=*&__return_param:coroutine_once::VoidTask* [line 67, column 24]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_3" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_4" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_4" [label="4:  Return Stmt \n   _=*&__promise:coroutine_once::VoidTask::promise_type [line 67, column 10]\n  n$3=_fun_coroutine_once::VoidTask::promise_type::get_return_object(&__promise:coroutine_once::VoidTask::promise_type&,n$0:coroutine_once::VoidTask*) assign_last [line 67, column 10]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_4" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_5" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_5" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_2" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_6" [label="6:  Return Stmt \n  " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_6" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_2" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_7" [label="7:  Return Stmt \n   n$4=*&__return_param:coroutine_once::VoidTask* [line 67, column 26]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_7" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_8" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_8" [label="8:  Return Stmt \n   *n$4:coroutine_once::VoidTask=n$5 [line 67, column 26]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_8" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_2" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_9" [label="9:  Return Stmt \n   n$6=_fun_coroutine_once::side_effect() [line 67, column 36]\n  _=*&__promise:coroutine_once::VoidTask::promise_type [line 67, column 26]\n  n$8=_fun_coroutine_once::VoidTask::promise_type::return_void(&__promise:coroutine_once::VoidTask::promise_type&) [line 67, column 26]\n  n$9=_fun___builtin_cxx_co_return(n$6:void,n$8:void) [line 67, column 26]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_9" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_7" ;
+"void_effect#coroutine_once#123621.bbba1d8b86756aac_10" [label="10:  DeclStmt \n   VARIABLE_DECLARED(__promise:coroutine_once::VoidTask::promise_type); [line 67, column 10]\n  n$10=_fun_coroutine_once::VoidTask::promise_type::promise_type(&__promise:coroutine_once::VoidTask::promise_type*) [line 67, column 10]\n " shape="box"]
+	
+
+	 "void_effect#coroutine_once#123621.bbba1d8b86756aac_10" -> "void_effect#coroutine_once#123621.bbba1d8b86756aac_9" ;
+"promise_type#promise_type#Task#co.6f039a282a24fbcd_1" [label="1: Start coroutine_once::Task::promise_type::promise_type\nFormals:  this:coroutine_once::Task::promise_type*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "promise_type#promise_type#Task#co.6f039a282a24fbcd_1" -> "promise_type#promise_type#Task#co.6f039a282a24fbcd_2" ;
+"promise_type#promise_type#Task#co.6f039a282a24fbcd_2" [label="2: Exit coroutine_once::Task::promise_type::promise_type \n  " color=yellow style=filled]
+	
+
+"promise_type#promise_type#VoidTas.efad7a82ed4fb3cf_1" [label="1: Start coroutine_once::VoidTask::promise_type::promise_type\nFormals:  this:coroutine_once::VoidTask::promise_type*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "promise_type#promise_type#VoidTas.efad7a82ed4fb3cf_1" -> "promise_type#promise_type#VoidTas.efad7a82ed4fb3cf_2" ;
+"promise_type#promise_type#VoidTas.efad7a82ed4fb3cf_2" [label="2: Exit coroutine_once::VoidTask::promise_type::promise_type \n  " color=yellow style=filled]
+	
+
+}
