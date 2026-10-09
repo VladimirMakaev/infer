@@ -1712,6 +1712,7 @@ module PulseTransferFunctions = struct
           (astates, path, astate_n)
       | Load {id= lhs_id; e= rhs_exp; loc; typ} ->
           (* [lhs_id := *rhs_exp] *)
+          let load_non_disj = ref astate_n in
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
           let deref_rhs astate =
             (let** astate, rhs_vo =
@@ -1724,6 +1725,12 @@ module PulseTransferFunctions = struct
                    let++ astate, addr_hist = model {path; location= loc} astate in
                    (astate, ValueOrigin.unknown addr_hist)
              in
+             ( match (typ.Typ.desc, rhs_vo) with
+             | ( Tptr ({desc= Tstruct (CppClass _)}, (Pk_lvalue_reference | Pk_rvalue_reference))
+               , ValueOrigin.InMemory {src= src, _; dest= dst, _} ) ->
+                 load_non_disj := NonDisjDomain.record_closure_load ~src ~dst astate !load_non_disj
+             | _ ->
+                 () ) ;
              and_type_info tenv path loc typ rhs_exp rhs_vo astate
              >>|| PulseOperations.write_load_id lhs_id rhs_vo )
             |> SatUnsat.to_list
@@ -1742,7 +1749,9 @@ module PulseTransferFunctions = struct
             | _ ->
                 astate_n
           in
-          let astates, path, non_disj = (List.concat_map astates ~f:deref_rhs, path, astate_n) in
+          load_non_disj := astate_n ;
+          let astates = List.concat_map astates ~f:deref_rhs in
+          let astates, path, non_disj = (astates, path, !load_non_disj) in
           let astates =
             let procname = Procdesc.get_proc_name proc_desc in
             List.concat_map astates ~f:(fun astate ->
@@ -1794,6 +1803,8 @@ module PulseTransferFunctions = struct
             |> NonDisjDomain.bind
                  ~f:(set_global_astates ~access:`Written limit path analysis_data lhs_exp typ loc)
           in
+          let astate_n = NonDisjDomain.set_captured_variables rhs_exp astate_n in
+          let store_non_disj = ref astate_n in
           let exec_store astate =
             let** astate, rhs_value_origin =
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
@@ -1802,6 +1813,44 @@ module PulseTransferFunctions = struct
             let** astate, ((lhs_addr, _) as lhs_addr_hist) =
               PulseOperations.eval path Write loc lhs_exp astate
             in
+            let is_escape () =
+              match lhs_exp with
+              | Lvar pvar ->
+                  Pvar.is_global pvar || Pvar.is_return pvar
+              | _ ->
+                  let local_roots =
+                    Procdesc.get_locals proc_desc
+                    |> List.concat_map ~f:(fun {ProcAttributes.name; typ} ->
+                        match typ.Typ.desc with
+                        | Tstruct _ | Tarray _ ->
+                            let pvar = Pvar.mk name (Procdesc.get_proc_name proc_desc) in
+                            Stack.find_opt (Var.of_pvar pvar) astate
+                            |> Option.value_map ~default:[] ~f:(fun vo ->
+                                let root = ValueOrigin.value vo in
+                                root
+                                :: ( Memory.find_edge_opt root Dereference astate
+                                   |> Option.to_list |> List.map ~f:fst ) )
+                        | _ ->
+                            [] )
+                  in
+                  let owned =
+                    AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq local_roots)
+                      ~edge_filter:(function
+                        | FieldAccess _ | ArrayAccess _ -> true | Dereference -> false )
+                      astate `Post
+                  in
+                  not (AbstractValue.Set.mem lhs_addr owned)
+            in
+            store_non_disj :=
+              NonDisjDomain.record_closure_store loc timestamp ~rhs_addr ~is_escape astate
+                !store_non_disj ;
+            ( match rhs_exp with
+            | Closure _ ->
+                store_non_disj :=
+                  NonDisjDomain.record_closure_load ~src:rhs_addr ~dst:lhs_addr astate
+                    !store_non_disj
+            | _ ->
+                () ) ;
             let hist = ValueHistory.sequence event rhs_history in
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
@@ -1847,12 +1896,11 @@ module PulseTransferFunctions = struct
             | _ ->
                 Ok astate
           in
-          let astate_n = NonDisjDomain.set_captured_variables rhs_exp astate_n in
           let results =
             List.concat_map astates ~f:(fun astate -> exec_store astate |> SatUnsat.to_list)
           in
           let astates = PulseReport.report_results analysis_data path loc results in
-          (List.take astates limit, path, astate_n)
+          (List.take astates limit, path, !store_non_disj)
       | Call (ret, call_exp, actuals, loc, call_flags) ->
           let astate_n = check_modified_before_destructor actuals call_exp astate astate_n in
           let astates, astate_n =
@@ -1863,8 +1911,9 @@ module PulseTransferFunctions = struct
           let astates = List.take astates limit in
           (* [astates_before] are the states after we evaluate args but before we apply the callee. This is needed for PulseNonDisjunctiveOperations to determine whether we are copying from something pointed to by [this].  *)
           CallGlobalForStats.init_before_call () ;
-          let astates, astate_n, astates_before =
+          let astates, astate_n, astates_before, closure_calls =
             let astates_before = ref [] in
+            let closure_calls = ref [] in
             let res, post_astate_n, _ =
               List.rev astates
               |> List.fold ~init:([], NonDisjDomain.bottom, 0)
@@ -1876,18 +1925,40 @@ module PulseTransferFunctions = struct
                            astate_n
                        , n_disjuncts )
                      else
+                       let disjunct_calls = ref [] in
                        let new_astates, astate_n =
                          let ( let<**> ) x f = bind_sat_result astate_n x f in
                          let<**> astate, call_exp, callee_pname, func_args =
                            eval_function_call_args path call_exp actuals loc astate
                          in
+                         let astate_n =
+                           List.fold func_args ~init:astate_n
+                             ~f:(fun astate_n {FuncArg.exp; arg_payload} ->
+                               match exp with
+                               | Closure _ ->
+                                   NonDisjDomain.record_closure_store loc timestamp
+                                     ~rhs_addr:(ValueOrigin.value arg_payload)
+                                     ~is_escape:(fun () -> false)
+                                     astate astate_n
+                               | _ ->
+                                   astate_n )
+                         in
                          (* stash the intermediate "before" [astate] here because the result monad does
                                   not accept more complicated types than lists of states (we need a pair of the
                                   before astate and the list of results) *)
                          astates_before := astate :: !astates_before ;
+                         disjunct_calls :=
+                           ( astate
+                           , callee_pname
+                           , List.map func_args ~f:(fun {FuncArg.arg_payload} ->
+                                 ValueOrigin.value arg_payload ) )
+                           :: !disjunct_calls ;
                          dispatch_call_eval_args (limit - n_disjuncts) analysis_data path ret
                            call_exp func_args loc call_flags astate astate_n callee_pname
                        in
+                       let afters = List.filter_map new_astates ~f:PulseResult.ok in
+                       List.iter !disjunct_calls ~f:(fun (before, callee, actuals) ->
+                           closure_calls := (before, callee, actuals, afters) :: !closure_calls ) ;
                        ( new_astates @ astates
                        , NonDisjDomain.join post_astate_n astate_n
                        , List.length new_astates + n_disjuncts ) )
@@ -1895,7 +1966,8 @@ module PulseTransferFunctions = struct
             let astates_before = !astates_before in
             ( PulseReport.report_exec_results analysis_data path loc res
             , post_astate_n
-            , astates_before )
+            , astates_before
+            , !closure_calls )
           in
           if not (CallGlobalForStats.is_node_not_stuck ()) then (
             if Config.log_pulse_coverage then add_verbose_never_return_info proc_desc instr loc ;
@@ -1906,6 +1978,55 @@ module PulseTransferFunctions = struct
             let integer_type_widths = Exe_env.get_integer_type_widths pname in
             PulseNonDisjunctiveOperations.call integer_type_widths tenv proc_desc cfg_node path loc
               ~call_exp ~actuals ~astates_before astates astate_n
+          in
+          let astate_n =
+            List.fold closure_calls ~init:astate_n
+              ~f:(fun astate_n (astate, callee, actuals, afters) ->
+                let unknown_effect addr astate =
+                  AddressAttributes.find_opt `Post addr astate
+                  |> Option.bind ~f:Attributes.get_unknown_effect
+                in
+                let has_new_unknown_effect root =
+                  List.exists afters ~f:(function
+                    | ContinueProgram after ->
+                        let rec check visited addr =
+                          if AbstractValue.Set.mem addr visited then false
+                          else
+                            let visited = AbstractValue.Set.add addr visited in
+                            let changed =
+                              match (unknown_effect addr after, unknown_effect addr astate) with
+                              | Some (call, hist), Some (old_call, old_hist) ->
+                                  let was_havoced =
+                                    match
+                                      ( AddressAttributes.get_written_to addr after
+                                      , AddressAttributes.get_written_to addr astate )
+                                    with
+                                    | Some (written, _), Some (old_written, _) ->
+                                        not (Int.equal (written :> int) (old_written :> int))
+                                    | Some _, None ->
+                                        true
+                                    | None, _ ->
+                                        false
+                                  in
+                                  was_havoced
+                                  || not
+                                       ( CallEvent.equal call old_call
+                                       && ValueHistory.equal hist old_hist )
+                              | Some _, None ->
+                                  true
+                              | None, _ ->
+                                  false
+                            in
+                            changed
+                            || Memory.find_edge_opt addr Dereference after
+                               |> Option.exists ~f:(fun (pointee, _) -> check visited pointee)
+                        in
+                        check AbstractValue.Set.empty root
+                    | _ ->
+                        false )
+                in
+                NonDisjDomain.record_closure_call loc timestamp ~callee ~actuals
+                  ~has_new_unknown_effect astate astate_n )
           in
           let astate_n = NonDisjDomain.set_passed_to loc timestamp call_exp actuals astate_n in
           let astate_n =
