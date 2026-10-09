@@ -1511,22 +1511,102 @@ module GenericMapCollection = struct
     AddressAttributes.add_one (fst arg_payload) (LastLookup (fst key_payload)) |> exec_command
 
 
-  let update_last ~desc arg_payload key_payload =
+  let key_value_dsl map key_payload =
     let open PulseModelsDSL.Syntax in
-    start_named_model desc @@ fun () -> update_last_dsl arg_payload key_payload
+    match extract_key_and_value_types map with
+    | Some ({Typ.desc= Tint _}, _) ->
+        let* value = load key_payload in
+        let* constant = as_constant_q value in
+        let key =
+          match constant with
+          | Some q when Z.equal (Q.den q) Z.one ->
+              Attribute.KnownInteger (IntLit.of_big_int (Q.num q))
+          | _ ->
+              Attribute.SymbolicInteger (fst value)
+        in
+        ret (Some (value, key))
+    | _ ->
+        ret None
 
 
-  let check_and_update_last_dsl arg_payload key_payload : bool PulseModelsDSL.model_monad =
+  let set_last_value_dsl ~known_present arg_payload key_value =
+    let open PulseModelsDSL.Syntax in
+    match key_value with
+    | None ->
+        ret ()
+    | Some (_, key) ->
+        AddressAttributes.add_one (fst arg_payload)
+          (Attribute.LastLookupValue {key; first_key= Some key; known_present})
+        |> exec_command
+
+
+  let forget_key_membership_dsl arg_payload =
+    let open PulseModelsDSL.Syntax in
+    exec_command (fun astate ->
+        match
+          AddressAttributes.find_opt `Post (fst arg_payload) astate
+          |> Option.bind ~f:Attributes.get_last_lookup_value
+        with
+        | Some (key, first_key, true) ->
+            AddressAttributes.add_one (fst arg_payload)
+              (Attribute.LastLookupValue {key; first_key; known_present= false})
+              astate
+        | _ ->
+            astate )
+
+
+  let update_last ~desc ({FuncArg.arg_payload} as map) key_payload =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* key_value = key_value_dsl map key_payload in
+    (* Queries do not prove membership; retain their existing same-source handling. *)
+    set_last_value_dsl ~known_present:false arg_payload key_value
+    @@> update_last_dsl arg_payload key_payload
+
+
+  let check_last_dsl arg_payload key_payload key_value : bool PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
     let* last_lookup = AddressAttributes.get_last_lookup (fst arg_payload) |> exec_pure_operation in
-    update_last_dsl arg_payload key_payload
-    @@> ret (Option.value_map last_lookup ~default:false ~f:(AbstractValue.equal (fst key_payload)))
+    let* snapshot =
+      exec_pure_operation (fun astate ->
+          AddressAttributes.find_opt `Post (fst arg_payload) astate
+          |> Option.bind ~f:Attributes.get_last_lookup_value )
+    in
+    let same_source =
+      Option.value_map last_lookup ~default:false ~f:(AbstractValue.equal (fst key_payload))
+    in
+    match (last_lookup, key_value, snapshot) with
+    | Some _, Some (value, _), Some (key, first_key, known_present) ->
+        let* equal, equal_first =
+          exec_pure_operation (fun astate ->
+              let phi = astate.AbductiveDomain.path_condition in
+              let matches (key : Attribute.lookup_key) =
+                match key with
+                | KnownInteger old ->
+                    Option.exists
+                      (Formula.as_constant_q phi (fst value))
+                      ~f:(fun current -> Q.equal current (Q.of_bigint (IntLit.to_big_int old)))
+                | SymbolicInteger old ->
+                    let repr = Formula.get_var_repr phi in
+                    AbstractValue.equal (repr old) (repr (fst value))
+                    || Option.exists
+                         (Option.both (Formula.as_constant_q phi old)
+                            (Formula.as_constant_q phi (fst value)) )
+                         ~f:(fun (left, right) -> Q.equal left right)
+              in
+              (matches key, Option.value_map first_key ~default:true ~f:matches) )
+        in
+        ret ((equal && known_present) || (same_source && equal_first))
+    | _ ->
+        ret same_source
 
 
   let constructor map_t classname map =
     let open PulseModelsDSL.Syntax in
     let desc = Format.asprintf "%a::%s" Invalidation.pp_map_type map_t classname in
-    start_named_model desc @@ fun () -> reset_backing_fields_dsl map
+    start_named_model desc
+    @@ fun () -> reset_backing_fields_dsl map @@> forget_key_membership_dsl map.FuncArg.arg_payload
 
 
   let invalidate_references_dsl map_t map_f ({FuncArg.arg_payload} as map) :
@@ -1546,18 +1626,30 @@ module GenericMapCollection = struct
     let desc =
       Format.asprintf "%a::%a" Invalidation.pp_map_type map_t Invalidation.pp_map_function map_f
     in
-    start_named_model desc @@ fun () -> invalidate_references_dsl map_t map_f map
+    start_named_model desc
+    @@ fun () ->
+    let* () =
+      match (map_f : Invalidation.map_function) with
+      | Clear | OperatorEqual ->
+          forget_key_membership_dsl map.FuncArg.arg_payload
+      | _ ->
+          ret ()
+    in
+    invalidate_references_dsl map_t map_f map
 
 
   let operator_bracket desc map_t ({FuncArg.arg_payload} as map) key_payload =
     let open PulseModelsDSL.Syntax in
     start_named_model desc
     @@ fun () ->
-    let* double_lookup = check_and_update_last_dsl arg_payload key_payload in
+    let* key_value = key_value_dsl map key_payload in
+    let* double_lookup = check_last_dsl arg_payload key_payload key_value in
     let* () =
       if double_lookup then ret () else invalidate_references_dsl map_t OperatorBracket map
     in
-    return_value_reference_dsl map
+    update_last_dsl arg_payload key_payload
+    @@> set_last_value_dsl ~known_present:true arg_payload key_value
+    @@> return_value_reference_dsl map
 
 
   let emplace_hint desc map_t map_f ({FuncArg.arg_payload} as map) args =
@@ -1588,11 +1680,15 @@ module GenericMapCollection = struct
 
   let insert ~hinted map_t map_f map return_arg = try_emplace ~hinted map_t map_f map [return_arg]
 
-  let find map_t arg_payload key_payload it =
+  let find map_t ({FuncArg.arg_payload} as map) key_payload it =
     let open PulseModelsDSL.Syntax in
     let desc = Format.asprintf "%a::find" Invalidation.pp_map_type map_t in
     start_named_model desc
-    @@ fun () -> update_last_dsl arg_payload key_payload @@> return_it_dsl arg_payload it
+    @@ fun () ->
+    let* key_value = key_value_dsl map key_payload in
+    update_last_dsl arg_payload key_payload
+    @@> set_last_value_dsl ~known_present:false arg_payload key_value
+    @@> return_it_dsl arg_payload it
 
 
   let swap map_t arg_payload other_payload =
@@ -1604,6 +1700,8 @@ module GenericMapCollection = struct
     let* other_pair = access Read other_payload pair_access in
     write_field ~ref:arg_payload pair_field other_pair
     @@> write_field ~ref:other_payload pair_field arg_pair
+    @@> forget_key_membership_dsl arg_payload
+    @@> forget_key_membership_dsl other_payload
 
 
   let iterator_star desc it =
@@ -1832,7 +1930,7 @@ let map_matchers =
           $+ capt_arg_payload
           $+...$--> GenericMapCollection.operator_bracket "folly::F14FastMap::operator[]" map_t
         ; -"folly" <>:: "f14" <>:: "detail" <>:: "F14BasicMap" &:: "find"
-          $ capt_arg_payload_of_typ (-"folly" <>:: map_s)
+          $ capt_arg_of_typ (-"folly" <>:: map_s)
           $+ capt_arg_payload $+ capt_arg_payload $--> GenericMapCollection.find map_t
         ; -"folly" <>:: "f14" <>:: "detail" <>:: "F14BasicMap" &:: "begin"
           <>$ capt_arg_payload_of_typ (-"folly" <>:: map_s)
@@ -1843,11 +1941,11 @@ let map_matchers =
           $+ capt_arg_payload
           $--> GenericMapCollection.return_it (Format.asprintf "folly::%s::cbegin" map_s)
         ; -"folly" <>:: "f14" <>:: "detail" <>:: "F14BasicMap" &:: "contains"
-          <>$ capt_arg_payload_of_typ (-"folly" <>:: map_s)
+          <>$ capt_arg_of_typ (-"folly" <>:: map_s)
           $+ capt_arg_payload
           $--> GenericMapCollection.update_last ~desc:"folly::f14::detail::F14BasicMap::contains"
         ; -"folly" <>:: "f14" <>:: "detail" <>:: "F14BasicMap" &:: "count"
-          <>$ capt_arg_payload_of_typ (-"folly" <>:: map_s)
+          <>$ capt_arg_of_typ (-"folly" <>:: map_s)
           $+ capt_arg_payload
           $--> GenericMapCollection.update_last ~desc:"folly::f14::detail::F14BasicMap::count"
         ; -"folly" <>:: map_s &:: "swap"
