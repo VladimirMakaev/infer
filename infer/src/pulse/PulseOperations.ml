@@ -306,6 +306,17 @@ let write_deref path location ~ref:addr_trace_ref ~obj:addr_trace_obj astate =
   write_access path location addr_trace_ref Dereference addr_trace_obj astate
 
 
+let write_deref_with_origin path location ~ref ~obj astate =
+  let+ astate = write_deref path location ~ref:(ValueOrigin.addr_hist ref) ~obj astate in
+  match (ref : ValueOrigin.t) with
+  | InMemory {src= addr, _; access= ArrayAccess _} ->
+      (* A subscript store can initialize a scalar passed by address, e.g. [p[0] = 42]. Keep the
+         existing coarse backing-location effect at the actual store, not address computation. *)
+      AddressAttributes.initialize addr astate
+  | InMemory _ | OnStack _ | Unknown _ ->
+      astate
+
+
 let degrade_mode addr astate mode =
   match mode with
   | Read when AbductiveDomain.AddressAttributes.has_unknown_effect addr astate ->
@@ -444,13 +455,21 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
         Sat (Ok (constant_address path location i (astate, AbstractValue.mk_fresh ())))
     | None ->
         let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
-        let mode = degrade_mode addr astate mode in
+        (* Field-address evaluation must not read the backing object. Preserve the existing write
+           effects for construction and Python's captured-field value convention. *)
+        let mode =
+          match mode with
+          | Read when not (Language.curr_language_is Python) ->
+              NoAccess
+          | Read | Write | NoAccess ->
+              degrade_mode addr astate mode
+        in
         eval_access_to_value_origin path mode location addr_hist (FieldAccess field) astate )
   | Lindex (exp', exp_index) ->
       let** astate, addr_hist_index = eval path Read location exp_index astate in
-      let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
-      let mode = degrade_mode addr astate mode in
-      eval_access_to_value_origin path mode location addr_hist
+      let+* astate, addr_hist = eval path Read location exp' astate in
+      (* An array subscript computes an address, not a read or write of the contents. *)
+      eval_access_to_value_origin path NoAccess location addr_hist
         (ArrayAccess (StdTyp.void, fst addr_hist_index))
         astate
   | Closure {name; captured_vars} ->
@@ -722,6 +741,8 @@ let degrade_mode_exp path location exp astate mode =
 let eval_deref_to_value_origin path ?must_be_valid_reason location exp astate =
   let** astate, addr_hist = eval path Read location exp astate in
   let+* mode = degrade_mode_exp path location exp astate Read in
+  (* An opaque call may affect this element without affecting its parent allocation. *)
+  let mode = degrade_mode (fst addr_hist) astate mode in
   let+ astate = check_addr_access path ?must_be_valid_reason mode location addr_hist astate in
   let astate, dest_addr_hist = Memory.eval_edge addr_hist Dereference astate in
   (astate, ValueOrigin.InMemory {src= addr_hist; access= Dereference; dest= dest_addr_hist})
