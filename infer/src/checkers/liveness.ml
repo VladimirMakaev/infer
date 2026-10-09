@@ -516,9 +516,13 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
         Mangled.equal (Pvar.get_name pvar) local_data.ProcAttributes.name )
   in
   let is_constexpr_or_unused pvar =
-    find_local pvar
-    |> Option.exists ~f:(fun local ->
-        local.ProcAttributes.is_constexpr || local.ProcAttributes.is_declared_unused )
+    let name = Pvar.get_name pvar in
+    List.existsi (Procdesc.get_formals proc_desc) ~f:(fun index (formal, _, _) ->
+        Mangled.equal name formal
+        && List.mem (Procdesc.get_attributes proc_desc).unused_formals index ~equal:Int.equal )
+    || find_local pvar
+       |> Option.exists ~f:(fun local ->
+           local.ProcAttributes.is_constexpr || local.ProcAttributes.is_declared_unused )
   in
   let names_read_by_closures = lazy (names_read_by_closures proc_desc) in
   let is_const_read_by_closure pvar =
