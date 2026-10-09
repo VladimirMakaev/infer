@@ -331,6 +331,23 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
     | _ ->
         astate
   in
+  let forget_file_descriptors_owned_by_callee astate =
+    let owns_fd (_, formal_typ, annot) =
+      (not (Typ.is_pointer formal_typ))
+      && Annotations.ia_has_annotation_with annot (fun {Annot.class_name} ->
+          String.equal class_name Annotations.takes_fd_ownership )
+    in
+    (* Consult explicit contracts only when the callee body cannot be analyzed. The return value
+       and all ordinary unknown-call effects are still modeled above. *)
+    Option.bind callee_pname_opt ~f:IRAttributes.load
+    |> Option.value_map ~default:astate ~f:(fun attrs ->
+        if not (List.exists attrs.ProcAttributes.formals ~f:owns_fd) then astate
+        else
+          List.filter_mapi actuals ~f:(fun index ((value, _), typ) ->
+              Option.bind (List.nth attrs.ProcAttributes.formals index) ~f:(fun formal ->
+                  Option.some_if (owns_fd formal) (value, typ) ) )
+          |> fun args -> PulseOperations.forget_file_descriptors_passed_by_value args astate )
+  in
   L.d_printfln ~color:Orange "skipping unknown procedure %a" (Pp.option Procname.pp)
     callee_pname_opt ;
   ( match (actuals, formals_opt) with
@@ -352,7 +369,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
             havoc_actuals_without_typ_info astate
         | Ok result ->
             result ) )
-  |> forget_file_descriptors_owned_by_result |> add_skipped_proc
+  |> forget_file_descriptors_owned_by_result |> forget_file_descriptors_owned_by_callee
+  |> add_skipped_proc
 
 
 type implicit_copy = {class_name: Typ.Name.t; is_trivial: bool}
