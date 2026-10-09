@@ -1063,6 +1063,7 @@ let mark_if_unchanged ~old_pdesc ~new_pdesc =
     Bool.equal old_attrs.is_defined new_attrs.is_defined
     && Typ.equal old_attrs.ret_type new_attrs.ret_type
     && formals_eq old_attrs.formals new_attrs.formals
+    && [%equal: int list] old_attrs.unused_formals new_attrs.unused_formals
     && [%equal: (Pvar.t * Typ.t) list] old_attrs.globals new_attrs.globals
     && nodes_eq (get_nodes old_pdesc) (get_nodes new_pdesc)
   in
