@@ -23,3 +23,11 @@ val add_call_source :
   -> AbductiveDomain.t
 
 val find : AbstractValue.t -> AbductiveDomain.t -> DecompilerExpr.t
+
+val add_iterator_source :
+     AbstractValue.t
+  -> CallEvent.t
+  -> src:AbstractValue.t
+  -> is_reference_receiver:bool
+  -> AbductiveDomain.t
+  -> AbductiveDomain.t
