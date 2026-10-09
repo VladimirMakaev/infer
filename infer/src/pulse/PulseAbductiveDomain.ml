@@ -885,6 +885,19 @@ module Internal = struct
                    (not (TaintSanitizedSet.is_empty taint_sanitizers))
                    (TaintSanitized taint_sanitizers)
             in
+            let astate =
+              match (access : Access.t) with
+              | FieldAccess _ | ArrayAccess _ ->
+                  (* Offsets name cells within the same object. Computing their addresses does not
+                     read the contents, but a later dereference must retain initialization checks.
+                     Only inherit on creation: an existing cell may already have been written. *)
+                  BaseAddressAttributes.find_opt addr_src (astate.post :> base_domain).attrs
+                  |> Option.bind ~f:Attribute.Attributes.get_uninitialized
+                  |> Option.value_map ~default:astate ~f:(fun typ ->
+                      SafeAttributes.uninitialize addr_dst typ astate )
+              | Dereference ->
+                  astate
+            in
             ( { astate with
                 post= PostDomain.update astate.post ~heap:post_heap
               ; pre= PreDomain.update astate.pre ~heap:pre_heap }
