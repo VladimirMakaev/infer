@@ -2264,6 +2264,18 @@ let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) hist x astate =
               BaseAddressAttributes.remove_allocation_attr addr attrs
               |> BaseAddressAttributes.initialize addr
             in
+            let attrs =
+              match
+                BaseAddressAttributes.find_opt addr attrs
+                |> Option.bind ~f:Attributes.get_last_lookup_value
+              with
+              | Some (key, first_key, true) ->
+                  BaseAddressAttributes.add_one addr
+                    (Attribute.LastLookupValue {key; first_key; known_present= false})
+                    attrs
+              | _ ->
+                  attrs
+            in
             let heap = havoc_accesses hist addr heap in
             Continue (heap, attrs)
         | `ShouldOnlyHavocResources ->
