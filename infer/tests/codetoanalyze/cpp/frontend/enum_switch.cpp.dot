@@ -1,0 +1,632 @@
+/* @generated */
+digraph cfg {
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_1" [label="1: Start bool_fixed_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_1" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_11" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_2" [label="2: Exit bool_fixed_implicit \n  " color=yellow style=filled]
+	
+
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 186, column 10]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_3" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_4" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 186, column 3]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_4" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_2" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 178, column 11]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_5" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_9" ;
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_5" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_10" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 183, column 7]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_6" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_3" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 180, column 7]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_7" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_3" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 182, column 5]\n " shape="invhouse"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_8" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_6" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_9" [label="9: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 179, column 5]\n " shape="invhouse"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_9" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_7" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_10" [label="10: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 179, column 5]\n " shape="invhouse"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_10" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_8" ;
+"bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_11" [label="11:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 177, column 3]\n  *&result:int=-1 [line 177, column 3]\n " shape="box"]
+	
+
+	 "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_11" -> "bool_fixed_implicit#9326504588297.7c7c66a205cb6c05_5" ;
+"dense_explicit#678345280322585437.31304f7787f60992_1" [label="1: Start dense_explicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_1" -> "dense_explicit#678345280322585437.31304f7787f60992_11" ;
+"dense_explicit#678345280322585437.31304f7787f60992_2" [label="2: Exit dense_explicit \n  " color=yellow style=filled]
+	
+
+"dense_explicit#678345280322585437.31304f7787f60992_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 144, column 10]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_3" -> "dense_explicit#678345280322585437.31304f7787f60992_4" ;
+"dense_explicit#678345280322585437.31304f7787f60992_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 144, column 3]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_4" -> "dense_explicit#678345280322585437.31304f7787f60992_2" ;
+"dense_explicit#678345280322585437.31304f7787f60992_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 134, column 11]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_5" -> "dense_explicit#678345280322585437.31304f7787f60992_9" ;
+	 "dense_explicit#678345280322585437.31304f7787f60992_5" -> "dense_explicit#678345280322585437.31304f7787f60992_10" ;
+"dense_explicit#678345280322585437.31304f7787f60992_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 139, column 7]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_6" -> "dense_explicit#678345280322585437.31304f7787f60992_3" ;
+"dense_explicit#678345280322585437.31304f7787f60992_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 136, column 7]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_7" -> "dense_explicit#678345280322585437.31304f7787f60992_3" ;
+"dense_explicit#678345280322585437.31304f7787f60992_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 138, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_8" -> "dense_explicit#678345280322585437.31304f7787f60992_6" ;
+"dense_explicit#678345280322585437.31304f7787f60992_9" [label="9: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 135, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_9" -> "dense_explicit#678345280322585437.31304f7787f60992_7" ;
+"dense_explicit#678345280322585437.31304f7787f60992_10" [label="10: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 135, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_10" -> "dense_explicit#678345280322585437.31304f7787f60992_8" ;
+"dense_explicit#678345280322585437.31304f7787f60992_11" [label="11:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 133, column 3]\n  *&result:int=-1 [line 133, column 3]\n " shape="box"]
+	
+
+	 "dense_explicit#678345280322585437.31304f7787f60992_11" -> "dense_explicit#678345280322585437.31304f7787f60992_5" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_1" [label="1: Start dense_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_1" -> "dense_implicit#118405824679386712.1e7c101c3980061b_11" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_2" [label="2: Exit dense_implicit \n  " color=yellow style=filled]
+	
+
+"dense_implicit#118405824679386712.1e7c101c3980061b_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 129, column 10]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_3" -> "dense_implicit#118405824679386712.1e7c101c3980061b_4" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 129, column 3]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_4" -> "dense_implicit#118405824679386712.1e7c101c3980061b_2" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 121, column 11]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_5" -> "dense_implicit#118405824679386712.1e7c101c3980061b_9" ;
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_5" -> "dense_implicit#118405824679386712.1e7c101c3980061b_10" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 126, column 7]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_6" -> "dense_implicit#118405824679386712.1e7c101c3980061b_3" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 123, column 7]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_7" -> "dense_implicit#118405824679386712.1e7c101c3980061b_3" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 125, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_8" -> "dense_implicit#118405824679386712.1e7c101c3980061b_6" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_9" [label="9: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 122, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_9" -> "dense_implicit#118405824679386712.1e7c101c3980061b_7" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_10" [label="10: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 122, column 5]\n " shape="invhouse"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_10" -> "dense_implicit#118405824679386712.1e7c101c3980061b_8" ;
+"dense_implicit#118405824679386712.1e7c101c3980061b_11" [label="11:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 120, column 3]\n  *&result:int=-1 [line 120, column 3]\n " shape="box"]
+	
+
+	 "dense_implicit#118405824679386712.1e7c101c3980061b_11" -> "dense_implicit#118405824679386712.1e7c101c3980061b_5" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_1" [label="1: Start fixed_explicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_1" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_12" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_2" [label="2: Exit fixed_explicit \n  " color=yellow style=filled]
+	
+
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 66, column 10]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_3" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_4" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 66, column 3]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_4" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_2" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 56, column 11]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_5" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_10" ;
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_5" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_11" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 63, column 7]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_6" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_3" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 60, column 7]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_7" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_3" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 62, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_8" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_6" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 62, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_9" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_3" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 59, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_10" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_7" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 59, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_11" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_8" ;
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_11" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_9" ;
+"fixed_explicit#330226388752762694.77924f9fa8d6e7b8_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 55, column 3]\n  *&result:int=-1 [line 55, column 3]\n " shape="box"]
+	
+
+	 "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_12" -> "fixed_explicit#330226388752762694.77924f9fa8d6e7b8_5" ;
+"fixed_implicit#533290486240849704.291618c523014140_1" [label="1: Start fixed_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_1" -> "fixed_implicit#533290486240849704.291618c523014140_12" ;
+"fixed_implicit#533290486240849704.291618c523014140_2" [label="2: Exit fixed_implicit \n  " color=yellow style=filled]
+	
+
+"fixed_implicit#533290486240849704.291618c523014140_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 51, column 10]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_3" -> "fixed_implicit#533290486240849704.291618c523014140_4" ;
+"fixed_implicit#533290486240849704.291618c523014140_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 51, column 3]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_4" -> "fixed_implicit#533290486240849704.291618c523014140_2" ;
+"fixed_implicit#533290486240849704.291618c523014140_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 43, column 11]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_5" -> "fixed_implicit#533290486240849704.291618c523014140_10" ;
+	 "fixed_implicit#533290486240849704.291618c523014140_5" -> "fixed_implicit#533290486240849704.291618c523014140_11" ;
+"fixed_implicit#533290486240849704.291618c523014140_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 48, column 7]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_6" -> "fixed_implicit#533290486240849704.291618c523014140_3" ;
+"fixed_implicit#533290486240849704.291618c523014140_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 45, column 7]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_7" -> "fixed_implicit#533290486240849704.291618c523014140_3" ;
+"fixed_implicit#533290486240849704.291618c523014140_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 47, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_8" -> "fixed_implicit#533290486240849704.291618c523014140_6" ;
+"fixed_implicit#533290486240849704.291618c523014140_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 47, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_9" -> "fixed_implicit#533290486240849704.291618c523014140_3" ;
+"fixed_implicit#533290486240849704.291618c523014140_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 44, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_10" -> "fixed_implicit#533290486240849704.291618c523014140_7" ;
+"fixed_implicit#533290486240849704.291618c523014140_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 44, column 5]\n " shape="invhouse"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_11" -> "fixed_implicit#533290486240849704.291618c523014140_8" ;
+	 "fixed_implicit#533290486240849704.291618c523014140_11" -> "fixed_implicit#533290486240849704.291618c523014140_9" ;
+"fixed_implicit#533290486240849704.291618c523014140_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 42, column 3]\n  *&result:int=-1 [line 42, column 3]\n " shape="box"]
+	
+
+	 "fixed_implicit#533290486240849704.291618c523014140_12" -> "fixed_implicit#533290486240849704.291618c523014140_5" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_1" [label="1: Start scoped_default_fallthrough\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_1" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_13" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_2" [label="2: Exit scoped_default_fallthrough \n  " color=yellow style=filled]
+	
+
+"scoped_default_fallthrough#912346.300a48fd5d638f42_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 109, column 10]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_3" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_4" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 109, column 3]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_4" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_2" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 99, column 11]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_5" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_11" ;
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_5" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_12" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_6" [label="6:  BinaryOperatorStmt: AddAssign \n   n$3=*&result:int [line 106, column 7]\n  *&result:int=(n$3 + 1) [line 106, column 7]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_6" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_3" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=6 [line 104, column 7]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_7" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_6" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_8" [label="8:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 101, column 7]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_8" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_3" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_9" [label="9: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 105, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_9" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_6" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_10" [label="10: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 105, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_10" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_7" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_11" [label="11: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 100, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_11" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_8" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_12" [label="12: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 100, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_12" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_9" ;
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_12" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_10" ;
+"scoped_default_fallthrough#912346.300a48fd5d638f42_13" [label="13:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 98, column 3]\n  *&result:int=-1 [line 98, column 3]\n " shape="box"]
+	
+
+	 "scoped_default_fallthrough#912346.300a48fd5d638f42_13" -> "scoped_default_fallthrough#912346.300a48fd5d638f42_5" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_1" [label="1: Start scoped_explicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_1" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_12" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_2" [label="2: Exit scoped_explicit \n  " color=yellow style=filled]
+	
+
+"scoped_explicit#26622554173103371.110a5e54c53f572b_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 38, column 10]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_3" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_4" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 38, column 3]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_4" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_2" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 28, column 11]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_5" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_10" ;
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_5" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_11" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 33, column 7]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_6" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_3" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 30, column 7]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_7" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_3" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 32, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_8" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_6" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 32, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_9" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_3" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 29, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_10" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_7" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 29, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_11" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_8" ;
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_11" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_9" ;
+"scoped_explicit#26622554173103371.110a5e54c53f572b_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 27, column 3]\n  *&result:int=-1 [line 27, column 3]\n " shape="box"]
+	
+
+	 "scoped_explicit#26622554173103371.110a5e54c53f572b_12" -> "scoped_explicit#26622554173103371.110a5e54c53f572b_5" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_1" [label="1: Start scoped_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_1" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_12" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_2" [label="2: Exit scoped_implicit \n  " color=yellow style=filled]
+	
+
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 23, column 10]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_4" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 23, column 3]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_4" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_2" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 15, column 11]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_5" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_10" ;
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_5" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_11" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 20, column 7]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_6" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 17, column 7]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_7" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 19, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_8" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_6" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 19, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 16, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_10" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_7" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 16, column 5]\n " shape="invhouse"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_11" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_8" ;
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_11" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" ;
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 14, column 3]\n  *&result:int=-1 [line 14, column 3]\n " shape="box"]
+	
+
+	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_12" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_5" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_1" [label="1: Start signed_dense_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_1" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_17" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_2" [label="2: Exit signed_dense_implicit \n  " color=yellow style=filled]
+	
+
+"signed_dense_implicit#15458399202.69ba84b7ef292066_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 163, column 10]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_3" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_4" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 163, column 3]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_4" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_2" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 149, column 11]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_5" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_15" ;
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_5" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_16" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 160, column 7]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_6" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_3" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 157, column 7]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_7" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_3" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_8" [label="8:  BinaryOperatorStmt: Assign \n   *&result:int=3 [line 154, column 7]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_8" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_3" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_9" [label="9:  BinaryOperatorStmt: Assign \n   *&result:int=2 [line 151, column 7]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_9" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_3" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 1), true); [line 159, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_10" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_6" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_11" [label="11: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 156, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_11" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_7" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_12" [label="12: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 156, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_12" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_10" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_13" [label="13: Prune (true branch, switch) \n   PRUNE((n$1 == -1), true); [line 153, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_13" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_8" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_14" [label="14: Prune (false branch, switch) \n   PRUNE(!(n$1 == -1), false); [line 153, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_14" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_11" ;
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_14" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_12" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_15" [label="15: Prune (true branch, switch) \n   PRUNE((n$1 == -2), true); [line 150, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_15" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_9" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_16" [label="16: Prune (false branch, switch) \n   PRUNE(!(n$1 == -2), false); [line 150, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_16" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_13" ;
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_16" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_14" ;
+"signed_dense_implicit#15458399202.69ba84b7ef292066_17" [label="17:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 148, column 3]\n  *&result:int=-1 [line 148, column 3]\n " shape="box"]
+	
+
+	 "signed_dense_implicit#15458399202.69ba84b7ef292066_17" -> "signed_dense_implicit#15458399202.69ba84b7ef292066_5" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_1" [label="1: Start signed_pair_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_1" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_11" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_2" [label="2: Exit signed_pair_implicit \n  " color=yellow style=filled]
+	
+
+"signed_pair_implicit#178085902557.c9007c2a3a774230_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 202, column 10]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_3" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_4" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 202, column 3]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_4" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_2" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 194, column 11]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_5" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_9" ;
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_5" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_10" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 199, column 7]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_6" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_3" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 196, column 7]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_7" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_3" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 198, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_8" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_6" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_9" [label="9: Prune (true branch, switch) \n   PRUNE((n$1 == -1), true); [line 195, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_9" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_7" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_10" [label="10: Prune (false branch, switch) \n   PRUNE(!(n$1 == -1), false); [line 195, column 5]\n " shape="invhouse"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_10" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_8" ;
+"signed_pair_implicit#178085902557.c9007c2a3a774230_11" [label="11:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 193, column 3]\n  *&result:int=-1 [line 193, column 3]\n " shape="box"]
+	
+
+	 "signed_pair_implicit#178085902557.c9007c2a3a774230_11" -> "signed_pair_implicit#178085902557.c9007c2a3a774230_5" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_1" [label="1: Start sparse_explicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_1" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_12" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_2" [label="2: Exit sparse_explicit \n  " color=yellow style=filled]
+	
+
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 94, column 10]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_3" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_4" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 94, column 3]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_4" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_2" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 84, column 11]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_5" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_10" ;
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_5" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_11" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 91, column 7]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_6" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_3" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 86, column 7]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_7" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_3" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 2), true); [line 90, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_8" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_6" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 2), false); [line 90, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_9" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_3" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 85, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_10" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_7" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 85, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_11" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_8" ;
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_11" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_9" ;
+"sparse_explicit#37489889083131763.25cb7c1a8877a81f_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 83, column 3]\n  *&result:int=-1 [line 83, column 3]\n " shape="box"]
+	
+
+	 "sparse_explicit#37489889083131763.25cb7c1a8877a81f_12" -> "sparse_explicit#37489889083131763.25cb7c1a8877a81f_5" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_1" [label="1: Start sparse_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_1" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_12" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_2" [label="2: Exit sparse_implicit \n  " color=yellow style=filled]
+	
+
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 79, column 10]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_3" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_4" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 79, column 3]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_4" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_2" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 71, column 11]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_5" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_10" ;
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_5" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_11" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=5 [line 76, column 7]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_6" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_3" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_7" [label="7:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 73, column 7]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_7" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_3" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_8" [label="8: Prune (true branch, switch) \n   PRUNE((n$1 == 2), true); [line 75, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_8" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_6" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 2), false); [line 75, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_9" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_3" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_10" [label="10: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 72, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_10" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_7" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_11" [label="11: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 72, column 5]\n " shape="invhouse"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_11" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_8" ;
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_11" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_9" ;
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_12" [label="12:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 70, column 3]\n  *&result:int=-1 [line 70, column 3]\n " shape="box"]
+	
+
+	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_12" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_5" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_1" [label="1: Start zero_only_implicit\nFormals:  code:int\nLocals:  result:int \n  " color=yellow style=filled]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_1" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_9" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_2" [label="2: Exit zero_only_implicit \n  " color=yellow style=filled]
+	
+
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_3" [label="3:  Return Stmt \n   n$0=*&result:int [line 173, column 10]\n " shape="box"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_3" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_4" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 173, column 3]\n " shape="box"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_4" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_2" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_5" [label="5:  SwitchStmt \n   n$1=*&code:int [line 168, column 11]\n " shape="box"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_5" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_7" ;
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_5" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_8" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_6" [label="6:  BinaryOperatorStmt: Assign \n   *&result:int=4 [line 170, column 7]\n " shape="box"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_6" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_3" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_7" [label="7: Prune (true branch, switch) \n   PRUNE((n$1 == 0), true); [line 169, column 5]\n " shape="invhouse"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_7" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_6" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_8" [label="8: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 169, column 5]\n " shape="invhouse"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_8" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_3" ;
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_9" [label="9:  DeclStmt \n   VARIABLE_DECLARED(result:int); [line 167, column 3]\n  *&result:int=-1 [line 167, column 3]\n " shape="box"]
+	
+
+	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_9" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_5" ;
+}
