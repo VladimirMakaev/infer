@@ -539,6 +539,7 @@ let create_cm_procdesc source_file program icfg cm proc_name =
           ; modify_in_block= false
           ; is_constexpr= false
           ; is_declared_unused= false
+          ; is_empty_pod_reference_only= false
           ; is_structured_binding= false
           ; has_cleanup_attribute= false
           ; tmp_id= None } )
