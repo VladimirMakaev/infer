@@ -984,7 +984,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         {res_trans with control= {res_trans.control with initd_exps= [fst var_exp_typ]}}
 
 
-  and var_deref_trans ?expr_info trans_state stmt_info (decl_ref : Clang_ast_t.decl_ref) =
+  and var_deref_trans ?(is_const_expr = false) trans_state stmt_info
+      (decl_ref : Clang_ast_t.decl_ref) =
     let context = trans_state.context in
     let _, decl_ptr, ast_qual_type = CAst_utils.get_info_from_decl_ref decl_ref in
     let ast_typ = CType_decl.qual_type_to_sil_type context.tenv ast_qual_type in
@@ -1032,11 +1033,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                   declaration and the type stored for the capture need not be const. Keep the
                   expression's qualification without changing the synthetic reference used to
                   access the capture, or the pointee of a captured pointer. *)
-               if
-                 Procname.is_cpp_lambda procname
-                 && Option.exists expr_info ~f:(fun {Clang_ast_t.ei_qual_type} ->
-                     ei_qual_type.qt_is_const )
-               then if Typ.is_reference typ then Typ.set_ptr_to_const typ else Typ.set_to_const typ
+               if Procname.is_cpp_lambda procname && is_const_expr then
+                 if Typ.is_reference typ then Typ.set_ptr_to_const typ else Typ.set_to_const typ
                else typ )
              ~default:typ
       else typ
@@ -1069,8 +1067,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     res_trans
 
 
-  and decl_ref_trans ?expr_info ?(is_constructor_init = false) ?(is_member_of_const = false)
-      ?(is_implicit_self = false) ~context trans_state stmt_info decl_ref =
+  and decl_ref_trans ?(is_const_expr = false) ?(is_constructor_init = false)
+      ?(is_member_of_const = false) ?(is_implicit_self = false) ~context trans_state stmt_info
+      decl_ref =
     let decl_kind = decl_ref.Clang_ast_t.dr_kind in
     match (decl_kind, context) with
     | `EnumConstant, _ ->
@@ -1083,7 +1082,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       | Some binding_expr ->
           instruction {trans_state with var_exp_typ= None} binding_expr
       | None ->
-          var_deref_trans ?expr_info trans_state stmt_info decl_ref )
+          var_deref_trans ~is_const_expr trans_state stmt_info decl_ref )
     | (`Field | `ObjCIvar), MemberOrIvar pre_trans_result ->
         field_deref_trans trans_state ~is_implicit_self stmt_info pre_trans_result decl_ref
           ~is_constructor_init ~is_member_of_const
@@ -1102,7 +1101,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
 
   and declRefExpr_trans trans_state stmt_info expr_info decl_ref_expr_info =
     let decl_ref = Option.value_exn decl_ref_expr_info.Clang_ast_t.drti_decl_ref in
-    decl_ref_trans ~expr_info ~context:DeclRefExpr trans_state stmt_info decl_ref
+    decl_ref_trans ~is_const_expr:expr_info.Clang_ast_t.ei_qual_type.qt_is_const
+      ~context:DeclRefExpr trans_state stmt_info decl_ref
 
 
   (** evaluates an enum constant *)

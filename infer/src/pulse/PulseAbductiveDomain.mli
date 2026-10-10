@@ -217,6 +217,9 @@ module AddressAttributes : sig
 
   val find_opt : [`Pre | `Post] -> AbstractValue.t -> t -> Attributes.t option
 
+  val forget_last_lookup_presence : AbstractValue.t -> t -> t
+  (** Clear only the post lookup's membership proof, preserving its key fingerprints. *)
+
   val check_valid :
        PathContext.t
     -> ?must_be_valid_reason:Invalidation.must_be_valid_reason

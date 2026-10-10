@@ -84,6 +84,8 @@ module LocalAliases = struct
     visit (locals targets) VarSet.empty
 
 
+  let reachable_exp aliases exp = reachable aliases (address aliases exp)
+
   let singleton_local targets =
     if Int.equal (Targets.cardinal targets) 1 then
       match Targets.choose_opt targets with Some (Target.Local pvar) -> Some pvar | _ -> None
@@ -450,7 +452,7 @@ module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
   type analysis_data = unit
 
   let add_actual aliases expr escaped =
-    VarSet.union escaped (LocalAliases.reachable aliases (LocalAliases.address aliases expr))
+    VarSet.union escaped (LocalAliases.reachable_exp aliases expr)
 
 
   let add_direct expr vars =
@@ -500,7 +502,8 @@ module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
           in
           (VarSet.union passed_by_ref targets, VarSet.union escaped targets)
       | Store {e1; e2; _} when LocalAliases.store_escapes aliases escaped e1 ->
-          (add_actual aliases e2 passed_by_ref, add_actual aliases e2 escaped)
+          let targets = LocalAliases.reachable_exp aliases e2 in
+          (VarSet.union passed_by_ref targets, VarSet.union escaped targets)
       | _ ->
           (passed_by_ref, escaped)
     in
@@ -604,9 +607,7 @@ module CheckerTransferFunctions = struct
       VarSet.fold Domain.add (LocalAliases.locals (LocalAliases.address aliases exp)) astate
     in
     let add_reachable exp astate =
-      VarSet.fold Domain.add
-        (LocalAliases.reachable aliases (LocalAliases.address aliases exp))
-        astate
+      VarSet.fold Domain.add (LocalAliases.reachable_exp aliases exp) astate
     in
     match instr with
     | Load {id; e} when not (Ident.is_none id) ->
