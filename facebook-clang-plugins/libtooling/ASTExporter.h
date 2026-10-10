@@ -769,8 +769,23 @@ void ASTExporter<ATDWriter>::dumpName(const NamedDecl &Decl) {
 
   std::string name = Decl.getNameAsString();
   if (name.length() == 0) {
-    const FieldDecl *FD = dyn_cast<FieldDecl>(&Decl);
-    if (FD) {
+    if (const auto *Ivar = dyn_cast<ObjCIvarDecl>(&Decl)) {
+      // ObjCIvarDecl inherits FieldDecl, but getFieldIndex requires a
+      // RecordDecl parent. The interface's chain also includes extension and
+      // implementation ivars, so their anonymous names cannot collide.
+      const auto *Interface = Ivar->getContainingInterface();
+      const ObjCIvarDecl *Sibling =
+          Interface ? Interface->all_declared_ivar_begin() : nullptr;
+      unsigned Index = 0;
+      while (Sibling && Sibling != Ivar) {
+        Sibling = Sibling->getNextIvar();
+        ++Index;
+      }
+      if (Sibling != Ivar) {
+        llvm_unreachable("Ivar missing from its containing interface");
+      }
+      name = "__anon_ivar_" + std::to_string(Index);
+    } else if (const auto *FD = dyn_cast<FieldDecl>(&Decl)) {
       name = "__anon_field_" + std::to_string(FD->getFieldIndex());
     }
   }

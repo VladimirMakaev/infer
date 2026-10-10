@@ -1,0 +1,49 @@
+/* @generated */
+digraph cfg {
+"record_bitfields_null_bad#2643871.a07f900efa2a7407_1" [label="1: Start record_bitfields_null_bad\nFormals: \nLocals:  value:RecordBitfields* \n  " color=yellow style=filled]
+	
+
+	 "record_bitfields_null_bad#2643871.a07f900efa2a7407_1" -> "record_bitfields_null_bad#2643871.a07f900efa2a7407_5" ;
+"record_bitfields_null_bad#2643871.a07f900efa2a7407_2" [label="2: Exit record_bitfields_null_bad \n  " color=yellow style=filled]
+	
+
+"record_bitfields_null_bad#2643871.a07f900efa2a7407_3" [label="3:  Return Stmt \n   n$0=*&value:RecordBitfields* [line 25, column 10]\n  n$1=*n$0.second:unsigned int [line 25, column 10]\n " shape="box"]
+	
+
+	 "record_bitfields_null_bad#2643871.a07f900efa2a7407_3" -> "record_bitfields_null_bad#2643871.a07f900efa2a7407_4" ;
+"record_bitfields_null_bad#2643871.a07f900efa2a7407_4" [label="4:  Return Stmt \n   *&return:int=(int)n$1 [line 25, column 3]\n " shape="box"]
+	
+
+	 "record_bitfields_null_bad#2643871.a07f900efa2a7407_4" -> "record_bitfields_null_bad#2643871.a07f900efa2a7407_2" ;
+"record_bitfields_null_bad#2643871.a07f900efa2a7407_5" [label="5:  DeclStmt \n   VARIABLE_DECLARED(value:RecordBitfields*); [line 24, column 3]\n  *&value:RecordBitfields*=null [line 24, column 3]\n " shape="box"]
+	
+
+	 "record_bitfields_null_bad#2643871.a07f900efa2a7407_5" -> "record_bitfields_null_bad#2643871.a07f900efa2a7407_3" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_1" [label="1: Start record_bitfields_ok\nFormals: \nLocals:  value:RecordBitfields \n  " color=yellow style=filled]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_1" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_7" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_2" [label="2: Exit record_bitfields_ok \n  " color=yellow style=filled]
+	
+
+"record_bitfields_ok#9764800988999.43117190e7b373ea_3" [label="3:  Return Stmt \n   n$0=*&value.first:unsigned int [line 20, column 10]\n  n$1=*&value.second:unsigned int [line 20, column 24]\n " shape="box"]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_3" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_4" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_4" [label="4:  Return Stmt \n   *&return:int=((int)n$0 + (int)n$1) [line 20, column 3]\n " shape="box"]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_4" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_2" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_5" [label="5:  BinaryOperatorStmt: Assign \n   *&value.second:unsigned int=(unsigned int)2 [line 19, column 3]\n " shape="box"]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_5" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_3" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_6" [label="6:  BinaryOperatorStmt: Assign \n   *&value.first:unsigned int=(unsigned int)1 [line 18, column 3]\n " shape="box"]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_6" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_5" ;
+"record_bitfields_ok#9764800988999.43117190e7b373ea_7" [label="7:  DeclStmt \n   VARIABLE_DECLARED(value:RecordBitfields); [line 17, column 3]\n  *&value.first:unsigned int=0 [line 17, column 25]\n  *&value.second:unsigned int=0 [line 17, column 25]\n " shape="box"]
+	
+
+	 "record_bitfields_ok#9764800988999.43117190e7b373ea_7" -> "record_bitfields_ok#9764800988999.43117190e7b373ea_6" ;
+}
