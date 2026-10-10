@@ -167,7 +167,13 @@ and name =
   | SwiftClosure of Mangled.t
 [@@deriving hash, sexp, compare, equal, yojson_of]
 
-and template_arg = TType of t | TInt of int64 | TNull | TNullPtr | TOpaque
+and template_arg =
+  | TType of t
+  | TInt of int64
+  | TNull
+  | TNullPtr
+  | TOpaque
+  | TStructuralValue of {typ: t; value: string}
 
 and template_spec_info = NoTemplate | Template of {mangled: string option; args: template_arg list}
 [@@deriving compare, equal, yojson_of, hash, normalize]
@@ -265,6 +271,8 @@ and pp_template_spec_info pe f = function
             F.pp_print_string f "NullPtr"
         | TOpaque ->
             F.pp_print_string f "Opaque"
+        | TStructuralValue {typ; value} ->
+            F.fprintf f "StructuralValue(%a,%s)" (pp_full pe) typ (escape pe (String.escaped value))
       in
       F.fprintf f "%s%a%s" (escape pe "<") (Pp.comma_seq pp_arg_opt) args (escape pe ">")
 
