@@ -11,6 +11,29 @@ module L = Logging
 open PulseBasicInterface
 open PulseDomainInterface
 
+type reporting_scope =
+  { specialization: Specialization.Pulse.t option
+  ; mutable pending: ExecutionDomain.conditional_manifest_report list
+  ; mutable exposed: bool }
+
+(* Registered with the on-demand state manager: nested analyses must neither inherit nor
+   overwrite their caller's pending reports and specialization. *)
+let reporting_scope = AnalysisGlobalState.make_dls ~init:(fun () -> None)
+
+let register_conditional report =
+  Option.iter (DLS.get reporting_scope) ~f:(fun scope -> scope.pending <- report :: scope.pending)
+
+
+let current_specialization () =
+  Option.bind (DLS.get reporting_scope) ~f:(fun scope -> scope.specialization)
+
+
+let has_exposed_context () = Option.exists (DLS.get reporting_scope) ~f:(fun scope -> scope.exposed)
+
+let mark_incomplete () =
+  Option.iter (DLS.get reporting_scope) ~f:(fun scope -> scope.exposed <- true)
+
+
 (* Is nullptr dereference issue in Java class annotated with [@Nullsafe] *)
 let is_nullptr_dereference_in_nullsafe_class tenv ~is_nullptr_dereference jn =
   is_nullptr_dereference
@@ -180,6 +203,145 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
 
 let report analysis_data ~is_suppressed ~latent diagnostic =
   do_report analysis_data ~is_suppressed ~latent diagnostic
+
+
+let report_conditional_origin analysis_data
+    {ExecutionDomain.origin= {proc_name}; original_diagnostic; is_suppressed} =
+  match Procdesc.load proc_name with
+  | Some proc_desc ->
+      let err_log = Errlog.empty () in
+      let origin_data = InterproceduralAnalysis.for_procedure proc_desc err_log analysis_data in
+      report origin_data ~is_suppressed ~latent:false original_diagnostic ;
+      analysis_data.InterproceduralAnalysis.add_errlog proc_name err_log
+  | None ->
+      (* A missing origin must not turn a pending error into a silent path. *)
+      report analysis_data ~is_suppressed ~latent:false original_diagnostic
+
+
+let with_specialization analysis_data specialization ~f =
+  let saved = DLS.get reporting_scope in
+  let scope = {specialization; pending= []; exposed= false} in
+  DLS.set reporting_scope (Some scope) ;
+  Fun.protect
+    ~finally:(fun () -> DLS.set reporting_scope saved)
+    (fun () ->
+      match f () with
+      | result ->
+          if scope.exposed then List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
+          result
+      | exception exn ->
+          let backtrace = Stdlib.Printexc.get_raw_backtrace () in
+          List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
+          Stdlib.Printexc.raise_with_backtrace exn backtrace )
+
+
+let callable_class tenv (name : Typ.Name.t) =
+  match name with
+  | Typ.CFunction _ ->
+      true
+  | Typ.CppClass _ ->
+      let spelling = Typ.Name.name name in
+      String.is_prefix spelling ~prefix:"std::function<"
+      || String.is_prefix spelling ~prefix:"folly::Function<"
+      || Option.exists (Tenv.lookup tenv name) ~f:(fun {Struct.methods} ->
+          List.exists methods ~f:(fun {Struct.name} -> Procname.is_cpp_call_operator name) )
+  | _ ->
+      false
+
+
+let rec callable_type tenv typ =
+  match typ.Typ.desc with
+  | Tptr (typ, _) ->
+      callable_type tenv typ
+  | Tfun _ ->
+      true
+  | Tstruct name ->
+      callable_class tenv name
+  | _ ->
+      false
+
+
+let note_unknown_actuals tenv actuals astate =
+  let rec callable_value depth value =
+    Option.exists (PulseArithmetic.get_dynamic_type value astate) ~f:(fun {Formula.typ} ->
+        callable_type tenv typ )
+    || depth > 0
+       && Option.exists (Memory.find_edge_opt value Dereference astate) ~f:(fun (value, _) ->
+           callable_value (depth - 1) value )
+  in
+  Option.iter (DLS.get reporting_scope) ~f:(fun scope ->
+      if
+        List.exists actuals ~f:(fun ((value, _), typ) ->
+            callable_type tenv typ || callable_value 2 value )
+      then scope.exposed <- true )
+
+
+let has_trivial_callable_actual tenv actuals astate =
+  let rec trivial depth value =
+    Option.exists (PulseArithmetic.get_dynamic_type value astate) ~f:(fun {Formula.typ} ->
+        match typ.Typ.desc with
+        | Tstruct name when callable_class tenv name ->
+            Option.exists (Tenv.lookup tenv name) ~f:(fun {Struct.class_info} ->
+                match class_info with
+                | Struct.ClassInfo.CppClassInfo {is_trivially_copyable} ->
+                    is_trivially_copyable
+                | _ ->
+                    false )
+        | _ ->
+            false )
+    || depth > 0
+       && Option.exists (Memory.find_edge_opt value Dereference astate) ~f:(fun (value, _) ->
+           trivial (depth - 1) value )
+  in
+  List.exists actuals ~f:(fun ((value, _), _) -> trivial 2 value)
+
+
+let note_summary_escapes {InterproceduralAnalysis.tenv; proc_desc}
+    (summary : AbductiveDomain.Summary.t) =
+  Option.iter (DLS.get reporting_scope) ~f:(fun scope ->
+      if not (List.is_empty scope.pending) then
+        let post = AbductiveDomain.Summary.get_post summary in
+        let formal_names =
+          Procdesc.get_formals proc_desc |> List.map ~f:fst3 |> Mangled.Set.of_list
+        in
+        let rec reachable_callable seen written value =
+          if AbstractValue.Set.mem value seen then false
+          else
+            let seen = AbstractValue.Set.add value seen in
+            let written =
+              written || Option.is_some (UnsafeAttributes.get_written_to value post.attrs)
+            in
+            written
+            && Option.exists
+                 (PulseArithmetic.get_dynamic_type value (summary :> AbductiveDomain.t))
+                 ~f:(fun {Formula.typ} -> callable_type tenv typ)
+            || Option.exists (UnsafeMemory.find_opt value post.heap) ~f:(fun edges ->
+                UnsafeMemory.Edges.exists edges ~f:(fun (_, (value, _)) ->
+                    reachable_callable seen written value ) )
+        in
+        if
+          UnsafeStack.exists
+            (fun var origin ->
+              Option.exists (Var.get_pvar var) ~f:(fun pvar ->
+                  let exported = Pvar.is_global pvar || Pvar.is_return pvar in
+                  (exported || Mangled.Set.mem (Pvar.get_name pvar) formal_names)
+                  && reachable_callable AbstractValue.Set.empty exported (ValueOrigin.value origin) ) )
+            post.stack
+        then scope.exposed <- true )
+
+
+let depends_on_requested_callable specialization = function
+  | Diagnostic.AccessToInvalidAddress {invalidation= ConstantDereference constant; access_trace}
+    when IntLit.iszero constant ->
+      Trace.exists_call access_trace ~f:(function
+        | Call pname when Procname.is_cpp_call_operator pname ->
+            Option.exists
+              (Procname.get_class_type_name pname)
+              ~f:(Specialization.Pulse.has_type_in_specialization specialization)
+        | _ ->
+            false )
+  | _ ->
+      false
 
 
 let report_if_entry_point ({InterproceduralAnalysis.proc_desc} as analysis_data) trace_to_error
@@ -365,15 +527,32 @@ let report_summary_error ({InterproceduralAnalysis.tenv; proc_desc} as analysis_
           ~is_optional_empty
       in
       match LatentIssue.should_report summary diagnostic with
-      | `ReportNow ->
-          if is_suppressed then L.d_printfln "ReportNow suppressed error" ;
-          report analysis_data ~latent:false ~is_suppressed diagnostic ;
-          if Diagnostic.aborts_execution path diagnostic then
-            let trace_to_issue =
-              Trace.Immediate {location= Procdesc.get_loc proc_desc; history= ValueHistory.epoch}
-            in
-            Some (Stopped (AbortProgram {astate= summary; diagnostic; trace_to_issue}))
-          else None
+      | `ReportNow -> (
+          let trace_to_issue =
+            Trace.Immediate {location= Procdesc.get_loc proc_desc; history= ValueHistory.epoch}
+          in
+          match current_specialization () with
+          | Some specialization
+            when (not (has_exposed_context ()))
+                 && depends_on_requested_callable specialization diagnostic
+                 && Diagnostic.aborts_execution path diagnostic ->
+              let report =
+                { ExecutionDomain.origin=
+                    { proc_name= Procdesc.get_proc_name proc_desc
+                    ; specialization= Some (Pulse specialization) }
+                ; original_diagnostic= diagnostic
+                ; diagnostic
+                ; is_suppressed
+                ; trace_to_issue }
+              in
+              register_conditional report ;
+              Some (Stopped (ConditionalManifestIssue {astate= summary; report}))
+          | _ ->
+              if is_suppressed then L.d_printfln "ReportNow suppressed error" ;
+              report analysis_data ~latent:false ~is_suppressed diagnostic ;
+              if Diagnostic.aborts_execution path diagnostic then
+                Some (Stopped (AbortProgram {astate= summary; diagnostic; trace_to_issue}))
+              else None )
       | `DelayReport latent_issue ->
           if is_suppressed then L.d_printfln "DelayReport suppressed error" ;
           if Config.pulse_report_latent_issues then
