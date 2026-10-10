@@ -356,6 +356,8 @@ codetoanalyze/c/pulse/list_checks.c, null_ptr_deref_bad, 0, NULLPTR_DEREFERENCE,
 codetoanalyze/c/pulse/list_checks.c, null_ptr_deref2_bad, 0, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,when calling `go_to_end_of_list` here,parameter `head` of go_to_end_of_list,invalid access occurs here]
 codetoanalyze/c/pulse/list_checks.c, null_ptr_deref3_bad, 0, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,when calling `check_next` here,parameter `head` of check_next,invalid access occurs here]
 codetoanalyze/c/pulse/lists.c, call_add2_then_deref_null_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse/lua_typeerror.c, lua_typeerror_returning_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse/lua_typeerror.c, lua_typeerror_null_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/memcpy.c, memcpy_to_null_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/memcpy.c, memcpy_to_null_indirect_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/memcpy.c, memcpy_from_null_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
