@@ -603,6 +603,8 @@ and get_template_args tenv (template_args : Clang_ast_t.template_instantiation_a
         [Typ.TOpaque]
     | `Integral i -> (
       match Int64.of_string i with x -> [Typ.TInt x] | exception Failure _ -> [Typ.TOpaque] )
+    | `StructuralValue {Clang_ast_t.svi_qual_type; svi_value} ->
+        [Typ.TStructuralValue {typ= qual_type_to_sil_type tenv svi_qual_type; value= svi_value}]
     | `Null ->
         [Typ.TNull]
     | `NullPtr ->
