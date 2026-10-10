@@ -110,6 +110,7 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
     in
     match (summary_result : _ result) with
     | Ok summary ->
+        PulseReport.note_summary_escapes analysis_data summary ;
         exec_domain_of_summary summary
     | Error (`MemoryLeak (summary, astate, allocator, allocation_trace, location)) ->
         PulseReport.report_summary_error analysis_data path
@@ -198,6 +199,16 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
   | Stopped (AbortProgram {astate; diagnostic; trace_to_issue}) ->
       PulseReport.report_if_entry_point analysis_data trace_to_issue diagnostic ;
       Sat (Stopped (AbortProgram {astate; diagnostic; trace_to_issue}))
+  | Stopped (ConditionalManifestIssue {astate; report}) ->
+      PulseReport.register_conditional report ;
+      PulseReport.note_summary_escapes analysis_data astate ;
+      if Option.is_none specialization || PulseReport.has_exposed_context () then (
+        PulseReport.report_conditional_origin analysis_data report ;
+        Sat
+          (Stopped
+             (AbortProgram
+                {astate; diagnostic= report.diagnostic; trace_to_issue= report.trace_to_issue} ) ) )
+      else Sat (Stopped (ConditionalManifestIssue {astate; report}))
   | Stopped (ExitProgram astate) ->
       Sat (Stopped (ExitProgram astate))
   | Stopped (LatentAbortProgram {astate; latent_issue}) ->

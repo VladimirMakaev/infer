@@ -16,6 +16,26 @@ val report :
 
 val report_if_entry_point : _ InterproceduralAnalysis.t -> Trace.t -> Diagnostic.t -> unit
 
+val with_specialization :
+  _ InterproceduralAnalysis.t -> Specialization.Pulse.t option -> f:(unit -> 'a) -> 'a
+
+val register_conditional : ExecutionDomain.conditional_manifest_report -> unit
+
+val has_exposed_context : unit -> bool
+
+val mark_incomplete : unit -> unit
+
+val report_conditional_origin :
+  _ InterproceduralAnalysis.t -> ExecutionDomain.conditional_manifest_report -> unit
+
+val note_unknown_actuals :
+  Tenv.t -> ((AbstractValue.t * ValueHistory.t) * Typ.t) list -> AbductiveDomain.t -> unit
+
+val has_trivial_callable_actual :
+  Tenv.t -> ((AbstractValue.t * ValueHistory.t) * Typ.t) list -> AbductiveDomain.t -> bool
+
+val note_summary_escapes : _ InterproceduralAnalysis.t -> AbductiveDomain.Summary.t -> unit
+
 val report_summary_error :
      _ InterproceduralAnalysis.t
   -> PathContext.t
