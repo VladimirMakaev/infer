@@ -36,6 +36,9 @@ end
 
 val get_record_typename : ?tenv:Tenv.t -> Clang_ast_t.decl -> Typ.Name.t
 
+val get_record_definition : Clang_ast_t.decl -> Clang_ast_t.decl
+(** returns the available record definition, or the input declaration if it is unavailable *)
+
 val add_types_from_decl_to_tenv : Tenv.t -> Clang_ast_t.decl -> Typ.desc
 
 val add_predefined_types : Tenv.t -> unit

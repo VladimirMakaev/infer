@@ -862,6 +862,16 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
            local.ProcAttributes.is_constexpr || local.ProcAttributes.is_declared_unused )
   in
   let names_read_by_closures = lazy (names_read_by_closures proc_desc) in
+  let is_reference_only_empty_default_construction pvar pname actuals =
+    match actuals with
+    | [_] ->
+        Option.exists (find_local pvar) ~f:(fun local ->
+            local.ProcAttributes.is_empty_pod_reference_only )
+        && Option.exists (Attributes.load pname) ~f:(fun attrs ->
+            attrs.ProcAttributes.is_cpp_implicit )
+    | _ ->
+        false
+  in
   let is_const_read_by_closure pvar =
     find_local pvar
     |> Option.exists ~f:(fun local -> Typ.is_const local.ProcAttributes.typ.Typ.quals)
@@ -902,6 +912,7 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
       | Exp.Const (Cfun (Procname.ObjC_Cpp _ as pname)), Exp.Lvar pvar
         when Procname.is_constructor pname
              && should_report pvar typ live_vars passed_by_ref_vars
+             && (not (is_reference_only_empty_default_construction pvar pname actuals))
              && ( Procname.is_objc_method pname
                 || is_copy_or_move_constructor_call actuals
                 || constructor_writes_only_to_this ~depth:3 pname ) ->
