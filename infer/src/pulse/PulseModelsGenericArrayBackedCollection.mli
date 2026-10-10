@@ -122,6 +122,12 @@ module Iterator : sig
     [< `Equal | `NotEqual] -> desc:string -> AbstractValue.t -> AbstractValue.t -> model_no_non_disj
   (** [operator==] or [operator!=] on two iterators whose positions are the given values *)
 
+  val distance :
+       desc:string
+    -> AbstractValue.t * ValueHistory.t
+    -> AbstractValue.t * ValueHistory.t
+    -> model_no_non_disj
+
   val construct :
        PathContext.t
     -> Location.t

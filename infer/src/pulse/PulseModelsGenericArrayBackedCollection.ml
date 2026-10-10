@@ -390,6 +390,37 @@ module Iterator = struct
     compare_values comparison ~desc index_lhs index_rhs model_data astate
 
 
+  let distance ~desc first last : model_no_non_disj =
+   fun ({path; location; ret= ret_id, _} as model_data) astate ->
+    let origin iter =
+      let open IOption.Let_syntax in
+      let* address, _ = Memory.find_edge_opt (fst iter) access astate in
+      let+ array, _ = Memory.find_edge_opt address Dereference astate in
+      array
+    in
+    let same_origin =
+      match (origin first, origin last) with
+      | Some first_array, Some last_array ->
+          PulseArithmetic.prune_binop ~negated:false Ne (AbstractValueOperand first_array)
+            (AbstractValueOperand last_array) astate
+          |> SatUnsat.sat |> Option.is_none
+      | _ ->
+          false
+    in
+    if not same_origin then Basic.nondet ~desc model_data astate
+    else
+      let<*> astate, _, (first_pos, _) =
+        to_internal_pointer_deref path Read location first astate
+      in
+      let<*> astate, _, (last_pos, _) = to_internal_pointer_deref path Read location last astate in
+      let<**> astate, result =
+        PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) MinusPP
+          (AbstractValueOperand last_pos) (AbstractValueOperand first_pos) astate
+      in
+      let hist = Hist.single_call path location desc in
+      Basic.ok_continue (PulseOperations.write_id ret_id (result, hist) astate)
+
+
   let operator_star ~desc iter : model_no_non_disj =
    fun {path; location; ret; callee_procname; analysis_data= {proc_desc}} astate ->
     let event = Hist.call_event path location desc in
