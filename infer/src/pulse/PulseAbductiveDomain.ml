@@ -2838,6 +2838,14 @@ module AddressAttributes = struct
     SafeAttributes.find_opt pre_or_post (CanonValue.canon' astate v) astate
 
 
+  let forget_last_lookup_presence v astate =
+    match find_opt `Post v astate |> Option.bind ~f:Attributes.get_last_lookup_value with
+    | Some (key, first_key, true) ->
+        add_one v (Attribute.LastLookupValue {key; first_key; known_present= false}) astate
+    | _ ->
+        astate
+
+
   let check_valid path ?must_be_valid_reason trace v astate =
     SafeAttributes.check_valid path ?must_be_valid_reason trace (CanonValue.canon' astate v) astate
 

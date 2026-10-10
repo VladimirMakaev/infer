@@ -590,16 +590,10 @@ module IntraDomElt = struct
   let remove_var var astate_n = {astate_n with copy_map= CopyMap.remove_var var astate_n.copy_map}
 
   let has_intermediate_copies {copy_map} =
-    CopyMap.fold
-      (fun CopyVar.{copied_into; source_addr_opt} _ found ->
-        found
-        ||
-        match (copied_into, source_addr_opt) with
-        | IntoIntermediate _, Some _ ->
-            true
-        | _ ->
-            false )
-      copy_map false
+    CopyMap.exists
+      (fun CopyVar.{copied_into; source_addr_opt} _ ->
+        match (copied_into, source_addr_opt) with IntoIntermediate _, Some _ -> true | _ -> false )
+      copy_map
 
 
   (* The order of evaluation of the arguments of a call is unspecified, so a variable that is copied
