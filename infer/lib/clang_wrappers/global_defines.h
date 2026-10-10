@@ -14,7 +14,8 @@
 // when building any source code
 #define _FORTIFY_SOURCE 0
 
-// Make it harder for compilation to fail. When in the future, infer
-// wants to use this information, it can call some builtin instead of
-// the default static_assert
+// Keep the legacy C macro, but let C++ use its keyword. A function-like
+// macro rejects preprocessor directives inside the assertion's operand.
+#ifndef __cplusplus
 #define static_assert(...)
+#endif
