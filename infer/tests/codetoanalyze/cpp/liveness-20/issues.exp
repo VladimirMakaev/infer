@@ -7,3 +7,5 @@ codetoanalyze/cpp/liveness-20/maybe_unused_parameters.cpp, maybe_unused_paramete
 codetoanalyze/cpp/liveness-20/maybe_unused_parameters.cpp, maybe_unused_parameters::shadowed_local_bad, 2, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
 codetoanalyze/cpp/liveness-20/maybe_unused_parameters.cpp, maybe_unused_parameters::Parameters::plain_member_bad, 2, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `unsigned short`)]
 codetoanalyze/cpp/liveness-20/maybe_unused_parameters.cpp, maybe_unused_parameters::Parameters::mixed_member_bad, 1, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
+codetoanalyze/cpp/liveness-20/visitor_capture.cpp, visitor_capture::unused_lambda_in_visitor_bad, 2, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `lambda_visitor_capture.cpp:31_c6f8d27a`)]
+codetoanalyze/cpp/liveness-20/visitor_capture.cpp, visitor_capture::nested_unused_bad, 3, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `lambda_visitor_capture.cpp:77_c5ad4901`)]
