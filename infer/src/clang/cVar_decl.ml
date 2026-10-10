@@ -234,13 +234,31 @@ let has_block_attribute decl_info =
       match attr with `BlocksAttr _ -> true | _ -> false )
 
 
+let is_empty_pod_reference_only decl_info qual_type =
+  let open Clang_ast_t in
+  decl_info.di_is_this_declaration_referenced && (not decl_info.di_is_used)
+  && Option.exists (CAst_utils.get_decl_from_typ_ptr qual_type.qt_type_ptr) ~f:(fun decl ->
+      let decl = CType_decl.get_record_definition decl in
+      match decl with
+      | CXXRecordDecl (_, _, _, _, _, _, record_info, cxx_info)
+      | ClassTemplateSpecializationDecl (_, _, _, _, _, _, record_info, cxx_info, _, _, _) ->
+          record_info.rdi_is_complete_definition
+          && (not record_info.rdi_is_dependent_type)
+          && cxx_info.xrdi_is_pod && List.is_empty cxx_info.xrdi_bases
+          && List.is_empty cxx_info.xrdi_vbases
+          && List.is_empty cxx_info.xrdi_transitive_vbases
+          && List.is_empty (CAst_utils.get_record_fields decl)
+      | _ ->
+          false )
+
+
 let add_var_to_locals procdesc var_decl typ pvar =
   let open Clang_ast_t in
   match var_decl with
-  | VarDecl (decl_info, _, _, vdi)
-  | BindingDecl (decl_info, _, _, {binding_var= Some vdi})
-  | DecompositionDecl (decl_info, _, _, vdi, _)
-  | VarTemplateSpecializationDecl (_, decl_info, _, _, vdi) ->
+  | VarDecl (decl_info, _, qual_type, vdi)
+  | BindingDecl (decl_info, _, qual_type, {binding_var= Some vdi})
+  | DecompositionDecl (decl_info, _, qual_type, vdi, _)
+  | VarTemplateSpecializationDecl (_, decl_info, _, qual_type, vdi) ->
       if not vdi.Clang_ast_t.vdi_is_global then
         let modify_in_block = has_block_attribute decl_info in
         let is_constexpr =
@@ -260,6 +278,7 @@ let add_var_to_locals procdesc var_decl typ pvar =
           { (ProcAttributes.default_var_data pvar typ) with
             modify_in_block
           ; is_declared_unused
+          ; is_empty_pod_reference_only= is_empty_pod_reference_only decl_info qual_type
           ; is_constexpr
           ; is_structured_binding
           ; has_cleanup_attribute }
