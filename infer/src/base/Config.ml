@@ -2491,6 +2491,11 @@ and pulse_log_unknown_calls =
   CLOpt.mk_bool ~long:"pulse-log-unknown-calls" "log calls to unknown functions in pulse in stats"
 
 
+and pulse_test_observability =
+  CLOpt.mk_bool ~long:"pulse-test-observability" ~default:false
+    "Write versioned procedure, call-route and completion observations as JSON in stats for tests."
+
+
 and pulse_log_unknown_callees =
   CLOpt.mk_bool ~long:"pulse-log-unknown-callees"
     "log each unique callee Pulse cannot model, once per [infer] process; suitable for default-on \
@@ -4756,6 +4761,8 @@ and pulse_intraprocedural_only = !pulse_intraprocedural_only
 and pulse_log_summary_count = !pulse_log_summary_count
 
 and pulse_log_unknown_calls = !pulse_log_unknown_calls
+
+and pulse_test_observability = !pulse_test_observability
 
 and pulse_log_unknown_callees = !pulse_log_unknown_callees
 
