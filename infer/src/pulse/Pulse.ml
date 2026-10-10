@@ -2504,7 +2504,7 @@ let python_register_info_per_source_lines proc_desc initial invariant_map =
           SourcePrinter.add_info_after ~sourcefile:loc.file ~line:loc.line ~info ) )
 
 
-let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data) =
+let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data) =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let proc_attrs = Procdesc.get_attributes proc_desc in
   let location = Procdesc.get_loc proc_desc in
@@ -2608,6 +2608,11 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
       in
       let exit_esink_summaries = PulseSummary.join summaries_for_exit summaries_at_exn_sink in
       report_on_and_return_summaries exit_esink_summaries )
+
+
+let analyze specialization analysis_data =
+  PulseReport.with_specialization analysis_data specialization ~f:(fun () ->
+      analyze_body specialization analysis_data )
 
 
 let checker ?specialization ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) =

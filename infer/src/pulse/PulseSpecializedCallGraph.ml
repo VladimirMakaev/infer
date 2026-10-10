@@ -145,6 +145,7 @@ let get_missed_captures ~get_summary entry_nodes =
         | AbortProgram {astate= summary}
         | LatentAbortProgram {astate= summary}
         | LatentInvalidAccess {astate= summary}
+        | ConditionalManifestIssue {astate= summary}
         | LatentSpecializedTypeIssue {astate= summary} ) ->
         AbductiveDomain.Summary.get_transitive_info summary
   in
