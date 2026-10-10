@@ -205,7 +205,11 @@ let is_issue : ExecutionDomain.t AccessResult.t -> bool = function
     match exec with
     | ContinueProgram _ | ExceptionRaised _ | Stopped (ExitProgram _ | AbortProgram _) ->
         false
-    | Stopped (LatentAbortProgram _ | LatentInvalidAccess _ | LatentSpecializedTypeIssue _) ->
+    | Stopped
+        ( LatentAbortProgram _
+        | LatentInvalidAccess _
+        | LatentSpecializedTypeIssue _
+        | ConditionalManifestIssue _ ) ->
         true )
 
 
