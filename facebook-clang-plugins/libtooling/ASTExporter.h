@@ -58,6 +58,7 @@
 #include "AttrParameterVectorStream.h"
 #include "NamePrinter.h"
 #include "SimplePluginASTAction.h"
+#include "StructuralValue.h"
 #include "atdlib/ATDWriter.h"
 
 //===----------------------------------------------------------------------===//
@@ -1999,6 +2000,10 @@ void ASTExporter<ATDWriter>::VisitCXXRecordDecl(const CXXRecordDecl *D) {
   }
 }
 
+//@atd type structural_value_info = {
+//@atd   qual_type : qual_type;
+//@atd   value : string;
+//@atd } <ocaml field_prefix="svi_">
 //@atd type template_instantiation_arg_info = [
 //@atd   | Null
 //@atd   | Type of qual_type
@@ -2009,6 +2014,7 @@ void ASTExporter<ATDWriter>::VisitCXXRecordDecl(const CXXRecordDecl *D) {
 //@atd   | TemplateExpansion
 //@atd   | Expression
 //@atd   | Pack of template_instantiation_arg_info list
+//@atd   | StructuralValue of structural_value_info
 //@atd ]
 template <class ATDWriter>
 void ASTExporter<ATDWriter>::dumpTemplateArgument(const TemplateArgument &Arg) {
@@ -2034,6 +2040,19 @@ void ASTExporter<ATDWriter>::dumpTemplateArgument(const TemplateArgument &Arg) {
     llvm::SmallString<64> buf;
     Arg.getAsIntegral().toString(buf, 10);
     OF.emitString(buf.str().str());
+    break;
+  }
+  case TemplateArgument::StructuralValue: {
+    VariantScope Scope(OF, "StructuralValue");
+    ObjectScope Object(OF, 2);
+    OF.emitTag("qual_type");
+    dumpQualType(Arg.getStructuralValueType());
+    OF.emitTag("value");
+    std::string Value;
+    llvm::raw_string_ostream OS(Value);
+    StructuralValuePrinter(Context, *Mangler, OS)
+        .print(Arg.getStructuralValueType(), Arg.getAsStructuralValue());
+    OF.emitString(Value);
     break;
   }
   case TemplateArgument::Template: {

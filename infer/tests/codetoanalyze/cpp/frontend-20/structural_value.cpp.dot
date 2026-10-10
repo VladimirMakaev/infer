@@ -1,0 +1,186 @@
+/* @generated */
+digraph cfg {
+"__infer_globals_initializer_data.3e3ec783a5a9d159_1" [label="1: Start __infer_globals_initializer_data\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "__infer_globals_initializer_data.3e3ec783a5a9d159_1" -> "__infer_globals_initializer_data.3e3ec783a5a9d159_3" ;
+"__infer_globals_initializer_data.3e3ec783a5a9d159_2" [label="2: Exit __infer_globals_initializer_data \n  " color=yellow style=filled]
+	
+
+"__infer_globals_initializer_data.3e3ec783a5a9d159_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp>$data:Data); [line 54, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp>$data.array[0]:int=0 [line 54, column 18]\n  *&#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp>$data.array[1]:int=0 [line 54, column 18]\n  *&#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp>$data.array[2]:int=0 [line 54, column 18]\n " shape="box"]
+	
+
+	 "__infer_globals_initializer_data.3e3ec783a5a9d159_3" -> "__infer_globals_initializer_data.3e3ec783a5a9d159_2" ;
+"__infer_globals_initializer_varia.e1fac122c7db5dba_1" [label="1: Start __infer_globals_initializer_variable_template<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "__infer_globals_initializer_varia.e1fac122c7db5dba_1" -> "__infer_globals_initializer_varia.e1fac122c7db5dba_3" ;
+"__infer_globals_initializer_varia.e1fac122c7db5dba_2" [label="2: Exit __infer_globals_initializer_variable_template<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})> \n  " color=yellow style=filled]
+	
+
+"__infer_globals_initializer_varia.e1fac122c7db5dba_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp|ice>$variable_template<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>:int); [line 46, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp|ice>$variable_template<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>:int=7 [line 46, column 1]\n " shape="box"]
+	
+
+	 "__infer_globals_initializer_varia.e1fac122c7db5dba_3" -> "__infer_globals_initializer_varia.e1fac122c7db5dba_2" ;
+"adjacent_value_ok#183689625068635.cd45ee212db3a56c_1" [label="1: Start adjacent_value_ok\nFormals:  value:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "adjacent_value_ok#183689625068635.cd45ee212db3a56c_1" -> "adjacent_value_ok#183689625068635.cd45ee212db3a56c_3" ;
+"adjacent_value_ok#183689625068635.cd45ee212db3a56c_2" [label="2: Exit adjacent_value_ok \n  " color=yellow style=filled]
+	
+
+"adjacent_value_ok#183689625068635.cd45ee212db3a56c_3" [label="3:  Return Stmt \n   n$0=*&value:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>* [line 21, column 10]\n " shape="box"]
+	
+
+	 "adjacent_value_ok#183689625068635.cd45ee212db3a56c_3" -> "adjacent_value_ok#183689625068635.cd45ee212db3a56c_4" ;
+"adjacent_value_ok#183689625068635.cd45ee212db3a56c_4" [label="4:  Return Stmt \n   *&return:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>*=n$0 [line 21, column 3]\n " shape="box"]
+	
+
+	 "adjacent_value_ok#183689625068635.cd45ee212db3a56c_4" -> "adjacent_value_ok#183689625068635.cd45ee212db3a56c_2" ;
+"call_function_template_ok#1173523.f631518f11786756_1" [label="1: Start call_function_template_ok\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "call_function_template_ok#1173523.f631518f11786756_1" -> "call_function_template_ok#1173523.f631518f11786756_3" ;
+"call_function_template_ok#1173523.f631518f11786756_2" [label="2: Exit call_function_template_ok \n  " color=yellow style=filled]
+	
+
+"call_function_template_ok#1173523.f631518f11786756_3" [label="3:  Return Stmt \n   n$0=_fun_function_template_ok<3.140000e+00>() [line 44, column 42]\n " shape="box"]
+	
+
+	 "call_function_template_ok#1173523.f631518f11786756_3" -> "call_function_template_ok#1173523.f631518f11786756_4" ;
+"call_function_template_ok#1173523.f631518f11786756_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 44, column 35]\n " shape="box"]
+	
+
+	 "call_function_template_ok#1173523.f631518f11786756_4" -> "call_function_template_ok#1173523.f631518f11786756_2" ;
+"first_element_ok#2680706061935598.cf4bee459c72cfc8_1" [label="1: Start first_element_ok\nFormals:  value:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;0;001R0F0;I0;})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "first_element_ok#2680706061935598.cf4bee459c72cfc8_1" -> "first_element_ok#2680706061935598.cf4bee459c72cfc8_3" ;
+"first_element_ok#2680706061935598.cf4bee459c72cfc8_2" [label="2: Exit first_element_ok \n  " color=yellow style=filled]
+	
+
+"first_element_ok#2680706061935598.cf4bee459c72cfc8_3" [label="3:  Return Stmt \n   n$0=*&value:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;0;001R0F0;I0;})>* [line 57, column 10]\n " shape="box"]
+	
+
+	 "first_element_ok#2680706061935598.cf4bee459c72cfc8_3" -> "first_element_ok#2680706061935598.cf4bee459c72cfc8_4" ;
+"first_element_ok#2680706061935598.cf4bee459c72cfc8_4" [label="4:  Return Stmt \n   *&return:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;0;001R0F0;I0;})>*=n$0 [line 57, column 3]\n " shape="box"]
+	
+
+	 "first_element_ok#2680706061935598.cf4bee459c72cfc8_4" -> "first_element_ok#2680706061935598.cf4bee459c72cfc8_2" ;
+"float_capture_ok#3783674360697049.727d6d686f2d0224_1" [label="1: Start float_capture_ok\nFormals:  value:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "float_capture_ok#3783674360697049.727d6d686f2d0224_1" -> "float_capture_ok#3783674360697049.727d6d686f2d0224_3" ;
+"float_capture_ok#3783674360697049.727d6d686f2d0224_2" [label="2: Exit float_capture_ok \n  " color=yellow style=filled]
+	
+
+"float_capture_ok#3783674360697049.727d6d686f2d0224_3" [label="3:  Return Stmt \n   n$0=*&value:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>* [line 17, column 72]\n " shape="box"]
+	
+
+	 "float_capture_ok#3783674360697049.727d6d686f2d0224_3" -> "float_capture_ok#3783674360697049.727d6d686f2d0224_4" ;
+"float_capture_ok#3783674360697049.727d6d686f2d0224_4" [label="4:  Return Stmt \n   *&return:DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>*=n$0 [line 17, column 65]\n " shape="box"]
+	
+
+	 "float_capture_ok#3783674360697049.727d6d686f2d0224_4" -> "float_capture_ok#3783674360697049.727d6d686f2d0224_2" ;
+"function_template_ok<3.140000e+00.c3249fdd3f101a60_1" [label="1: Start function_template_ok<3.140000e+00>\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "function_template_ok<3.140000e+00.c3249fdd3f101a60_1" -> "function_template_ok<3.140000e+00.c3249fdd3f101a60_3" ;
+"function_template_ok<3.140000e+00.c3249fdd3f101a60_2" [label="2: Exit function_template_ok<3.140000e+00> \n  " color=yellow style=filled]
+	
+
+"function_template_ok<3.140000e+00.c3249fdd3f101a60_3" [label="3:  Return Stmt \n   *&return:int=7 [line 41, column 3]\n " shape="box"]
+	
+
+	 "function_template_ok<3.140000e+00.c3249fdd3f101a60_3" -> "function_template_ok<3.140000e+00.c3249fdd3f101a60_2" ;
+"integral_type_control_ok#19751783.2b1a1e82c378bbc5_1" [label="1: Start integral_type_control_ok\nFormals:  value:Mixed<int,3,4,NullPtr>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "integral_type_control_ok#19751783.2b1a1e82c378bbc5_1" -> "integral_type_control_ok#19751783.2b1a1e82c378bbc5_3" ;
+"integral_type_control_ok#19751783.2b1a1e82c378bbc5_2" [label="2: Exit integral_type_control_ok \n  " color=yellow style=filled]
+	
+
+"integral_type_control_ok#19751783.2b1a1e82c378bbc5_3" [label="3:  Return Stmt \n   n$0=*&value:Mixed<int,3,4,NullPtr>* [line 36, column 10]\n " shape="box"]
+	
+
+	 "integral_type_control_ok#19751783.2b1a1e82c378bbc5_3" -> "integral_type_control_ok#19751783.2b1a1e82c378bbc5_4" ;
+"integral_type_control_ok#19751783.2b1a1e82c378bbc5_4" [label="4:  Return Stmt \n   *&return:Mixed<int,3,4,NullPtr>*=n$0 [line 36, column 3]\n " shape="box"]
+	
+
+	 "integral_type_control_ok#19751783.2b1a1e82c378bbc5_4" -> "integral_type_control_ok#19751783.2b1a1e82c378bbc5_2" ;
+"member_pointer_ok#182573596851351.18cb8877f4e52c71_1" [label="1: Start member_pointer_ok\nFormals:  value:ValuePack<StructuralValue(void,14:_ZTSM7Derivedi12{F9:_ZTS4Base0;012:_ZTS7Derived})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "member_pointer_ok#182573596851351.18cb8877f4e52c71_1" -> "member_pointer_ok#182573596851351.18cb8877f4e52c71_3" ;
+"member_pointer_ok#182573596851351.18cb8877f4e52c71_2" [label="2: Exit member_pointer_ok \n  " color=yellow style=filled]
+	
+
+"member_pointer_ok#182573596851351.18cb8877f4e52c71_3" [label="3:  Return Stmt \n   n$0=*&value:ValuePack<StructuralValue(void,14:_ZTSM7Derivedi12{F9:_ZTS4Base0;012:_ZTS7Derived})>* [line 71, column 10]\n " shape="box"]
+	
+
+	 "member_pointer_ok#182573596851351.18cb8877f4e52c71_3" -> "member_pointer_ok#182573596851351.18cb8877f4e52c71_4" ;
+"member_pointer_ok#182573596851351.18cb8877f4e52c71_4" [label="4:  Return Stmt \n   *&return:ValuePack<StructuralValue(void,14:_ZTSM7Derivedi12{F9:_ZTS4Base0;012:_ZTS7Derived})>*=n$0 [line 71, column 3]\n " shape="box"]
+	
+
+	 "member_pointer_ok#182573596851351.18cb8877f4e52c71_4" -> "member_pointer_ok#182573596851351.18cb8877f4e52c71_2" ;
+"multiple_types_ok#103559443002899.c29db9e4d91891a5_1" [label="1: Start multiple_types_ok\nFormals:  value:ValuePack<StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(float,5:_ZTSf3{32:8:40000000}),StructuralValue(double,5:_ZTSd3{64:1:0}),StructuralValue(double,5:_ZTSd3{64:16:8000000000000000})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "multiple_types_ok#103559443002899.c29db9e4d91891a5_1" -> "multiple_types_ok#103559443002899.c29db9e4d91891a5_3" ;
+"multiple_types_ok#103559443002899.c29db9e4d91891a5_2" [label="2: Exit multiple_types_ok \n  " color=yellow style=filled]
+	
+
+"multiple_types_ok#103559443002899.c29db9e4d91891a5_3" [label="3:  Return Stmt \n   n$0=*&value:ValuePack<StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(float,5:_ZTSf3{32:8:40000000}),StructuralValue(double,5:_ZTSd3{64:1:0}),StructuralValue(double,5:_ZTSd3{64:16:8000000000000000})>* [line 26, column 10]\n " shape="box"]
+	
+
+	 "multiple_types_ok#103559443002899.c29db9e4d91891a5_3" -> "multiple_types_ok#103559443002899.c29db9e4d91891a5_4" ;
+"multiple_types_ok#103559443002899.c29db9e4d91891a5_4" [label="4:  Return Stmt \n   *&return:ValuePack<StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(float,5:_ZTSf3{32:8:40000000}),StructuralValue(double,5:_ZTSd3{64:1:0}),StructuralValue(double,5:_ZTSd3{64:16:8000000000000000})>*=n$0 [line 26, column 3]\n " shape="box"]
+	
+
+	 "multiple_types_ok#103559443002899.c29db9e4d91891a5_4" -> "multiple_types_ok#103559443002899.c29db9e4d91891a5_2" ;
+"nested_values_ok#5075783597493003.70eb25dbb8c4f378_1" [label="1: Start nested_values_ok\nFormals:  value:Mixed<DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>,-7,StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "nested_values_ok#5075783597493003.70eb25dbb8c4f378_1" -> "nested_values_ok#5075783597493003.70eb25dbb8c4f378_3" ;
+"nested_values_ok#5075783597493003.70eb25dbb8c4f378_2" [label="2: Exit nested_values_ok \n  " color=yellow style=filled]
+	
+
+"nested_values_ok#5075783597493003.70eb25dbb8c4f378_3" [label="3:  Return Stmt \n   n$0=*&value:Mixed<DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>,-7,StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>* [line 31, column 10]\n " shape="box"]
+	
+
+	 "nested_values_ok#5075783597493003.70eb25dbb8c4f378_3" -> "nested_values_ok#5075783597493003.70eb25dbb8c4f378_4" ;
+"nested_values_ok#5075783597493003.70eb25dbb8c4f378_4" [label="4:  Return Stmt \n   *&return:Mixed<DoubleValue<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>,-7,StructuralValue(float,5:_ZTSf3{32:8:3F800000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000000}),StructuralValue(double,5:_ZTSd3{64:16:3FF0000000000001})>*=n$0 [line 31, column 3]\n " shape="box"]
+	
+
+	 "nested_values_ok#5075783597493003.70eb25dbb8c4f378_4" -> "nested_values_ok#5075783597493003.70eb25dbb8c4f378_2" ;
+"second_element_ok#815579062040719.4350755e247cc6cf_1" [label="1: Start second_element_ok\nFormals:  value:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;4;001R0F0;I1;})>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "second_element_ok#815579062040719.4350755e247cc6cf_1" -> "second_element_ok#815579062040719.4350755e247cc6cf_3" ;
+"second_element_ok#815579062040719.4350755e247cc6cf_2" [label="2: Exit second_element_ok \n  " color=yellow style=filled]
+	
+
+"second_element_ok#815579062040719.4350755e247cc6cf_3" [label="3:  Return Stmt \n   n$0=*&value:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;4;001R0F0;I1;})>* [line 61, column 10]\n " shape="box"]
+	
+
+	 "second_element_ok#815579062040719.4350755e247cc6cf_3" -> "second_element_ok#815579062040719.4350755e247cc6cf_4" ;
+"second_element_ok#815579062040719.4350755e247cc6cf_4" [label="4:  Return Stmt \n   *&return:ValuePack<StructuralValue(int*,6:_ZTSPi7{D7:_Z4data0;0;;4;001R0F0;I1;})>*=n$0 [line 61, column 3]\n " shape="box"]
+	
+
+	 "second_element_ok#815579062040719.4350755e247cc6cf_4" -> "second_element_ok#815579062040719.4350755e247cc6cf_2" ;
+"variable_template_ok#640030409395.63f9a62b0a0da231_1" [label="1: Start variable_template_ok\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "variable_template_ok#640030409395.63f9a62b0a0da231_1" -> "variable_template_ok#640030409395.63f9a62b0a0da231_3" ;
+"variable_template_ok#640030409395.63f9a62b0a0da231_2" [label="2: Exit variable_template_ok \n  " color=yellow style=filled]
+	
+
+"variable_template_ok#640030409395.63f9a62b0a0da231_3" [label="3:  Return Stmt \n   n$0=*&#GB<codetoanalyze/cpp/frontend-20/structural_value.cpp|ice>$variable_template<StructuralValue(double,5:_ZTSd3{64:16:40091EB851EB851F})>:int [line 49, column 37]\n " shape="box"]
+	
+
+	 "variable_template_ok#640030409395.63f9a62b0a0da231_3" -> "variable_template_ok#640030409395.63f9a62b0a0da231_4" ;
+"variable_template_ok#640030409395.63f9a62b0a0da231_4" [label="4:  Return Stmt \n   *&return:int=n$0 [line 49, column 30]\n " shape="box"]
+	
+
+	 "variable_template_ok#640030409395.63f9a62b0a0da231_4" -> "variable_template_ok#640030409395.63f9a62b0a0da231_2" ;
+}
