@@ -995,3 +995,323 @@ int absent_query_copy_bad(Map& map) {
   return value;
 }
 } // namespace f14_local_keyeq
+
+
+namespace f14_helpers {
+using Map = folly::F14FastMap<int, int>;
+using ValueMap = folly::F14ValueMap<int, int>;
+using VectorMap = folly::F14VectorMap<int, int>;
+template <class M>
+void touch_ref(M& map, const int& key) {
+  (void)map[key];
+}
+template <class M>
+void touch_value(M& map, int key) {
+  (void)map[key];
+}
+template <class M>
+int& get_ref(M& map, const int& key) {
+  return map[key];
+}
+template <class M>
+void nested_touch(M& map, const int& key) {
+  touch_ref(map, key);
+}
+template <class M>
+void touch_twice(M& map, const int& first, const int& second) {
+  touch_ref(map, first);
+  touch_ref(map, second);
+}
+void mutate_map(Map& map);
+int unknown_key();
+void changed_touch(Map& map, int key) {
+  ++key;
+  touch_ref(map, key);
+}
+void clear_touch(Map& map, const int& key) {
+  map.clear();
+  touch_ref(map, key);
+}
+void rehash_touch(Map& map, const int& key) {
+  map.rehash(100);
+  touch_ref(map, key);
+}
+void reserve_touch(Map& map, const int& key) {
+  map.reserve(100);
+  touch_ref(map, key);
+}
+void insert_touch(Map& map, const int& key) {
+  map.insert({key + 1, 17});
+  touch_ref(map, key);
+}
+void assign_touch(Map& map, Map& source, const int& key) {
+  map = source;
+  touch_ref(map, key);
+}
+void swap_clear(Map& map, Map& other) {
+  map.swap(other);
+  other.clear();
+}
+int local_equal_ok(Map& map, int key) {
+  int& ref = map[key];
+  (void)map[key];
+  return ref;
+}
+int helper_equal_ok(Map& map, int key) {
+  int& ref = map[key];
+  touch_ref(map, key);
+  return ref;
+}
+int helper_value_ok(Map& map, int key) {
+  int& ref = map[key];
+  touch_value(map, key);
+  return ref;
+}
+int helper_guard_equal_ok(Map& map, int key, int other) {
+  if (key != other)
+    return 0;
+  int& ref = map[key];
+  touch_ref(map, other);
+  return ref;
+}
+int nested_equal_ok(Map& map, int key) {
+  int& ref = map[key];
+  nested_touch(map, key);
+  return ref;
+}
+int two_equal_ok(Map& map, int key, int other) {
+  if (key != other)
+    return 0;
+  int& ref = map[key];
+  touch_twice(map, key, other);
+  return ref;
+}
+int helper_return_ok(Map& map, int key) {
+  int& ref = get_ref(map, key);
+  (void)map[key];
+  return ref;
+}
+int alias_write_ok(Map& map, int key) {
+  int& first = map[key];
+  first = 11;
+  int& second = get_ref(map, key);
+  second = 17;
+  if (first != 17) {
+    int* p = nullptr;
+    return *p;
+  }
+  return first;
+}
+int copy_source_ok(Map& map, int key) {
+  int& ref = map[key];
+  Map copy(map);
+  touch_ref(map, key);
+  return ref;
+}
+int copy_target_after_lookup_ok(Map& map, int key) {
+  Map copy(map);
+  int& ref = copy[key];
+  touch_ref(copy, key);
+  return ref;
+}
+int move_target_after_lookup_ok(Map& map, int key) {
+  Map moved(std::move(map));
+  int& ref = moved[key];
+  touch_ref(moved, key);
+  return ref;
+}
+int value_equal_ok(ValueMap& map, int key) {
+  int& ref = map[key];
+  touch_ref(map, key);
+  return ref;
+}
+int vector_equal_ok(VectorMap& map, int key) {
+  int& ref = map[key];
+  touch_ref(map, key);
+  return ref;
+}
+int query_then_equal_ok(Map& map, int key) {
+  int& ref = map[key];
+  (void)map.contains(key);
+  touch_ref(map, key);
+  return ref;
+}
+int swap_only_ok(Map& map, Map& other, int key) {
+  int& ref = map[key];
+  map.swap(other);
+  return ref;
+}
+int swap_contents_equal_ok(Map& map, Map& other, int key) {
+  int& ref = map[key];
+  map.swap(other);
+  touch_ref(other, key);
+  return ref;
+}
+int self_swap_equal_ok(Map& map, int key) {
+  int& ref = map[key];
+  map.swap(map);
+  touch_ref(map, key);
+  return ref;
+}
+int different_key_bad(Map& map, int key, int other) {
+  if (key == other)
+    return 0;
+  int& ref = map[key];
+  touch_ref(map, other);
+  return ref;
+}
+int unknown_key_bad(Map& map, int key, int other) {
+  int& ref = map[key];
+  touch_ref(map, other);
+  return ref;
+}
+int changed_key_bad(Map& map, int key) {
+  int& ref = map[key];
+  changed_touch(map, key);
+  return ref;
+}
+int unknown_value_key_bad(Map& map, int key) {
+  int& ref = map[key];
+  int other = unknown_key();
+  touch_ref(map, other);
+  return ref;
+}
+int clear_bad(Map& map, int key) {
+  int& ref = map[key];
+  clear_touch(map, key);
+  return ref;
+}
+int rehash_bad(Map& map, int key) {
+  int& ref = map[key];
+  rehash_touch(map, key);
+  return ref;
+}
+int reserve_bad(Map& map, int key) {
+  int& ref = map[key];
+  reserve_touch(map, key);
+  return ref;
+}
+int insert_bad(Map& map, int key) {
+  int& ref = map[key];
+  insert_touch(map, key);
+  return ref;
+}
+int assignment_bad(Map& map, Map& other, int key) {
+  int& ref = map[key];
+  assign_touch(map, other, key);
+  return ref;
+}
+int swap_then_clear_bad(Map& map, Map& other, int key) {
+  int& ref = map[key];
+  swap_clear(map, other);
+  return ref;
+}
+int unknown_witness_bad(Map& map, int key) {
+  const int& ref = map.at(key);
+  touch_ref(map, key);
+  return ref;
+}
+int two_different_bad(Map& map, int key, int other) {
+  if (key == other)
+    return 0;
+  int& ref = map[key];
+  touch_twice(map, key, other);
+  return ref;
+}
+int clear_then_new_reference_bad(Map& map, int key) {
+  (void)map[key];
+  map.clear();
+  map.insert({key + 1, 17});
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+int assignment_then_new_reference_bad(Map& map, Map& other, int key) {
+  (void)map[key];
+  map = other;
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+int swap_then_new_reference_bad(Map& map, Map& other, int key) {
+  (void)map[key];
+  map.swap(other);
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+int unknown_map_then_new_reference_bad(Map& map, int key) {
+  (void)map[key];
+  mutate_map(map);
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+int copy_unknown_witness_bad(Map& map, int key) {
+  (void)map[key];
+  Map copy(map);
+  int& ref = copy.at(key);
+  touch_ref(copy, key);
+  return ref;
+}
+int move_unknown_witness_bad(Map& map, int key) {
+  (void)map[key];
+  Map moved(std::move(map));
+  int& ref = moved.at(key);
+  touch_ref(moved, key);
+  return ref;
+}
+// Erase is an existing unsupported invalidation, separate from the lookup
+// witness.
+int FN_erase_reference_bad(Map& map, int key) {
+  int& ref = map[key];
+  map.erase(key);
+  return ref;
+}
+
+int moved_source_must_forget_bad(Map& map, int key) {
+  (void)map[key];
+  Map moved(std::move(map));
+  map.insert({key + 1, 17});
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+int copied_source_membership_ok(Map& map, int key) {
+  (void)map[key];
+  Map copy(map);
+  map.insert({key + 1, 17});
+  int& ref = map.at(key + 1);
+  touch_ref(map, key);
+  return ref;
+}
+
+int legacy_clear_then_helper_bad(Map& map, int key) {
+  (void)map[key];
+  map.clear();
+  map.insert({key + 1, 17});
+  int& ref = map.at(key + 1);
+  (void)map[key];
+  touch_ref(map, key);
+  return ref;
+}
+int ignored_find_then_helper_bad(Map& map, int old_key, int new_key) {
+  if (old_key == new_key)
+    return 0;
+  int& ref = map[old_key];
+  auto ignored = map.find(new_key);
+  (void)map[new_key];
+  touch_ref(map, new_key);
+  return ref;
+}
+int ignored_find_repeated_then_helper_bad(Map& map, int old_key, int new_key) {
+  if (old_key == new_key)
+    return 0;
+  int& ref = map[old_key];
+  auto ignored = map.find(new_key);
+  (void)map[new_key];
+  (void)map[new_key];
+  touch_ref(map, new_key);
+  return ref;
+}
+} // namespace f14_helpers
