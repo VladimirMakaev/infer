@@ -13,6 +13,14 @@ module DecompilerExpr = PulseDecompilerExpr
 module Diagnostic = PulseDiagnostic
 module LatentIssue = PulseLatentIssue
 
+type conditional_manifest_report =
+  { origin: (SpecializedProcname.t[@yojson.opaque])
+  ; original_diagnostic: Diagnostic.t
+  ; is_suppressed: bool
+  ; diagnostic: Diagnostic.t
+  ; trace_to_issue: Trace.t }
+[@@deriving equal, compare, yojson_of]
+
 type stopped_execution =
   | ExitProgram of AbductiveDomain.Summary.t
   | AbortProgram of
@@ -25,6 +33,8 @@ type stopped_execution =
       ; calling_context: (CallEvent.t * Location.t) list }
   | LatentSpecializedTypeIssue of
       {astate: AbductiveDomain.Summary.t; specialized_type: Typ.Name.t; trace: Trace.t}
+  | ConditionalManifestIssue of
+      {astate: AbductiveDomain.Summary.t; report: conditional_manifest_report}
 
 type 'abductive_domain_t base_t =
   | ContinueProgram of 'abductive_domain_t

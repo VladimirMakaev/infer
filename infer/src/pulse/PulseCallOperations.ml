@@ -25,6 +25,11 @@ open PulseOperationResult.Import
    only failure mode is occasional duplicate log events, not a crash. *)
 let logged_unknown_callees = Procname.HashSet.create 256
 
+let callable_destructor_classes =
+  QualifiedCppName.Match.of_fuzzy_qual_names
+    ["std::function"; "std::_Function_base"; "folly::Function"]
+
+
 let is_ptr_to_const formal_typ_opt = Option.exists formal_typ_opt ~f:Typ.is_ptr_to_const
 
 let add_returned_from_unknown callee_pname_opt ret_val actuals astate =
@@ -588,6 +593,27 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
                   ~default_caller_history:ValueHistory.epoch trace_to_issue
               in
               Sat (Ok (Stopped (AbortProgram {astate= astate_summary; diagnostic; trace_to_issue})))
+          | Stopped (ConditionalManifestIssue {report}) ->
+              let diagnostic =
+                match report.ExecutionDomain.diagnostic with
+                | Diagnostic.AccessToInvalidAddress access ->
+                    LatentIssue.AccessToInvalidAddress access
+                    |> LatentIssue.add_call (Call callee_proc_name, call_loc) (subst, hist_map)
+                         astate_post_call
+                    |> LatentIssue.to_diagnostic
+                | diagnostic ->
+                    diagnostic
+              in
+              let trace_to_issue =
+                Trace.add_call (Call callee_proc_name) call_loc hist_map
+                  ~default_caller_history:ValueHistory.epoch report.trace_to_issue
+              in
+              Sat
+                (Ok
+                   (Stopped
+                      (ConditionalManifestIssue
+                         {astate= astate_summary; report= {report with diagnostic; trace_to_issue}}
+                      ) ) )
           | Stopped (ExitProgram _) ->
               Sat (Ok (Stopped (ExitProgram astate_summary)))
           | Stopped (LatentAbortProgram {latent_issue}) -> (
@@ -903,6 +929,7 @@ let check_nonnull_args_of_unknown_callee path call_loc callee_pname ~actuals ast
 let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc
     callee_pname ~ret ~actuals ~formals_opt call_kind call_flags (astate : AbductiveDomain.t)
     non_disj_caller =
+  PulseReport.note_unknown_actuals tenv actuals astate ;
   let arg_values = List.map actuals ~f:(fun ((value, _), _) -> value) in
   let ( let<**> ) = bind_sat_result (non_disj_caller, None) in
   let<**> astate_unknown =
@@ -1003,7 +1030,10 @@ let add_need_dynamic_type_specialization needs execution_states =
                   LatentInvalidAccess {latent_invalid_access with astate}
               | LatentSpecializedTypeIssue latent_specialized_type_issue ->
                   let astate = update_summary latent_specialized_type_issue.astate in
-                  LatentSpecializedTypeIssue {latent_specialized_type_issue with astate} ) ))
+                  LatentSpecializedTypeIssue {latent_specialized_type_issue with astate}
+              | ConditionalManifestIssue conditional ->
+                  ConditionalManifestIssue
+                    {conditional with astate= update_summary conditional.astate} ) ))
 
 
 let maybe_dynamic_type_specialization_is_needed already_specialized contradiction astate =
@@ -1160,8 +1190,33 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
       ([], non_disj) )
     else (results, non_disj)
   in
+  let trusted_callable_destructor =
+    Procname.is_destructor callee_pname
+    && Option.exists (Procname.get_class_type_name callee_pname) ~f:(fun name ->
+        QualifiedCppName.Match.match_qualifiers callable_destructor_classes
+          (Typ.Name.qual_name name) )
+    && PulseReport.has_trivial_callable_actual analysis_data.tenv actuals astate
+  in
   let call_specialized specialization
       {PulseSummary.pre_post_list= exec_states; non_disj= non_disj_callee} astate =
+    if not (Specialization.Pulse.is_bottom specialization) then
+      List.iter exec_states ~f:(function
+        | Stopped (ConditionalManifestIssue {report}) ->
+            PulseReport.register_conditional report
+        | _ ->
+            () ) ;
+    if
+      (not trusted_callable_destructor)
+      && List.exists exec_states ~f:(fun exec ->
+          not
+            (SkippedCalls.is_empty
+               (AbductiveDomain.Summary.get_skipped_calls
+                  ( match exec with
+                  | ContinueProgram summary | ExceptionRaised summary ->
+                      summary
+                  | Stopped stopped ->
+                      ExecutionDomain.summary_of_stopped_execution stopped ) ) ) )
+    then PulseReport.note_unknown_actuals analysis_data.tenv actuals astate ;
     match IRAttributes.load callee_pname with
     | None ->
         L.d_printfln_escaped ~color:Orange
@@ -1208,6 +1263,13 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
           (pre_posts, is_limit_reached)
     in
     let case_if_specialization_is_impossible res =
+      if not trusted_callable_destructor then PulseReport.mark_incomplete () ;
+      if not trusted_callable_destructor then
+        List.iter summary.PulseSummary.pre_post_list ~f:(function
+          | Stopped (ConditionalManifestIssue {report}) ->
+              PulseReport.report_conditional_origin analysis_data report
+          | _ ->
+              () ) ;
       ( res
       , summary
       , non_disj

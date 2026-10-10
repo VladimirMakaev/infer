@@ -13,6 +13,14 @@ module DecompilerExpr = PulseDecompilerExpr
 module Diagnostic = PulseDiagnostic
 module LatentIssue = PulseLatentIssue
 
+type conditional_manifest_report =
+  { origin: (SpecializedProcname.t[@yojson.opaque])
+  ; original_diagnostic: Diagnostic.t
+  ; is_suppressed: bool
+  ; diagnostic: Diagnostic.t
+  ; trace_to_issue: Trace.t }
+[@@deriving equal, compare, yojson_of]
+
 (* The type variable is needed to distinguish summaries from plain states.
 
    Some of the variants have summary-typed states instead of plain states, to ensure we have
@@ -29,6 +37,8 @@ type stopped_execution =
       ; calling_context: (CallEvent.t * Location.t) list }
   | LatentSpecializedTypeIssue of
       {astate: AbductiveDomain.Summary.t; specialized_type: Typ.Name.t; trace: Trace.t}
+  | ConditionalManifestIssue of
+      {astate: AbductiveDomain.Summary.t; report: conditional_manifest_report}
 [@@deriving equal, compare, yojson_of, variants]
 
 type 'abductive_domain_t base_t =
@@ -46,6 +56,7 @@ let summary_of_stopped_execution = function
   | AbortProgram {astate}
   | LatentAbortProgram {astate}
   | LatentInvalidAccess {astate}
+  | ConditionalManifestIssue {astate}
   | LatentSpecializedTypeIssue {astate} ->
       astate
 
@@ -64,6 +75,10 @@ let leq_stopped_execution ~lhs ~rhs =
     , LatentInvalidAccess {astate= astate2; address= v2; must_be_valid= _, reason_opt2} ) ->
       DecompilerExpr.equal v1 v2
       && Option.equal Invalidation.equal_must_be_valid_reason reason_opt1 reason_opt2
+      && AbductiveDomain.Summary.leq ~lhs:astate1 ~rhs:astate2
+  | ( ConditionalManifestIssue {astate= astate1; report= report1}
+    , ConditionalManifestIssue {astate= astate2; report= report2} ) ->
+      equal_conditional_manifest_report report1 report2
       && AbductiveDomain.Summary.leq ~lhs:astate1 ~rhs:astate2
   | _ ->
       false
@@ -117,6 +132,8 @@ let pp_header kind fmt = function
       Pp.with_color kind Orange F.pp_print_string fmt "LatentSpecializedTypeIssue" ;
       let origin_location = Trace.get_start_location trace in
       F.fprintf fmt "(%a: %a)" Location.pp origin_location Typ.Name.pp specialized_type
+  | Stopped (ConditionalManifestIssue {report= {diagnostic}}) ->
+      F.fprintf fmt "ConditionalManifestIssue(%a)" Diagnostic.pp diagnostic
 
 
 let pp_with_kind kind path_opt fmt exec_state =
@@ -141,6 +158,9 @@ let equal_fast_stopped_execution exec_state1 exec_state2 =
       phys_equal astate1 astate2 && phys_equal diagnostic1 diagnostic2
   | ExitProgram astate1, ExitProgram astate2 ->
       phys_equal astate1 astate2
+  | ( ConditionalManifestIssue {astate= astate1; report= report1}
+    , ConditionalManifestIssue {astate= astate2; report= report2} ) ->
+      phys_equal astate1 astate2 && phys_equal report1 report2
   | _ ->
       false
 
