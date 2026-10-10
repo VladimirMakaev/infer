@@ -1125,6 +1125,23 @@ module PulseTransferFunctions = struct
           PerfEvent.(log (fun logger -> log_end_event logger ())) ;
           r
     in
+    ( if Config.pulse_test_observability then
+        let route, reason =
+          match model_search_result with
+          | OCamlModel _ ->
+              ("model", "selected_model")
+          | InvalidSpecializedCall _ ->
+              ("unknown", "invalid_specialized_call")
+          | NoModel -> (
+            match call_was_unknown with
+            | `KnownCall ->
+                ("body", "summary_application")
+            | `UnknownCall ->
+                ("unknown", if call_as_unknown then "unresolved_call" else "summary_unavailable") )
+        in
+        PulseTestObservability.call
+          ~caller:(Procdesc.get_proc_name analysis_data.proc_desc)
+          ~callee:callee_pname ~loc:call_loc ~route ~reason ) ;
     let exec_states_res =
       let one_state exec_state_res =
         let* exec_state = exec_state_res in
@@ -2585,7 +2602,26 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
     if Config.pulse_log_summary_count then
       log_summary_count proc_name summary.PulseSummary.pre_post_list ;
     (* needed to record the stats corresponding to the metadata *)
-    DisjunctiveAnalyzer.get_cfg_metadata () |> ignore ;
+    let metadata = DisjunctiveAnalyzer.get_cfg_metadata () in
+    ( if Config.pulse_test_observability then
+        let outcome = function
+          | ContinueProgram _ ->
+              "continue"
+          | ExceptionRaised _ ->
+              "exception"
+          | Stopped (ExitProgram _) ->
+              "exit"
+          | Stopped (AbortProgram _) ->
+              "manifest"
+          | Stopped (ConditionalManifestIssue _) ->
+              "conditional_manifest"
+          | Stopped (LatentAbortProgram _ | LatentInvalidAccess _ | LatentSpecializedTypeIssue _) ->
+              "latent"
+        in
+        PulseTestObservability.complete proc_name
+          ~outcomes:(List.map summary.PulseSummary.pre_post_list ~f:outcome)
+          ~dropped_disjuncts:(AbstractInterpreter.DisjunctiveMetadata.dropped_disjuncts metadata)
+          ~interrupted_loops:(AbstractInterpreter.DisjunctiveMetadata.interrupted_loops metadata) ) ;
     Some summary
   in
   let exn_sink_node_opt = Procdesc.get_exn_sink proc_desc in
@@ -2610,9 +2646,27 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
       report_on_and_return_summaries exit_esink_summaries )
 
 
-let analyze specialization analysis_data =
-  PulseReport.with_specialization analysis_data specialization ~f:(fun () ->
-      analyze_body specialization analysis_data )
+let analyze specialization ({InterproceduralAnalysis.proc_desc} as analysis_data) =
+  let run () =
+    PulseReport.with_specialization analysis_data specialization ~f:(fun () ->
+        analyze_body specialization analysis_data )
+  in
+  if Config.pulse_test_observability then (
+    PulseTestObservability.start proc_desc ;
+    try run ()
+    with exn ->
+      IExn.reraise_after exn ~f:(fun () ->
+          let reason =
+            match exn with
+            | Timer.Timeout _ ->
+                "timeout"
+            | AboutToOOM ->
+                "heap_budget"
+            | _ ->
+                "exception"
+          in
+          PulseTestObservability.incomplete (Procdesc.get_proc_name proc_desc) ~reason ) )
+  else run ()
 
 
 let checker ?specialization ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) =
@@ -2639,7 +2693,15 @@ let checker ?specialization ({InterproceduralAnalysis.proc_desc; tenv} as analys
       (* Keep the summaries computed so far, but do not record the specialization as failed: the
          heap size depends on what was analyzed before, so a later attempt may succeed. *)
       Option.map specialization ~f:fst )
-  else None
+  else (
+    if Config.pulse_test_observability then
+      PulseTestObservability.incomplete
+        (Procdesc.get_proc_name proc_desc)
+        ~reason:
+          ( if Procdesc.is_too_big Pulse ~max_cfg_size:Config.pulse_max_cfg_size proc_desc then
+              "cfg_budget"
+            else "configured_skip_or_initializer" ) ;
+    None )
 
 
 let is_already_specialized (Pulse specialization : Specialization.t) (summary : PulseSummary.t) =

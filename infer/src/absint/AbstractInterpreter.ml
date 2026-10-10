@@ -179,6 +179,10 @@ module DisjunctiveMetadata = struct
 
   let empty = {dropped_disjuncts= 0; interrupted_loops= 0}
 
+  let dropped_disjuncts metadata = metadata.dropped_disjuncts
+
+  let interrupted_loops metadata = metadata.interrupted_loops
+
   let pp fmt ({dropped_disjuncts; interrupted_loops} [@warning "+missing-record-field-pattern"]) =
     F.fprintf fmt "dropped_disjuncts= %d;@ interrupted_loops= %d" dropped_disjuncts
       interrupted_loops
