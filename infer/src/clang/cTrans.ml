@@ -3476,6 +3476,17 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let init_field field_exp_typ stmt =
       init_expr_trans trans_state field_exp_typ stmt_info (Some stmt)
     in
+    let own_field_exps =
+      match supers with
+      | _ :: _ :: _ ->
+          List.filter field_exps ~f:(function
+            | Exp.Lfield (_, fieldname, _), _ ->
+                Typ.Name.equal (Fieldname.get_class_name fieldname) tname
+            | _ ->
+                false )
+      | _ ->
+          []
+    in
     match (supers, stmts) with
     | [super], stmt :: stmts when List.length field_exps >= List.length stmts ->
         (* When [var_typ] has a super class, the lengths of [field_exps] and [stmts] can be
@@ -3501,6 +3512,22 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         in
         let field_exps = List.drop field_exps (List.length field_exps - List.length stmts) in
         res_super @ List.map2_exn field_exps stmts ~f:init_field
+    | (_ :: _ :: _ as supers), stmts
+      when Int.equal (List.length stmts) (List.length supers + List.length own_field_exps)
+           && List.for_all supers ~f:(fun super -> Option.is_some (Tenv.lookup tenv super)) ->
+        (* Aggregate initializers name direct bases before fields. Translating the bases as
+           independent statements loses their destination and can leave disconnected CFG nodes
+           when a base initializer materializes a lambda. Return each initializer's controls for
+           the parent to compose, as for ordinary fields. Inherited fields are initialized by
+           their base, not again by the derived aggregate. *)
+        let base_stmts, field_stmts = List.split_n stmts (List.length supers) in
+        let base_results =
+          List.map2_exn supers base_stmts ~f:(fun super stmt ->
+              init_expr_trans ~is_declare_variable:false trans_state
+                (var_exp, Typ.mk (Tstruct super))
+                stmt_info (Some stmt) )
+        in
+        base_results @ List.map2_exn own_field_exps field_stmts ~f:init_field
     | [], stmts when Int.equal (List.length field_exps) (List.length stmts) ->
         List.map2_exn field_exps stmts ~f:init_field
     | [], [stmt] ->
