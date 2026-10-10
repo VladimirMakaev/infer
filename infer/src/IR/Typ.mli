@@ -114,7 +114,16 @@ and name =
   | SwiftClosure of Mangled.t
 [@@deriving hash, sexp, compare, equal]
 
-and template_arg = TType of t | TInt of Int64.t | TNull | TNullPtr | TOpaque
+and template_arg =
+  | TType of t
+  | TInt of Int64.t
+  | TNull
+  | TNullPtr
+  | TOpaque
+  | TStructuralValue of {typ: t; value: string}
+      (** The translated type and lossless APValue encoding, kept distinct from type and integral
+          arguments. The encoding includes the canonical Clang type; floating-point bits retain
+          signed zero and the original precision. *)
 
 and template_spec_info =
   | NoTemplate

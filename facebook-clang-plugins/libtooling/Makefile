@@ -9,7 +9,7 @@ LEVEL=..
 include $(LEVEL)/Makefile.common
 
 # ASTExporter
-HEADERS+=atdlib/ATDWriter.h ASTExporter.h NamePrinter.h AttrParameterVectorStream.h SimplePluginASTAction.h FileUtils.h
+HEADERS+=atdlib/ATDWriter.h ASTExporter.h NamePrinter.h AttrParameterVectorStream.h SimplePluginASTAction.h FileUtils.h StructuralValue.h
 OBJS+=ASTExporter.o SimplePluginASTAction.o FileUtils.o AttrParameterVectorStream.o
 
 # Json
