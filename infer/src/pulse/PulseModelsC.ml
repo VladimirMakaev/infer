@@ -1459,7 +1459,8 @@ let matchers : matcher list =
   ; -"stpcpy" <>$ capt_arg_payload $+ capt_arg_payload $--> stpcpy
   ; -"strcasestr" <>$ capt_arg_payload $+ capt_arg_payload $--> strstr
   ; -"strcat" <>$ capt_arg_payload $+ capt_arg_payload $--> strcpy
-  ; -"strchr" <>$ capt_arg_payload $+ capt_arg_payload $--> strchr
+  ; ( -"strchr" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> fun str c -> observe_model ~rule:"libc.strchr" (strchr str c) )
   ; -"strcmp" <>$ capt_arg_payload $+ capt_arg_payload
     $--> compose2 valid_args2 (ignore_args2 non_det_ret)
   ; -"strcpy" <>$ capt_arg_payload $+ capt_arg_payload $--> strcpy
@@ -1478,7 +1479,8 @@ let matchers : matcher list =
     $--> compose2 valid_args2 (ignore_args2 non_det_ret)
   ; -"strncpy" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> strcpy
   ; -"strpbrk" <>$ capt_arg_payload $+ capt_arg_payload $--> strpbrk
-  ; -"strrchr" <>$ capt_arg_payload $+ capt_arg_payload $--> strchr
+  ; ( -"strrchr" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> fun str c -> observe_model ~rule:"libc.strrchr" (strchr str c) )
   ; +(fun _ name -> Config.pulse_nullability_annotations && String.equal name "strsep")
     <>$ capt_arg_payload $+ capt_arg_payload $--> strsep
   ; -"strspn" <>$ capt_arg_payload $+ capt_arg_payload
