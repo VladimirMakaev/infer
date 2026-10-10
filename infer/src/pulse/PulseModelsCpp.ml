@@ -916,6 +916,16 @@ module PointerIterator = struct
     store ~ref:iter_ref res
 end
 
+let rec struct_name_of_type (typ : Typ.t) =
+  match typ.desc with
+  | Tstruct name ->
+      Some name
+  | Tptr (typ, _) ->
+      struct_name_of_type typ
+  | _ ->
+      None
+
+
 module ForwardIterator = struct
   let layouts =
     [ ( QualifiedCppName.Match.of_fuzzy_qual_names ["folly::f14::detail::VectorContainerIterator"]
@@ -923,10 +933,6 @@ module ForwardIterator = struct
     ; ( QualifiedCppName.Match.of_fuzzy_qual_names
           ["folly::f14::detail::ValueContainerIterator"; "folly::f14::detail::NodeContainerIterator"]
       , [["underlying_"; "itemPtr_"]; ["underlying_"; "index_"]] ) ]
-
-
-  let rec class_name (typ : Typ.t) =
-    match typ.desc with Tstruct name -> Some name | Tptr (typ, _) -> class_name typ | _ -> None
 
 
   let copy_source_class procname =
@@ -1025,7 +1031,7 @@ module ForwardIterator = struct
   let distance ~desc (first : _ FuncArg.t) (last : _ FuncArg.t) : model_no_non_disj =
    fun ({analysis_data= {tenv}; path; location; ret= ret_id, _} as model_data) astate ->
     let position typ =
-      Option.bind (class_name typ) ~f:(field_paths tenv)
+      Option.bind (struct_name_of_type typ) ~f:(field_paths tenv)
       |> Option.bind ~f:(fun paths -> List.hd paths)
     in
     match (position first.typ, position last.typ) with
@@ -1716,17 +1722,7 @@ module GenericMapCollection = struct
 
   let forget_key_membership_dsl ({FuncArg.arg_payload} as map) =
     let open PulseModelsDSL.Syntax in
-    exec_command (fun astate ->
-        match
-          AddressAttributes.find_opt `Post (fst arg_payload) astate
-          |> Option.bind ~f:Attributes.get_last_lookup_value
-        with
-        | Some (key, first_key, true) ->
-            AddressAttributes.add_one (fst arg_payload)
-              (Attribute.LastLookupValue {key; first_key; known_present= false})
-              astate
-        | _ ->
-            astate )
+    exec_command (AddressAttributes.forget_last_lookup_presence (fst arg_payload))
     @@> forget_lookup_witness_dsl map
 
 
@@ -1786,18 +1782,11 @@ module GenericMapCollection = struct
     let* () =
       match args with
       | source :: _ ->
-          let rec struct_name {Typ.desc} =
-            match desc with
-            | Tptr (typ, _) ->
-                struct_name typ
-            | Tstruct name ->
-                Some name
-            | _ ->
-                None
-          in
           let same_map_type =
             Option.exists
-              (Option.both (struct_name map.FuncArg.typ) (struct_name source.FuncArg.typ))
+              (Option.both
+                 (struct_name_of_type map.FuncArg.typ)
+                 (struct_name_of_type source.FuncArg.typ) )
               ~f:(fun (left, right) -> Typ.Name.equal left right)
           in
           let may_move =
