@@ -44,6 +44,15 @@ type matcher = (Tenv.t * Procname.t, model, ValueOrigin.t) ProcnameDispatcher.Ca
 
 let lift_model model data astate non_disj = (model data astate, non_disj)
 
+let observe_model ~rule (model : model) : model =
+  if Config.pulse_test_observability then ( fun data astate non_disj ->
+    PulseTestObservability.dispatch_rule
+      ~caller:(Procdesc.get_proc_name data.analysis_data.proc_desc)
+      ~callee:data.callee_procname ~loc:data.location ~rule ;
+    model data astate non_disj )
+  else model
+
+
 let with_non_disj model = ProcnameDispatcher.Call.map_matcher ~f:lift_model model
 
 module Hist = struct
