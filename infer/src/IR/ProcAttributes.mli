@@ -27,6 +27,9 @@ type var_data =
   ; is_declared_unused: bool
         (** variable declared with attribute [unused], or with an invalid declaration, or referenced
             in a discarded [if constexpr] branch *)
+  ; is_empty_pod_reference_only: bool
+        (** complete empty POD record without bases, referenced without a value use according to
+            Clang; used only to avoid reporting implicit default construction as a dead store *)
   ; is_structured_binding: bool  (** variable declared by structured binding *)
   ; has_cleanup_attribute: bool
         (** variable declared with attribute [cleanup], only set in clang frontend *)
