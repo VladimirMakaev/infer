@@ -123,3 +123,4 @@ check_stream successful_empty_keep_going 0 empty yes
 check_stream successful_corrupt_keep_going 0 corrupt yes
 
 bash "$source_dir/test_static_assert.sh" "$infer_bin"
+bash "$source_dir/test_ivar_bitfields.sh" "$infer_bin"
