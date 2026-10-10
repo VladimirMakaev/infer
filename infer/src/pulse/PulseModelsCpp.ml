@@ -916,6 +916,150 @@ module PointerIterator = struct
     store ~ref:iter_ref res
 end
 
+module ForwardIterator = struct
+  let layouts =
+    [ ( QualifiedCppName.Match.of_fuzzy_qual_names ["folly::f14::detail::VectorContainerIterator"]
+      , [["current_"]; ["lowest_"]] )
+    ; ( QualifiedCppName.Match.of_fuzzy_qual_names
+          ["folly::f14::detail::ValueContainerIterator"; "folly::f14::detail::NodeContainerIterator"]
+      , [["underlying_"; "itemPtr_"]; ["underlying_"; "index_"]] ) ]
+
+
+  let rec class_name (typ : Typ.t) =
+    match typ.desc with Tstruct name -> Some name | Tptr (typ, _) -> class_name typ | _ -> None
+
+
+  let copy_source_class procname =
+    match List.nth (IRAttributes.load_formal_types procname) 1 with
+    | Some {Typ.desc= Tptr ({desc= Tstruct name}, (Pk_lvalue_reference | Pk_rvalue_reference))} ->
+        Some name
+    | _ ->
+        None
+
+
+  let is_copy_method procname =
+    match (Procname.get_class_type_name procname, copy_source_class procname) with
+    | Some destination, Some source ->
+        QualifiedCppName.equal (Typ.Name.qual_name destination) (Typ.Name.qual_name source)
+    | _ ->
+        false
+
+
+  let field_paths tenv name =
+    let open IOption.Let_syntax in
+    let* _, paths =
+      List.find layouts ~f:(fun (matcher, _) ->
+          QualifiedCppName.Match.match_qualifiers matcher (Typ.Name.qual_name name) )
+    in
+    let rec resolve name = function
+      | [] ->
+          Some []
+      | field_name :: rest ->
+          let* {Struct.fields} = Tenv.lookup tenv name in
+          let* {Struct.name= field; typ} =
+            List.find fields ~f:(fun ({Struct.name} : Struct.field) ->
+                String.equal (Fieldname.get_field_name name) field_name )
+          in
+          let+ rest =
+            match (rest, typ.Typ.desc) with
+            | [], Tptr _ when not (String.equal field_name "index_") ->
+                Some []
+            | [], Tint _ when String.equal field_name "index_" ->
+                Some []
+            | _ :: _, Tstruct name ->
+                resolve name rest
+            | _ ->
+                None
+          in
+          field :: rest
+    in
+    Option.all (List.map paths ~f:(resolve name))
+
+
+  let rec field_ref path location obj fields astate =
+    match fields with
+    | [field] ->
+        Ok (astate, obj, field)
+    | field :: rest ->
+        let* astate, obj =
+          PulseOperations.eval_access path NoAccess location obj (FieldAccess field) astate
+        in
+        field_ref path location obj rest astate
+    | [] ->
+        assert false
+
+
+  let load_field path location obj fields astate =
+    let* astate, obj, field = field_ref path location obj fields astate in
+    PulseOperations.eval_deref_access path Read location obj (FieldAccess field) astate
+
+
+  let copy_position ~src ~dst : model_no_non_disj =
+   fun {analysis_data= {tenv}; path; location; callee_procname} astate ->
+    let source_paths = Option.bind (copy_source_class callee_procname) ~f:(field_paths tenv) in
+    let destination_paths =
+      Option.bind (Procname.get_class_type_name callee_procname) ~f:(field_paths tenv)
+    in
+    let paths =
+      match (source_paths, destination_paths) with
+      | Some source, Some destination ->
+          List.zip_exn source destination
+      | _ ->
+          []
+    in
+    let rec copy astate = function
+      | [] ->
+          Ok astate
+      | (source_fields, destination_fields) :: rest ->
+          let* astate, value = load_field path location src source_fields astate in
+          let* astate, obj, field = field_ref path location dst destination_fields astate in
+          let* astate =
+            PulseOperations.write_deref_field path location ~ref:obj field ~obj:value astate
+          in
+          copy astate rest
+    in
+    let<+> astate = copy astate paths in
+    astate
+
+
+  let distance ~desc (first : _ FuncArg.t) (last : _ FuncArg.t) : model_no_non_disj =
+   fun ({analysis_data= {tenv}; path; location; ret= ret_id, _} as model_data) astate ->
+    let position typ =
+      Option.bind (class_name typ) ~f:(field_paths tenv)
+      |> Option.bind ~f:(fun paths -> List.hd paths)
+    in
+    match (position first.typ, position last.typ) with
+    | Some first_fields, Some last_fields ->
+        let<*> astate, (first_pos, _) =
+          load_field path location first.arg_payload first_fields astate
+        in
+        let<*> astate, (last_pos, _) =
+          load_field path location last.arg_payload last_fields astate
+        in
+        (* These forward iterators compare their positions. For a valid forward range, equality
+           means distance zero and inequality means a positive count, not an arbitrary value.
+           In particular, do not subtract F14's pointers: iteration can cross noncontiguous chunks. *)
+        let result = AbstractValue.mk_fresh () in
+        let astate =
+          PulseOperations.write_id ret_id (result, Hist.single_call path location desc) astate
+        in
+        let constrain comparison =
+          PulseArithmetic.prune_binop ~negated:false comparison (AbstractValueOperand first_pos)
+            (AbstractValueOperand last_pos)
+        in
+        let empty =
+          PulseArithmetic.prune_eq_zero result astate
+          >>== constrain Eq >>|| ExecutionDomain.continue
+        in
+        let nonempty =
+          PulseArithmetic.prune_positive result astate
+          >>== constrain Ne >>|| ExecutionDomain.continue
+        in
+        SatUnsat.to_list empty @ SatUnsat.to_list nonempty
+    | _ ->
+        Basic.nondet ~desc model_data astate
+end
+
 (** The frontend translates [{a, b, c}] into [__infer_initializer_list(&arr)]. The return value
     carries the list's begin/size fields; stores and constructors copy those fields onto the actual
     list object, whose begin pointer still refers to the shared backing array. *)
@@ -1718,6 +1862,7 @@ module GenericMapCollection = struct
     @@ fun () ->
     let* pair = load other in
     store ~ref:it pair
+    @@> lift_to_monad (lift_model (ForwardIterator.copy_position ~src:other ~dst:it))
 end
 
 let get_cpp_matchers =
@@ -2009,11 +2154,16 @@ let map_matchers =
   in
   let folly_iterator_matchers =
     List.concat_map ["ValueContainerIterator"; "VectorContainerIterator"] ~f:(fun it ->
-        [ -"folly" <>:: "f14" <>:: "detail" <>:: it &:: it <>$ capt_arg_payload $+ capt_arg_payload
+        let copy_method method_name (_, procname) name =
+          String.equal name method_name && ForwardIterator.is_copy_method procname
+        in
+        [ -"folly" <>:: "f14" <>:: "detail" <>:: it &::+ copy_method it <>$ capt_arg_payload
+          $+ capt_arg_payload_of_typ (-"folly" <>:: "f14" <>:: "detail" <>:: it)
           $--> GenericMapCollection.iterator_copy
                  (Format.asprintf "folly::f14::detail::%s::%s" it it)
-        ; -"folly" <>:: "f14" <>:: "detail" <>:: it &:: "operator=" <>$ capt_arg_payload
-          $+ capt_arg_payload
+        ; -"folly" <>:: "f14" <>:: "detail" <>:: it &::+ copy_method "operator="
+          <>$ capt_arg_payload
+          $+ capt_arg_payload_of_typ (-"folly" <>:: "f14" <>:: "detail" <>:: it)
           $--> GenericMapCollection.iterator_copy
                  (Format.asprintf "folly::f14::detail::%s::operator=" it)
         ; -"folly" <>:: "f14" <>:: "detail" <>:: it &:: "operator->" <>$ capt_arg_payload
@@ -2277,6 +2427,12 @@ let simple_matchers =
       &::+ PointerIterator.is_function_on_pointers ["distance"]
       $ capt_arg_payload $+ capt_arg_payload
       $--> PointerIterator.distance ~desc:"std::distance"
+    ; -"std" &:: "distance"
+      $ capt_arg_payload_of_typ_exists
+          [-"std" &:: "__wrap_iter"; -"__gnu_cxx" &:: "__normal_iterator"]
+      $+ capt_arg_payload
+      $--> GenericArrayBackedCollection.Iterator.distance ~desc:"std::distance"
+      |> with_non_disj
     ; -"std"
       &::+ PointerIterator.is_function_on_pointers ["next"]
       $ capt_arg_payload $+? capt_arg_payload
@@ -2307,7 +2463,9 @@ let simple_matchers =
       $--> InitializerList.begin_ ~desc:"std::initializer_list::begin()"
     ; -"std" &:: "initializer_list" &:: "end" <>$ capt_arg_payload
       $--> InitializerList.end_ ~desc:"std::initializer_list::end()"
-    ; -"std" &:: "distance" &--> Basic.nondet ~desc:"std::distance" |> with_non_disj
+    ; -"std" &:: "distance" $ capt_arg $+ capt_arg
+      $--> ForwardIterator.distance ~desc:"std::distance"
+      |> with_non_disj
     ; -"std" &:: "integral_constant" < any_typ &+ capt_int
       >::+ (fun _ name -> String.is_prefix ~prefix:"operator_" name)
       <>--> Basic.return_int ~desc:"std::integral_constant"
