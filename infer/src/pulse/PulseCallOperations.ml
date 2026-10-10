@@ -418,18 +418,7 @@ let is_copied_implicitly tenv ~is_assignment name =
 let copy_uninitialized_fields tenv ~is_assignment class_name ~src ~dst astate =
   let rec visit class_name ~src ~dst astate =
     let astate =
-      if is_assignment then
-        match
-          AddressAttributes.find_opt `Post dst astate
-          |> Option.bind ~f:Attributes.get_last_lookup_value
-        with
-        | Some (key, first_key, true) ->
-            AddressAttributes.add_one dst
-              (Attribute.LastLookupValue {key; first_key; known_present= false})
-              astate
-        | _ ->
-            astate
-      else astate
+      if is_assignment then AddressAttributes.forget_last_lookup_presence dst astate else astate
     in
     match Tenv.lookup tenv class_name with
     | None ->

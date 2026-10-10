@@ -130,30 +130,9 @@ let should_create_procdesc cfg procname ~defined ~set_objc_accessor_attr =
       true
 
 
-(** Returns a list of the indices of expressions in [args] which point to const-typed values *)
-let get_const_params_indices params =
-  let i = ref 0 in
-  let rec aux result = function
-    | [] ->
-        List.rev result
-    | ({is_pointer_to_const} : CMethodSignature.param_type) :: tl ->
-        incr i ;
-        if is_pointer_to_const then aux ((!i - 1) :: result) tl else aux result tl
-  in
-  aux [] params
-
-
-(** Returns a list of the indices of expressions in [args] which are passed by reference *)
-let get_reference_indices params =
-  let i = ref 0 in
-  let rec aux result = function
-    | [] ->
-        List.rev result
-    | ({is_reference} : CMethodSignature.param_type) :: tl ->
-        incr i ;
-        if is_reference then aux ((!i - 1) :: result) tl else aux result tl
-  in
-  aux [] params
+let get_param_indices params ~f =
+  List.filter_mapi params ~f:(fun index (param : CMethodSignature.param_type) ->
+      Option.some_if (f param) index )
 
 
 let get_objc_property_accessor tenv ms =
@@ -222,13 +201,9 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
       ~f:(fun ({name; typ; annot} : CMethodSignature.param_type) -> (name, typ, annot))
       all_params
   in
-  let const_formals = get_const_params_indices all_params in
-  let reference_formals = get_reference_indices all_params in
-  let unused_formals =
-    List.filter_mapi all_params
-      ~f:(fun index ({is_declared_unused} : CMethodSignature.param_type) ->
-        if is_declared_unused then Some index else None )
-  in
+  let const_formals = get_param_indices all_params ~f:(fun param -> param.is_pointer_to_const) in
+  let reference_formals = get_param_indices all_params ~f:(fun param -> param.is_reference) in
+  let unused_formals = get_param_indices all_params ~f:(fun param -> param.is_declared_unused) in
   let source_range = ms.CMethodSignature.loc in
   let loc_start =
     CLocation.location_of_source_range trans_unit_ctx.CFrontend_config.source_file source_range
