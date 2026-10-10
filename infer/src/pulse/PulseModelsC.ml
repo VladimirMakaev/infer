@@ -966,8 +966,23 @@ include struct
     @@> check_valid src @@> data_dependency dst [src] @@> assign_ret @= fresh_nonneg ()
 
 
-  let strchr str _c : model =
+  let memchr str _c : model =
     start_model @@ fun () -> check_valid str @@> null_or_nonneg_non_det_ret ()
+
+
+  let strchr str c : model =
+    start_model
+    @@ fun () ->
+    let* () = check_valid str in
+    let* needle_is_zero =
+      exec_pure_operation (fun astate -> PulseArithmetic.is_known_zero astate (ValueOrigin.value c))
+    in
+    if needle_is_zero then
+      (* The terminating NUL belongs to the searched string. Unlike bounded memory searches,
+         strchr and strrchr always find it on a normal return. *)
+      let* result = fresh_nonneg () in
+      prune_positive result @@> assign_ret result
+    else null_or_nonneg_non_det_ret ()
 
 
   let strcpy dst src : model =
@@ -1368,13 +1383,13 @@ let matchers : matcher list =
   ; ( -"lseek" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg $+ capt_arg
     $--> fun fd offset whence -> use_fd fd [offset; whence] )
   ; -"luaL_typeerror" <>$ any_arg $+ any_arg $+ any_arg $--> Basic.early_exit
-  ; -"memchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> strchr
+  ; -"memchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> memchr
   ; -"memcmp" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
     $--> compose2 valid_args2 (ignore_args2 non_det_ret)
   ; -"memcpy" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_exp $--> memcpy
   ; -"memfd_create" <>$ any_arg $+ any_arg $--> open_
   ; -"memmove" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_exp $--> memcpy
-  ; -"memrchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> strchr
+  ; -"memrchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> memchr
   ; -"memset" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_exp $--> memset
   ; -"mkostemp" <>$ any_arg $+ any_arg $--> open_
   ; -"mkstemp" <>$ any_arg $--> open_
