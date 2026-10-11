@@ -94,7 +94,10 @@ module CopySpec = MakeDomainFromTotalOrder (struct
 end)
 
 module CopyVar = struct
-  type t = {copied_into: Attribute.CopiedInto.t; source_addr_opt: AbstractValue.t option}
+  type t =
+    { copied_into: Attribute.CopiedInto.t
+    ; source_addr_opt: AbstractValue.t option
+    ; copy_addr_opt: AbstractValue.t option }
   [@@deriving compare]
 
   let pp fmt {copied_into; source_addr_opt} =
@@ -392,34 +395,46 @@ module IntraDomElt = struct
     && EscapedCopies.is_bottom escaped_copies
 
 
-  let mark_copy_as_modified ?(reached_end = false) ~is_modified ~copied_into ~source_addr_opt
-      ({copy_map} as astate_n) =
-    let copy_var = CopyVar.{copied_into; source_addr_opt} in
+  let mark_copy_as_modified ?(reached_end = false) ?copy_addr ?(get_repr = Fn.id) ~is_modified
+      ~copied_into ~source_addr_opt ({copy_map} as astate_n) =
+    let equal_address left right = AbstractValue.equal (get_repr left) (get_repr right) in
+    let matches CopyVar.{copied_into= into; source_addr_opt= source; copy_addr_opt= address} =
+      Attribute.CopiedInto.equal into copied_into
+      && Option.equal equal_address source source_addr_opt
+      && Option.equal equal_address address copy_addr
+    in
     let astate_n =
-      if reached_end then {astate_n with reached_end= ReachedEnd.add copy_var astate_n.reached_end}
+      if reached_end then
+        { astate_n with
+          reached_end=
+            CopyMap.fold
+              (fun key _ reached -> if matches key then ReachedEnd.add key reached else reached)
+              copy_map astate_n.reached_end }
       else astate_n
     in
     let copy_map =
-      match CopyMap.find_opt copy_var copy_map with
-      | Some
-          (Copied
-             { source_typ
-             ; source_opt
-             ; from
-             ; node
-             ; copied_location
-             ; location
-             ; heap= copy_heap
-             ; timestamp= copied_timestamp } )
-        when is_modified copy_heap copied_timestamp ->
-          Logging.d_printfln_escaped "Copy/source modified!" ;
-          let modified : copy_spec_t =
-            Modified
-              {source_typ; source_opt; node; location; copied_location; from; copied_timestamp}
-          in
-          CopyMap.add copy_var modified copy_map
-      | _ ->
-          copy_map
+      CopyMap.mapi
+        (fun key (spec : CopySpec.t) ->
+          match spec with
+          | Copied
+              { source_typ
+              ; source_opt
+              ; from
+              ; node
+              ; copied_location
+              ; location
+              ; heap= copy_heap
+              ; timestamp= copied_timestamp }
+            when matches key && is_modified copy_heap copied_timestamp ->
+              Logging.d_printfln_escaped "Copy/source modified!" ;
+              let modified : copy_spec_t =
+                Modified
+                  {source_typ; source_opt; node; location; copied_location; from; copied_timestamp}
+              in
+              modified
+          | _ ->
+              spec )
+        copy_map
     in
     {astate_n with copy_map}
 
@@ -448,6 +463,18 @@ module IntraDomElt = struct
     {astate_n with copy_map}
 
 
+  let get_unmodified_copy_vars {copy_map} =
+    CopyMap.fold
+      (fun CopyVar.{copied_into} (spec : CopySpec.t) vars ->
+        match (copied_into, spec) with
+        | (IntoVar {copied_var} | IntoIntermediate {copied_var}), Copied _ ->
+            Var.Set.add copied_var vars
+        | _ ->
+            vars )
+      copy_map Var.Set.empty
+    |> Var.Set.elements
+
+
   let mark_parameter_as_modified ~is_modified ~var ({parameter_map} as astate_n) =
     let parameter_map =
       match ParameterMap.find_opt var parameter_map with
@@ -467,10 +494,11 @@ module IntraDomElt = struct
   let is_never_used_after_copy_into_intermediate_or_field copy_var pvar
       (copied_location : Location.t) (copied_timestamp : Timestamp.t)
       {passed_to; loads; stores; escaped_copies} =
-    let is_after_copy =
+    let is_after_copy ?(ignore_copy_site = false) =
       TrackedLoc.exists (fun location timestamp ->
           SourceFile.equal copied_location.file location.file
           && copied_location.line <= location.line
+          && (not (ignore_copy_site && Location.equal copied_location location))
           && (copied_timestamp :> int) < (timestamp :> int) )
     in
     let source_var = Var.of_pvar pvar in
@@ -478,8 +506,21 @@ module IntraDomElt = struct
       PassedTo.find source_var passed_to
       |> CalleesWithLoc.exists (fun callee tracked_loc ->
           match callee with
-          | V {callee} ->
-              is_after_copy tracked_loc && not (Procname.is_destructor callee)
+          | V {callee; copy_tgt} ->
+              let is_defining_copy =
+                match (copy_var.CopyVar.copied_into, copy_tgt) with
+                | IntoIntermediate {copied_var}, Some (Exp.Lvar pvar | Lindex (Lvar pvar, _)) ->
+                    Var.equal copied_var (Var.of_pvar pvar)
+                    && Option.exists (IRAttributes.load callee) ~f:(fun attrs ->
+                        attrs.ProcAttributes.is_cpp_copy_ctor )
+                | _ ->
+                    false
+              in
+              (* Timestamps from different loop paths are joined. Another path's execution of
+                 this same constructor is part of the copy, not a use after it. Actual loop
+                 copies remain excluded separately by the reporting loop guard. *)
+              is_after_copy ~ignore_copy_site:is_defining_copy tracked_loc
+              && not (Procname.is_destructor callee)
           | Unknown ->
               false )
     in
@@ -583,8 +624,14 @@ module IntraDomElt = struct
       parameter_map []
 
 
-  let add_var copied_into ~source_addr_opt res astate_n =
-    {astate_n with copy_map= CopyMap.add {copied_into; source_addr_opt} res astate_n.copy_map}
+  let add_var copied_into ~copy_addr ~source_addr_opt res astate_n =
+    (* Different disjuncts may create different copy objects at the same source site. Their
+       lazy reads can introduce different abstract values in an otherwise unchanged source. *)
+    { astate_n with
+      copy_map=
+        CopyMap.add
+          {copied_into; source_addr_opt; copy_addr_opt= Some copy_addr}
+          res astate_n.copy_map }
 
 
   let remove_var var astate_n = {astate_n with copy_map= CopyMap.remove_var var astate_n.copy_map}
@@ -646,7 +693,7 @@ module IntraDomElt = struct
     { astate_n with
       copy_map=
         CopyMap.add
-          {copied_into= IntoField {field= copied_field}; source_addr_opt}
+          {copied_into= IntoField {field= copied_field}; source_addr_opt; copy_addr_opt= None}
           res astate_n.copy_map }
 
 
@@ -906,11 +953,16 @@ module IntraDom = struct
 
   let is_bottom = get ~default:false IntraDomElt.is_bottom
 
-  let mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt =
-    map (IntraDomElt.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
+  let mark_copy_as_modified ?reached_end ?copy_addr ?get_repr ~is_modified ~copied_into
+      ~source_addr_opt =
+    map
+      (IntraDomElt.mark_copy_as_modified ?reached_end ?copy_addr ?get_repr ~is_modified ~copied_into
+         ~source_addr_opt )
 
 
   let mark_copies_into_var_as_modified var = map (IntraDomElt.mark_copies_into_var_as_modified var)
+
+  let get_unmodified_copy_vars = get ~default:[] IntraDomElt.get_unmodified_copy_vars
 
   let mark_parameter_as_modified ~is_modified ~var =
     map (IntraDomElt.mark_parameter_as_modified ~is_modified ~var)
@@ -924,8 +976,8 @@ module IntraDom = struct
 
   let get_const_refable_parameters = get ~default:[] IntraDomElt.get_const_refable_parameters
 
-  let add_var copied_into ~source_addr_opt res =
-    map (IntraDomElt.add_var copied_into ~source_addr_opt res)
+  let add_var copied_into ~copy_addr ~source_addr_opt res =
+    map (IntraDomElt.add_var copied_into ~copy_addr ~source_addr_opt res)
 
 
   let remove_var var = map (IntraDomElt.remove_var var)
@@ -1127,11 +1179,16 @@ let map_intra f ({intra} as x) = {x with intra= f intra}
 
 let map_inter f ({inter} as x) = {x with inter= f inter}
 
-let mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt =
-  map_intra (IntraDom.mark_copy_as_modified ?reached_end ~is_modified ~copied_into ~source_addr_opt)
+let mark_copy_as_modified ?reached_end ?copy_addr ?get_repr ~is_modified ~copied_into
+    ~source_addr_opt =
+  map_intra
+    (IntraDom.mark_copy_as_modified ?reached_end ?copy_addr ?get_repr ~is_modified ~copied_into
+       ~source_addr_opt )
 
 
 let mark_copies_into_var_as_modified var = map_intra (IntraDom.mark_copies_into_var_as_modified var)
+
+let get_unmodified_copy_vars {intra} = IntraDom.get_unmodified_copy_vars intra
 
 let mark_parameter_as_modified ~is_modified ~var =
   map_intra (IntraDom.mark_parameter_as_modified ~is_modified ~var)
@@ -1145,8 +1202,8 @@ let get_copied ~ref_formals ~ptr_formals {intra} =
 
 let get_const_refable_parameters {intra} = IntraDom.get_const_refable_parameters intra
 
-let add_var copied_into ~source_addr_opt res =
-  map_intra (IntraDom.add_var copied_into ~source_addr_opt res)
+let add_var copied_into ~copy_addr ~source_addr_opt res =
+  map_intra (IntraDom.add_var copied_into ~copy_addr ~source_addr_opt res)
 
 
 let remove_var var = map_intra (IntraDom.remove_var var)
