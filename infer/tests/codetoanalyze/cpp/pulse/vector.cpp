@@ -832,8 +832,8 @@ void move_and_push_back_in_callee(std::vector<int>&& vec) {
   moved.push_back(42);
 }
 
-// the callee only invalidates the internal array of the vector it moved to
-void FN_deref_vector_element_after_move_and_push_back_in_callee_bad(
+// The callee destroys the moved storage, including the caller's elements.
+void deref_vector_element_after_move_and_push_back_in_callee_bad(
     std::vector<int>& vec) {
   int* elt = &vec[1];
   move_and_push_back_in_callee(std::move(vec));

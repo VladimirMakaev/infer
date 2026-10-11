@@ -11,10 +11,12 @@ module F = Format
 type std_vector_function =
   | Assign
   | Clear
+  | Destructor
   | Emplace
   | EmplaceBack
   | Erase
   | Insert
+  | PopBack
   | PushBack
   | Reserve
   | Resize
