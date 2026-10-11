@@ -438,7 +438,7 @@ void swap_then_reset_owner_bad() {
 
 // move-assigning to the last owner does not release the object it owned, so
 // weak pointers to that object do not expire
-void FN_move_assign_over_last_owner_bad() {
+void move_assign_over_last_owner_bad() {
   auto s = std::make_shared<int>(0);
   std::weak_ptr<int> p = s;
   auto t = std::make_shared<int>(1);
@@ -446,7 +446,7 @@ void FN_move_assign_over_last_owner_bad() {
   *p.lock() = 1;
 }
 
-void FN_make_shared_reassign_bad() {
+void make_shared_reassign_bad() {
   auto s = std::make_shared<int>(0);
   std::weak_ptr<int> p = s;
   s = std::make_shared<int>(1);
