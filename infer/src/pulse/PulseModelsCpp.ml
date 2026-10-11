@@ -1351,6 +1351,15 @@ module Vector = struct
     astate
 
 
+  let clear vector : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let<**> astate =
+      GenericArrayBackedCollection.assign_size_constant path location vector ~constant:IntLit.zero
+        ~desc:"std::vector::clear()" astate
+    in
+    invalidate_references Clear vector model_data astate
+
+
   let reserve vector : model_no_non_disj =
    fun {path; location} astate ->
     let hist = Hist.single_call path location "std::vector::reserve()" in
@@ -2462,9 +2471,7 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_end ~desc:"std::vector::cend()"
       |> with_non_disj
-    ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload
-      $--> Vector.invalidate_references Clear
-      |> with_non_disj
+    ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload $--> Vector.clear |> with_non_disj
       |> observe_matcher ~rule:"std.vector.clear.1"
     ; -"std" &:: "vector" &:: "data" <>$ capt_arg_payload
       $--> Vector.data ~desc:"std::vector::data()"
