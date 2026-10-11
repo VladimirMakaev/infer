@@ -513,7 +513,7 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
                 |> AddressAttributes.add_one copy_addr
                      (SourceOriginOfCopy {source= source_addr; is_unmovable_source}) )
           in
-          ( NonDisjDomain.add_var copy_into
+          ( NonDisjDomain.add_var copy_into ~copy_addr
               ~source_addr_opt:(Option.map source_addr_typ_opt ~f:fst3)
               (get_copy_spec source_opt) astate_n
           , astate' ) )
@@ -710,6 +710,41 @@ let get_copied_into copied_var : Attribute.CopiedInto.t =
   if is_copy_into_local copied_var then IntoVar {copied_var} else IntoIntermediate {copied_var}
 
 
+let get_copy_addr (copied_into : Attribute.CopiedInto.t) astate =
+  match copied_into with
+  | IntoVar {copied_var} | IntoIntermediate {copied_var} ->
+      Stack.find_opt copied_var astate |> Option.map ~f:ValueOrigin.value
+  | IntoField _ ->
+      None
+
+
+let mark_written_copy ~address astate astate_n =
+  let get_repr = Formula.get_var_repr astate.AbductiveDomain.path_condition in
+  let address = get_repr address in
+  List.fold (NonDisjDomain.get_unmodified_copy_vars astate_n) ~init:astate_n ~f:(fun astate_n var ->
+      Stack.find_opt var astate
+      |> Option.value_map ~default:astate_n ~f:(fun vo ->
+          let copy_addr = ValueOrigin.value vo in
+          match AddressAttributes.get_source_origin_of_copy copy_addr astate with
+          | None ->
+              astate_n
+          | Some source ->
+              (* Use the evaluated destination, including writes through pointer/reference aliases.
+                 Retain source writes too: a surviving sibling path must not conceal a necessary
+                 snapshot when the modified path is dropped before its scope check. *)
+              let reachable =
+                AbductiveDomain.reachable_addresses_from
+                  (Stdlib.List.to_seq [copy_addr; source])
+                  astate `Post
+              in
+              if AbstractValue.Set.mem address reachable then
+                NonDisjDomain.mark_copy_as_modified ~copy_addr ~get_repr
+                  ~copied_into:(get_copied_into var) ~source_addr_opt:(Some source)
+                  ~is_modified:(fun _ _ -> true)
+                  astate_n
+              else astate_n ) )
+
+
 let add_copied_return node path location pname actuals (astate_n, astate) =
   let open IOption.Let_syntax in
   if is_lock pname then Some (NonDisjDomain.set_locked astate_n, astate)
@@ -737,7 +772,7 @@ let add_copied_return node path location pname actuals (astate_n, astate) =
                  (SourceOriginOfCopy {source; is_unmovable_source= is_const_ref})
           in
           let astate_n =
-            NonDisjDomain.add_var into ~source_addr_opt:(Some source)
+            NonDisjDomain.add_var into ~copy_addr:ret_addr ~source_addr_opt:(Some source)
               (Copied
                  { heap= (astate.post :> BaseDomain.t).heap
                  ; source_typ= Some (Typ.strip_ptr copy_type)
@@ -780,7 +815,10 @@ let mark_copies_of_moved_sources path location pname actuals (astate_n, astate) 
           (fun source astate_n ->
             match AddressAttributes.get_copied_into source astate with
             | Some (IntoVar {copied_var} as copied_into) when is_alive_variable copied_var astate ->
-                NonDisjDomain.mark_copy_as_modified ~copied_into ~source_addr_opt:(Some source)
+                NonDisjDomain.mark_copy_as_modified
+                  ?copy_addr:(get_copy_addr copied_into astate)
+                  ~get_repr:(Formula.get_var_repr astate.AbductiveDomain.path_condition)
+                  ~copied_into ~source_addr_opt:(Some source)
                   ~is_modified:(fun _ _ -> true)
                   astate_n
             | Some (IntoVar _ | IntoIntermediate _ | IntoField _) | None ->
@@ -966,13 +1004,37 @@ let is_modified origin ~source_addr_opt address astate copy_heap copy_timestamp 
 
 let mark_modified_address_at ?reached_end ~address ~source_addr_opt origin ~copied_into astate
     (astate_n : NonDisjDomain.t) : NonDisjDomain.t =
-  NonDisjDomain.mark_copy_as_modified ?reached_end ~copied_into ~source_addr_opt astate_n
+  NonDisjDomain.mark_copy_as_modified ?reached_end
+    ?copy_addr:(get_copy_addr copied_into astate)
+    ~get_repr:(Formula.get_var_repr astate.AbductiveDomain.path_condition)
+    ~copied_into ~source_addr_opt astate_n
     ~is_modified:(is_modified origin ~source_addr_opt address astate)
 
 
 let mark_modified_parameter_at ~address ~var astate (astate_n : NonDisjDomain.t) : NonDisjDomain.t =
   NonDisjDomain.mark_parameter_as_modified ~var astate_n
     ~is_modified:(is_modified Parameter ~source_addr_opt:None address astate)
+
+
+let mark_modified_copies_eagerly astates astate_n =
+  let vars = NonDisjDomain.get_unmodified_copy_vars astate_n in
+  continue_fold astates ~init:astate_n ~f:(fun astate_n astate ->
+      List.fold vars ~init:astate_n ~f:(fun astate_n var ->
+          if NonDisjDomain.is_checked_via_destructor var astate_n then astate_n
+          else
+            Stack.find_opt var astate
+            |> Option.value_map ~default:astate_n ~f:(fun vo ->
+                let address = ValueOrigin.value vo in
+                match AddressAttributes.get_source_origin_of_copy address astate with
+                | None ->
+                    astate_n
+                | Some source ->
+                    let copied_into = get_copied_into var in
+                    let source_addr_opt = Some source in
+                    mark_modified_address_at ~address ~source_addr_opt ~copied_into Copy astate
+                      astate_n
+                    |> mark_modified_address_at ~address:source ~source_addr_opt ~copied_into Source
+                         astate ) ) )
 
 
 let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
@@ -1022,7 +1084,10 @@ let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
                 match AddressAttributes.get_copied_into source astate with
                 | Some (IntoVar {copied_var} as copied_into)
                   when is_alive_variable copied_var astate ->
-                    NonDisjDomain.mark_copy_as_modified ~copied_into ~source_addr_opt:(Some source)
+                    NonDisjDomain.mark_copy_as_modified
+                      ?copy_addr:(get_copy_addr copied_into astate)
+                      ~get_repr:(Formula.get_var_repr astate.AbductiveDomain.path_condition)
+                      ~copied_into ~source_addr_opt:(Some source)
                       ~is_modified:(fun _ _ -> true)
                       astate_n
                 | Some (IntoVar _ | IntoIntermediate _ | IntoField _) | None ->

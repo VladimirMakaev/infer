@@ -77,7 +77,12 @@ module Summary : sig
 end
 
 val add_var :
-  Attribute.CopiedInto.t -> source_addr_opt:AbstractValue.t option -> copy_spec_t -> t -> t
+     Attribute.CopiedInto.t
+  -> copy_addr:AbstractValue.t
+  -> source_addr_opt:AbstractValue.t option
+  -> copy_spec_t
+  -> t
+  -> t
 
 val remove_var : Var.t -> t -> t
 
@@ -97,8 +102,13 @@ val checked_via_destructor : Var.t -> t -> t
 val mark_copies_into_var_as_modified : Var.t -> t -> t
 (** the copies into the variable are modified, e.g. it is assigned to *)
 
+val get_unmodified_copy_vars : t -> Var.t list
+(** Variables with a copy snapshot that can still require a modification witness. *)
+
 val mark_copy_as_modified :
      ?reached_end:bool
+  -> ?copy_addr:AbstractValue.t
+  -> ?get_repr:(AbstractValue.t -> AbstractValue.t)
   -> is_modified:(BaseMemory.t -> Timestamp.t -> bool)
   -> copied_into:Attribute.CopiedInto.t
   -> source_addr_opt:AbstractValue.t option
