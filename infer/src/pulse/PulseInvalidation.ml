@@ -10,10 +10,12 @@ module F = Format
 type std_vector_function =
   | Assign
   | Clear
+  | Destructor
   | Emplace
   | EmplaceBack
   | Erase
   | Insert
+  | PopBack
   | PushBack
   | Reserve
   | Resize
@@ -25,6 +27,8 @@ let pp_std_vector_function f = function
       F.fprintf f "std::vector::assign"
   | Clear ->
       F.fprintf f "std::vector::clear"
+  | Destructor ->
+      F.fprintf f "std::vector::~vector"
   | Emplace ->
       F.fprintf f "std::vector::emplace"
   | EmplaceBack ->
@@ -33,6 +37,8 @@ let pp_std_vector_function f = function
       F.fprintf f "std::vector::erase"
   | Insert ->
       F.fprintf f "std::vector::insert"
+  | PopBack ->
+      F.fprintf f "std::vector::pop_back"
   | PushBack ->
       F.fprintf f "std::vector::push_back"
   | Reserve ->
