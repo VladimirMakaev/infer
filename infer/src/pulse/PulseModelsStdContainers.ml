@@ -50,6 +50,54 @@ let store_field path location event obj field (value, hist) astate =
     astate
 
 
+let ordered_map_cache_field =
+  Fieldname.make PulseOperations.pulse_model_type "__infer_ordered_map_cache"
+
+
+let ordered_map_complete_field =
+  Fieldname.make PulseOperations.pulse_model_type "__infer_ordered_map_complete"
+
+
+(* Keep node identity for later key erasure, but forget membership/cardinality proofs affected by
+   an unsupported mutation. Insertion cannot make an already-present key disappear. *)
+let forget_ordered_map_cache ?(insertion = false) path location this astate =
+  match
+    Memory.find_edge_opt (fst this) (FieldAccess ordered_map_cache_field) astate
+    |> Option.bind ~f:(fun cell -> Memory.find_edge_opt (fst cell) Dereference astate)
+  with
+  | None ->
+      Ok astate
+  | Some cache ->
+      let astate, zero = PulseArithmetic.absval_of_int astate IntLit.zero in
+      let astate =
+        Memory.add_edge path cache (FieldAccess ordered_map_complete_field)
+          (zero, snd cache)
+          location astate
+      in
+      Ok
+        (Memory.fold_edges (fst cache) astate ~init:astate ~f:(fun astate (access, value) ->
+             match access with
+             | FieldAccess field
+               when String.is_prefix (Fieldname.get_field_name field)
+                      ~prefix:"__infer_ordered_map_lookup_valid_" ->
+                 Memory.add_edge path cache access (zero, snd value) location astate
+             | FieldAccess field
+               when String.is_prefix (Fieldname.get_field_name field)
+                      ~prefix:"__infer_ordered_map_present_" ->
+                 if
+                   insertion
+                   && Option.exists
+                        (PulseArithmetic.as_constant_q astate (fst value))
+                        ~f:(fun q -> not (Q.equal q Q.zero))
+                 then astate
+                 else
+                   Memory.add_edge path cache access
+                     (AbstractValue.mk_fresh (), snd value)
+                     location astate
+             | _ ->
+                 astate ) )
+
+
 let end_function = Formula.Procname (Procname.from_string_c_fun "__infer_end_of_collection")
 
 (* The past-the-end value of a container is a function of its backing array rather than a cell of
@@ -226,11 +274,16 @@ let erase this pos ret_iter container ~desc : model_no_non_disj =
   let event = Hist.call_event path location desc in
   let has_token = has_token container in
   let<++> astate =
+    let=* astate = forget_ordered_map_cache path location this astate in
     let=* astate, elem, _ = check_iterator ~has_token ~allow_end:false path location pos astate in
     let astate = invalidate_element path location (StdContainer (container, Erase)) elem astate in
-    let+* astate = Collection.decrease_size path location this ~desc astate in
-    let* astate, next = fresh_element path location this astate in
-    make_iterator ~has_token path location event this ret_iter next astate
+    let** astate = Collection.decrease_size path location this ~desc astate in
+    let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
+    let** astate, next =
+      if PulseArithmetic.is_known_zero astate size then eval_end path location this astate
+      else Sat (fresh_element path location this astate)
+    in
+    Sat (make_iterator ~has_token path location event this ret_iter next astate)
   in
   astate
 
@@ -459,6 +512,7 @@ let node_insertion ~desc this args : model_no_non_disj =
  fun {path; location} astate ->
   let event = Hist.call_event path location desc in
   let<++> astate =
+    let=* astate = forget_ordered_map_cache ~insertion:true path location this astate in
     match returned_iterator path location event (List.last args) astate with
     | Some result ->
         let=* astate, ret_iter = result in
@@ -501,6 +555,425 @@ let on_container model : model_no_non_disj =
         callee_procname
 
 
+module OrderedMap = struct
+  let complete_field = ordered_map_complete_field
+
+  let key_field prefix key =
+    Fieldname.make PulseOperations.pulse_model_type (prefix ^ IntLit.to_string key)
+
+
+  let node_key key = key_field "__infer_ordered_map_node_" key
+
+  let present_key key = key_field "__infer_ordered_map_present_" key
+
+  let lookup_valid_key key = key_field "__infer_ordered_map_lookup_valid_" key
+
+  let is_std_type last = function
+    | {Typ.desc= Tstruct (CppClass {name})} ->
+        String.is_prefix (QualifiedCppName.to_qual_string name) ~prefix:"std::"
+        && Option.exists (QualifiedCppName.extract_last name) ~f:(fun (name, _) ->
+            String.equal (strip_template_args name) last )
+    | _ ->
+        false
+
+
+  (* No equivalence of user-defined comparators, or constructor callbacks, is assumed. *)
+  let supports callee =
+    match Procname.get_class_type_name callee with
+    | Some
+        (CppClass
+           { template_spec_info=
+               Template {args= [TType key; TType value; TType compare; TType allocator]} } ) ->
+        let compares_keys =
+          match compare.Typ.desc with
+          | Tstruct (CppClass {template_spec_info= Template {args= [TType compared]}}) ->
+              Typ.equal compared key
+          | _ ->
+              false
+        in
+        let allocates_values =
+          match allocator.Typ.desc with
+          | Tstruct (CppClass {template_spec_info= Template {args= [TType pair]}}) -> (
+              is_std_type "pair" pair
+              &&
+              match pair.Typ.desc with
+              | Tstruct
+                  (CppClass
+                     {template_spec_info= Template {args= [TType alloc_key; TType alloc_value]}} )
+                ->
+                  Typ.equal alloc_key (Typ.set_to_const key) && Typ.equal alloc_value value
+              | _ ->
+                  false )
+          | _ ->
+              false
+        in
+        Typ.is_int key
+        && (Typ.is_int value || Typ.is_pointer value)
+        && is_std_type "less" compare && compares_keys && is_std_type "allocator" allocator
+        && allocates_values
+    | _ ->
+        false
+
+
+  let edge astate addr field = Memory.find_edge_opt (fst addr) (FieldAccess field) astate
+
+  let cache this astate =
+    edge astate this ordered_map_cache_field
+    |> Option.bind ~f:(fun cell -> Memory.find_edge_opt (fst cell) Dereference astate)
+
+
+  let flag astate cache field =
+    edge astate cache field
+    |> Option.bind ~f:(fun (v, _) -> PulseArithmetic.as_constant_q astate v)
+    |> Option.map ~f:(fun q -> not (Q.equal q Q.zero))
+
+
+  let write_flag path location cache field flag astate =
+    let astate, value =
+      PulseArithmetic.absval_of_int astate (IntLit.of_int (if flag then 1 else 0))
+    in
+    Memory.add_edge path cache (FieldAccess field) (value, snd cache) location astate
+
+
+  let key_value path location (key : _ FuncArg.t) astate =
+    let* astate, (value, _) =
+      if Typ.is_pointer key.typ then
+        PulseOperations.eval_access path Read location key.arg_payload Dereference astate
+      else Ok (astate, key.arg_payload)
+    in
+    let constant =
+      PulseArithmetic.as_constant_q astate value
+      |> Option.bind ~f:(fun q ->
+          Option.some_if (Z.equal (Q.den q) Z.one) (IntLit.of_big_int (Q.num q)) )
+    in
+    Ok (astate, constant)
+
+
+  let is_empty path location this astate =
+    let+ astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
+    (astate, PulseArithmetic.is_known_zero astate size)
+
+
+  let presence path location this key astate =
+    let* astate, empty = is_empty path location this astate in
+    let known =
+      match cache this astate with
+      | None ->
+          Option.some_if empty false
+      | Some cache -> (
+        match edge astate cache (node_key key) with
+        | Some (node, _)
+          when AddressAttributes.is_end_of_collection node astate
+               && Option.value (flag astate cache (lookup_valid_key key)) ~default:false ->
+            Some false
+        | _ -> (
+          match flag astate cache (present_key key) with
+          | Some _ as known ->
+              known
+          | None ->
+              Option.some_if
+                (empty || Option.value (flag astate cache complete_field) ~default:false)
+                false ) )
+    in
+    Ok (astate, known)
+
+
+  let ensure_cache path location event this astate =
+    match cache this astate with
+    | Some cache ->
+        Ok (astate, cache)
+    | None ->
+        let* astate, empty = is_empty path location this astate in
+        let cache = (AbstractValue.mk_fresh (), Hist.single_event event) in
+        (* This is analysis-only lookup state, not an observable write to a user's map. *)
+        let astate, cell = Memory.eval_edge this (FieldAccess ordered_map_cache_field) astate in
+        let astate =
+          AbductiveDomain.set_post_edges (fst cell)
+            (UnsafeMemory.Edges.add Dereference cache UnsafeMemory.Edges.empty)
+            astate
+          |> AddressAttributes.initialize (fst cell)
+        in
+        Ok (write_flag path location cache complete_field empty astate, cache)
+
+
+  let existing_node this key astate =
+    cache this astate |> Option.bind ~f:(fun c -> edge astate c (node_key key))
+
+
+  let live_node this key astate =
+    existing_node this key astate
+    |> Option.filter ~f:(fun (node, _) ->
+        (not (AddressAttributes.is_end_of_collection node astate))
+        && AddressAttributes.find_opt `Post node astate
+           |> Option.bind ~f:Attributes.get_invalid
+           |> Option.is_none )
+
+
+  let value_reference path location callee elem astate =
+    match Procname.get_class_type_name callee with
+    | Some (CppClass {template_spec_info= Template {args= TType key_t :: TType value_t :: _}}) ->
+        PulseOperations.eval_access path Read location elem
+          (GenericMapCollection.pair_second_access key_t value_t)
+          astate
+    | _ ->
+        Ok (astate, elem)
+
+
+  let new_node path location event callee this key ~initialize astate =
+    let=* astate, cache = ensure_cache path location event this astate in
+    let=* astate, elem = fresh_element path location this astate in
+    (* The cache is only lookup evidence. Nodes remain owned by the collection after that
+       evidence is forgotten, so clear() still invalidates previously returned references. *)
+    let astate = Memory.add_edge path cache (FieldAccess (node_key key)) elem location astate in
+    let astate = write_flag path location cache (present_key key) true astate in
+    let=* astate, value = value_reference path location callee elem astate in
+    let=* astate =
+      if initialize then
+        let astate, zero = PulseArithmetic.absval_of_int astate IntLit.zero in
+        PulseOperations.write_deref path location ~ref:value ~obj:(zero, snd elem) astate
+      else Ok astate
+    in
+    let** astate, endpoint = eval_end path location this astate in
+    let++ astate =
+      PulseArithmetic.and_not_equal
+        (AbstractValueOperand (fst elem))
+        (AbstractValueOperand (fst endpoint))
+        astate
+    in
+    (astate, elem)
+
+
+  let mapped_reference ~inserts this (key : _ FuncArg.t) : model_no_non_disj =
+   fun ({path; location; callee_procname; ret= ret_id, _} as model_data) astate ->
+    let desc = callee_desc callee_procname "map" in
+    let event = Hist.call_event path location desc in
+    let<*> astate, constant = key_value path location key astate in
+    match constant with
+    | None ->
+        let<*> astate, unknown_key =
+          if Typ.is_pointer key.typ then
+            PulseOperations.eval_access path Read location key.arg_payload Dereference astate
+          else Ok (astate, key.arg_payload)
+        in
+        (* Return the actual cached reference when keys match. Acquiring a reference is not a
+           write; the caller's subsequent store must update the corresponding cached value. *)
+        let targets =
+          match cache this astate with
+          | None ->
+              []
+          | Some cache ->
+              Memory.fold_edges (fst cache) astate ~init:[] ~f:(fun targets (access, elem) ->
+                  match access with
+                  | FieldAccess field
+                    when String.is_prefix (Fieldname.get_field_name field)
+                           ~prefix:"__infer_ordered_map_node_"
+                         && (not (AddressAttributes.is_end_of_collection (fst elem) astate))
+                         && Option.is_none
+                              ( AddressAttributes.find_opt `Post (fst elem) astate
+                              |> Option.bind ~f:Attributes.get_invalid ) ->
+                      let text =
+                        String.chop_prefix_exn (Fieldname.get_field_name field)
+                          ~prefix:"__infer_ordered_map_node_"
+                      in
+                      let constant = IntLit.of_big_int (Z.of_string text) in
+                      if Option.value (flag astate cache (present_key constant)) ~default:false then
+                        (constant, elem) :: targets
+                      else targets
+                  | _ ->
+                      targets )
+        in
+        let matches =
+          List.concat_map targets ~f:(fun (constant, elem) ->
+              let<**> astate =
+                PulseArithmetic.and_equal
+                  (AbstractValueOperand (fst unknown_key))
+                  (ConstOperand (Cint constant)) astate
+              in
+              let<+> astate, (value, hist) =
+                value_reference path location callee_procname elem astate
+              in
+              PulseOperations.write_id ret_id (value, Hist.add_event event hist) astate
+              |> Decompiler.add_call_source value (Call callee_procname) [(this, StdTyp.void)] )
+        in
+        let fallback =
+          let<**> astate =
+            List.fold targets ~init:(Sat (Ok astate)) ~f:(fun result (constant, _) ->
+                let** astate = result in
+                PulseArithmetic.and_not_equal
+                  (AbstractValueOperand (fst unknown_key))
+                  (ConstOperand (Cint constant)) astate )
+          in
+          let<*> astate =
+            if inserts then forget_ordered_map_cache ~insertion:true path location this astate
+            else Ok astate
+          in
+          mapped_value_reference ~inserts ~desc this model_data astate
+        in
+        matches @ fallback
+    | Some key -> (
+        let<*> astate, known = presence path location this key astate in
+        let finish known existing astate =
+          let<**> astate, elem =
+            match existing with
+            | Some elem ->
+                Sat (Ok (astate, elem))
+            | None ->
+                new_node path location event callee_procname this key
+                  ~initialize:(inserts && Option.equal Bool.equal known (Some false))
+                  astate
+          in
+          let astate =
+            match cache this astate with
+            | Some cache when inserts ->
+                write_flag path location cache (present_key key) true astate
+            | _ ->
+                astate
+          in
+          let<**> astate =
+            if not inserts then Sat (Ok astate)
+            else if Option.equal Bool.equal known (Some false) then
+              Collection.increase_size path location this ~desc astate
+            else if Option.equal Bool.equal known (Some true) then Sat (Ok astate)
+            else set_size_positive path location event this astate
+          in
+          let<+> astate, (value, hist) =
+            value_reference path location callee_procname elem astate
+          in
+          PulseOperations.write_id ret_id (value, Hist.add_event event hist) astate
+          |> Decompiler.add_call_source value (Call callee_procname) [(this, StdTyp.void)]
+        in
+        match (live_node this key astate, known) with
+        | Some probe, None ->
+            (* A prior unknown find may have returned end(). Keep the saved iterator's identity
+               on the hit path, and create a different, initialized node on the miss path. *)
+            let<**> astate, endpoint = eval_end path location this astate in
+            let hit =
+              let<**> astate =
+                PulseArithmetic.and_not_equal
+                  (AbstractValueOperand (fst probe))
+                  (AbstractValueOperand (fst endpoint))
+                  astate
+              in
+              finish (Some true) (Some probe) astate
+            in
+            let miss =
+              let<**> astate =
+                PulseArithmetic.and_equal
+                  (AbstractValueOperand (fst probe))
+                  (AbstractValueOperand (fst endpoint))
+                  astate
+              in
+              finish (Some false) None astate
+            in
+            hit @ miss
+        | Some elem, Some true ->
+            finish known (Some elem) astate
+        | _ ->
+            finish known None astate )
+
+
+  let find this key iter : model_no_non_disj =
+   fun ({path; location; callee_procname} as model_data) astate ->
+    let desc = callee_desc callee_procname "map" in
+    let event = Hist.call_event path location desc in
+    let<*> astate, constant = key_value path location key astate in
+    match constant with
+    | None ->
+        begin_or_find this iter Map ~desc model_data astate
+    | Some key ->
+        let<*> astate, known = presence path location this key astate in
+        let<**> astate, elem =
+          if Option.equal Bool.equal known (Some false) then eval_end path location this astate
+          else
+            Sat
+              ( match live_node this key astate with
+              | Some elem ->
+                  Ok (astate, elem)
+              | None ->
+                  let* astate, elem = fresh_element path location this astate in
+                  let+ astate, cache = ensure_cache path location event this astate in
+                  (* A successful lookup gives a node identity, not an insertion or a proof of
+                     closed-world membership/cardinality on an input map. *)
+                  ( Memory.add_edge path cache (FieldAccess (node_key key)) elem location astate
+                    |> write_flag path location cache (lookup_valid_key key) true
+                  , elem ) )
+        in
+        let<+> astate = make_iterator ~has_token:false path location event this iter elem astate in
+        astate
+
+
+  let erase (this : _ FuncArg.t) (key : _ FuncArg.t) : model_no_non_disj =
+   fun ({path; location; callee_procname; ret= ret_id, _} as model_data) astate ->
+    let desc = callee_desc callee_procname "map" in
+    let<*> astate, constant = key_value path location key astate in
+    match constant with
+    | None ->
+        let<*> astate, empty = is_empty path location this.arg_payload astate in
+        if empty then Basic.return_int ~desc 0L model_data astate
+        else
+          let<*> astate = forget_ordered_map_cache path location this.arg_payload astate in
+          Basic.skipped_known_call [this; key] model_data astate
+    | Some key ->
+        let<*> astate, known = presence path location this.arg_payload key astate in
+        let astate =
+          match live_node this.arg_payload key astate with
+          | Some elem ->
+              invalidate_element path location (StdContainer (Map, Erase)) elem astate
+          | None ->
+              astate
+        in
+        let astate =
+          match cache this.arg_payload astate with
+          | Some cache ->
+              write_flag path location cache (present_key key) false astate
+          | None ->
+              astate
+        in
+        let<**> astate =
+          match known with
+          | Some true ->
+              Collection.decrease_size path location this.arg_payload ~desc astate
+          | Some false ->
+              Sat (Ok astate)
+          | None ->
+              Sat
+                (PulseOperations.havoc_deref_field path location this.arg_payload
+                   Collection.size_field
+                   (Hist.single_call path location desc)
+                   astate )
+        in
+        let astate, count =
+          match known with
+          | Some present ->
+              PulseArithmetic.absval_of_int astate (IntLit.of_int (if present then 1 else 0))
+          | None ->
+              (astate, AbstractValue.mk_fresh ())
+        in
+        Basic.ok_continue
+          (PulseOperations.write_id ret_id (count, Hist.single_call path location desc) astate)
+
+
+  let clear this : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let astate =
+      match cache this astate with
+      | None ->
+          astate
+      | Some cache ->
+          Memory.fold_edges (fst cache) astate ~init:astate ~f:(fun astate (access, elem) ->
+              match access with
+              | FieldAccess field
+                when String.is_prefix (Fieldname.get_field_name field)
+                       ~prefix:"__infer_ordered_map_node_"
+                     && not (AddressAttributes.is_end_of_collection (fst elem) astate) ->
+                  invalidate_element path location (StdContainer (Map, Clear)) elem astate
+              | _ ->
+                  astate )
+    in
+    let<*> astate = forget_ordered_map_cache path location this astate in
+    clear this Map ~desc:"std::map::clear()" model_data astate
+end
+
 (** a constructor whose body is translated, eg from headers under the project root, runs instead of
     the model: the other translated methods read the fields that it sets. The size is then unknown,
     as these methods do not maintain it. *)
@@ -531,6 +1004,20 @@ let matchers : matcher list =
   in
   let is_iterator _ name = is_iterator name in
   let is_container ?(f = fun _ -> true) _ name = Option.exists (container_of_name name) ~f in
+  let ordered_map_method name =
+    -"std"
+    &::+ (fun (_, procname) name ->
+    String.equal (strip_template_args name) "map" && OrderedMap.supports procname )
+    &:: name
+  in
+  let ordered_map_matchers =
+    [ ordered_map_method "operator[]" <>$ capt_arg_payload $+ capt_arg
+      $--> OrderedMap.mapped_reference ~inserts:true
+    ; ordered_map_method "find" <>$ capt_arg_payload $+ capt_arg $+ capt_arg_payload
+      $--> OrderedMap.find
+    ; ordered_map_method "erase" <>$ capt_arg $+ capt_arg $--> OrderedMap.erase
+    ; ordered_map_method "clear" <>$ capt_arg_payload $--> OrderedMap.clear ]
+  in
   let iterator_matchers ~in_detail =
     let namespace () = if in_detail then detail () else -"std" in
     let iterator_method name = namespace () &::+ is_iterator &:: name in
@@ -662,7 +1149,8 @@ let matchers : matcher list =
     ; -"std" &:: "deque" &:: "emplace" $ capt_arg_payload
       $++$--> deque_insertion Emplace ~ret:`Iterator ~desc:(deque_desc "emplace") ]
   in
-  iterator_matchers ~in_detail:false
+  ordered_map_matchers
+  @ iterator_matchers ~in_detail:false
   @ iterator_matchers ~in_detail:true @ comparison_matchers @ container_matchers @ lookup_matchers
   @ front_back_matchers @ map_matchers @ deque_matchers
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
