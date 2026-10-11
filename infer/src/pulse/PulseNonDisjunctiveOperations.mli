@@ -6,6 +6,7 @@
  *)
 
 open! IStd
+open PulseBasicInterface
 open PulseDomainInterface
 
 val has_copy_in : string -> bool
@@ -38,6 +39,14 @@ val call :
 val mark_modified_copies_and_parameters :
   Var.t list -> ExecutionDomain.t list -> NonDisjDomain.t -> NonDisjDomain.t
 (** Mark if copies and parameters has been modified so far *)
+
+val mark_written_copy :
+  address:AbstractValue.t -> AbductiveDomain.t -> NonDisjDomain.t -> NonDisjDomain.t
+(** Preserve writes to copies or their sources, including writes through aliases, before dropping
+    paths. *)
+
+val mark_modified_copies_eagerly : ExecutionDomain.t list -> NonDisjDomain.t -> NonDisjDomain.t
+(** Preserve callee mutation witnesses before the returned disjuncts are truncated. *)
 
 val mark_modified_copies_and_parameters_on_abductive :
   Var.t list -> AbductiveDomain.t -> NonDisjDomain.t -> NonDisjDomain.t
