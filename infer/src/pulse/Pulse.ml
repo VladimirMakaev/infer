@@ -167,6 +167,7 @@ let is_unnecessary_copy_in_loop node copied_into source_opt =
 let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
     non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
+  let reported = ref [] in
   if is_not_implicit_or_copy_ctor_assignment pname then
     PulseNonDisjunctiveDomain.get_copied
       ~ref_formals:(Procdesc.get_passed_by_ref_formals proc_desc)
@@ -202,7 +203,10 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
                   ~f:(fun typ -> Typ.is_const_reference_on_source typ |> not)
                   source_typ )
              && not (is_unnecessary_copy_in_loop node copied_into source_opt)
-           then PulseReport.report analysis_data ~is_suppressed ~latent:false diagnostic )
+           then
+             if not (List.exists !reported ~f:(Diagnostic.equal diagnostic)) then (
+               reported := diagnostic :: !reported ;
+               PulseReport.report analysis_data ~is_suppressed ~latent:false diagnostic ) )
 
 
 let report_unnecessary_parameter_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
@@ -1845,6 +1849,9 @@ module PulseTransferFunctions = struct
             in
             let lhs_addr = ValueOrigin.value lhs_value_origin in
             let lhs_addr_hist = ValueOrigin.addr_hist lhs_value_origin in
+            store_non_disj :=
+              PulseNonDisjunctiveOperations.mark_written_copy ~address:lhs_addr astate
+                !store_non_disj ;
             let is_escape () =
               match lhs_exp with
               | Lvar pvar ->
@@ -1993,6 +2000,9 @@ module PulseTransferFunctions = struct
                            call_exp func_args loc call_flags astate astate_n callee_pname
                        in
                        let afters = List.filter_map new_astates ~f:PulseResult.ok in
+                       let astate_n =
+                         PulseNonDisjunctiveOperations.mark_modified_copies_eagerly afters astate_n
+                       in
                        List.iter !disjunct_calls ~f:(fun (before, callee, actuals) ->
                            closure_calls := (before, callee, actuals, afters) :: !closure_calls ) ;
                        ( new_astates @ astates
