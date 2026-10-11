@@ -289,6 +289,12 @@ module SharedPtr = struct
 
   let count_access = Access.FieldAccess count
 
+  let managed_field =
+    Fieldname.make PulseOperations.pulse_model_type "__infer_shared_managed_pointer"
+
+
+  let managed_access = Access.FieldAccess managed_field
+
   let to_internal_count ?(access = count_access) path mode location value astate =
     PulseOperations.eval_access path mode location value access astate
 
@@ -331,6 +337,11 @@ module SharedPtr = struct
     let+* astate, value = fresh_value_from_constant path location ~constant ~desc astate in
     let+ astate, _ = write_count path location this ~value ~desc astate in
     astate
+
+
+  let record_managed_pointer path location this value astate =
+    let* astate, control = to_internal_count_deref path Read location this astate in
+    PulseOperations.write_field path location ~ref:control managed_field ~obj:value astate
 
 
   (* weak pointers sharing the count see that the object has expired *)
@@ -385,6 +396,13 @@ module SharedPtr = struct
     let<*!> astate, (value_addr, value_hist) =
       to_internal_value_deref path Read location this astate
     in
+    let value_addr, value_hist =
+      match Memory.find_edge_opt (fst pointer) managed_access astate with
+      | Some (managed, hist) when not (AbstractValue.equal managed value_addr) ->
+          (managed, hist)
+      | _ ->
+          (value_addr, value_hist)
+    in
     let value = (value_addr, Hist.add_call path location desc value_hist) in
     (* ref_count greater than one: decrement ref_count *)
     let ref_count_gt_one =
@@ -402,6 +420,13 @@ module SharedPtr = struct
     let dispose astate non_disj =
       match find_element_type tenv typ with
       | Some elem_typ ->
+          let elem_typ =
+            match PulseArithmetic.get_dynamic_type value_addr astate with
+            | Some {typ= {desc= Tstruct _} as typ} ->
+                typ
+            | _ ->
+                elem_typ
+          in
           let pointer_typ, invalidation = pointer_type_and_delete elem_typ in
           (* only the constructors taking a deleter record it in the control block *)
           let has_deleter =
@@ -441,28 +466,41 @@ module SharedPtr = struct
     (SatUnsat.to_list ref_count_gt_one @ SatUnsat.to_list ref_count_zero @ ref_count_one, non_disj)
 
 
-  let assign_pointer this value ~desc : model_no_non_disj =
+  let assign_raw_pointer this value ~desc : model_no_non_disj =
    fun {path; location} astate ->
     let<*> astate, _ = write_value path location this ~value ~desc astate in
-    (* set ref_count to *)
-    let astate_not_nullptr =
-      PulseArithmetic.prune_positive (fst value) astate
-      >>== assign_count path location this ~constant:IntLit.one ~desc
-      >>|| ExecutionDomain.continue
+    let initialize astate =
+      let<++> astate = assign_count path location this ~constant:IntLit.one ~desc astate in
+      astate
     in
-    let astate_nullptr =
-      PulseArithmetic.prune_eq_zero (fst value) astate
-      >>== assign_count path location this ~constant:IntLit.zero ~desc
-      >>|| ExecutionDomain.continue
+    let nonnull =
+      let<**> astate = PulseArithmetic.prune_positive (fst value) astate in
+      initialize astate
     in
-    SatUnsat.to_list astate_not_nullptr @ SatUnsat.to_list astate_nullptr
+    let null =
+      let<**> astate = PulseArithmetic.prune_eq_zero (fst value) astate in
+      initialize astate
+    in
+    nonnull @ null
+
+
+  let assign_pointer this FuncArg.{arg_payload= value; typ} ~desc : model_no_non_disj =
+   fun model_data astate ->
+    (* The frontend represents [nullptr_t] as an integer; raw pointers have [Tptr] type. *)
+    if Typ.is_int typ then
+      let<*> astate, _ = write_value model_data.path model_data.location this ~value ~desc astate in
+      let<++> astate =
+        assign_count model_data.path model_data.location this ~constant:IntLit.zero ~desc astate
+      in
+      astate
+    else assign_raw_pointer this value ~desc model_data astate
 
 
   (* old versions of libc++ add a defaulted parameter of type [__nat] to some constructors *)
   let libcxx_nat = QualifiedCppName.Match.of_fuzzy_qual_names ["std::shared_ptr::__nat"]
 
   (** [shared_ptr(Y* p, D d, ...)]: the last owner calls [d(p)] instead of [delete p] *)
-  let assign_pointer_with_deleter this FuncArg.{arg_payload= value}
+  let assign_pointer_with_deleter this (FuncArg.{arg_payload= value} as value_arg)
       FuncArg.{arg_payload= deleter; typ= deleter_typ} ~desc : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
     let deleter_opt =
@@ -488,7 +526,7 @@ module SharedPtr = struct
     in
     match deleter_opt with
     | None ->
-        assign_pointer this value ~desc model_data astate
+        assign_pointer this value_arg ~desc model_data astate
     | Some (astate, deleter) ->
         (* unlike [shared_ptr(p)], this owns [p] even if it is null *)
         let<*> astate, _ = write_value path location this ~value ~desc astate in
@@ -498,7 +536,16 @@ module SharedPtr = struct
         astate
 
 
-  let copy_constructor FuncArg.{arg_payload= this} other ~desc : model_no_non_disj =
+  let tracked_control value astate =
+    Memory.find_edge_opt (fst value) count_access astate
+    |> Option.bind ~f:(fun (cell, _) -> Memory.find_edge_opt cell Dereference astate)
+    |> Option.exists ~f:(fun (control, _) ->
+        Option.is_some (Memory.find_edge_opt control managed_access astate)
+        || Option.exists (Memory.find_edge_opt control Dereference astate) ~f:(fun (count, _) ->
+            Option.is_some (PulseArithmetic.as_constant_q astate count) ) )
+
+
+  let copy_untracked_constructor FuncArg.{arg_payload= this} other ~desc : model_no_non_disj =
    fun {path; location} astate ->
     (* copy value pointer*)
     let<*> astate, value = to_internal_value_deref path Read location other astate in
@@ -542,6 +589,41 @@ module SharedPtr = struct
     SatUnsat.to_list astate_not_nullptr @ SatUnsat.to_list astate_nullptr
 
 
+  let copy_tracked_constructor FuncArg.{arg_payload= this} other ~desc : model_no_non_disj =
+   fun {path; location} astate ->
+    let<*> astate, value = to_internal_value_deref path Read location other astate in
+    let<*> astate, _ = write_value path location this ~value ~desc astate in
+    let<*> astate, (pointer, hist) = to_internal_count_deref path Read location other astate in
+    let<*> astate, (count, _) =
+      PulseOperations.eval_access path Read location (pointer, hist) Dereference astate
+    in
+    let empty =
+      PulseArithmetic.prune_eq_zero count astate
+      >>== assign_count path location this ~constant:IntLit.zero ~desc
+      >>|| ExecutionDomain.continue
+    in
+    let owning =
+      let** astate = PulseArithmetic.prune_positive count astate in
+      let=* astate, _ = write_count path location this ~value:(pointer, hist) ~desc astate in
+      let=* astate, (count, _) =
+        PulseOperations.eval_access path Read location (pointer, hist) Dereference astate
+      in
+      let+* astate, next =
+        PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) (PlusA None)
+          (AbstractValueOperand count) (ConstOperand (Cint IntLit.one)) astate
+      in
+      PulseOperations.write_deref path location ~ref:(pointer, hist) ~obj:(next, hist) astate
+      |> Basic.map_continue
+    in
+    SatUnsat.to_list empty @ SatUnsat.to_list owning
+
+
+  let copy_constructor this other ~desc : model_no_non_disj =
+   fun model_data astate ->
+    if tracked_control other astate then copy_tracked_constructor this other ~desc model_data astate
+    else copy_untracked_constructor this other ~desc model_data astate
+
+
   let copy_assignment (FuncArg.{arg_payload= this} as arg) other ~desc : model =
    fun model_data astate non_disj ->
     let ( let<**> ) x f = bind_sat_result non_disj x f in
@@ -567,7 +649,7 @@ module SharedPtr = struct
     (astate_equals @ astate_not_equals, non_disj)
 
 
-  let move_assignment this other ~desc : model_no_non_disj =
+  let move_constructor this other ~desc : model_no_non_disj =
    fun {path; location} astate ->
     let<*> astate, value = to_internal_value_deref path Read location other astate in
     let<*> astate, count = to_internal_count_deref path Read location other astate in
@@ -576,6 +658,29 @@ module SharedPtr = struct
     let<**> astate = assign_value_nullptr path location other ~desc astate in
     let<++> astate = assign_count path location other ~constant:IntLit.zero ~desc astate in
     astate
+
+
+  let move_assignment (FuncArg.{arg_payload= this} as arg) other ~desc : model =
+   fun model_data astate non_disj ->
+    let ( let<**> ) x f = bind_sat_result non_disj x f in
+    let lhs = Formula.AbstractValueOperand (fst this) in
+    let rhs = Formula.AbstractValueOperand (fst other) in
+    let self =
+      if AbductiveDomain.cannot_be_equal_to_local_address astate (fst this) (fst other) then []
+      else
+        PulseArithmetic.and_equal lhs rhs astate >>|| ExecutionDomain.continue |> SatUnsat.to_list
+    in
+    let<**> astate = PulseArithmetic.and_not_equal lhs rhs astate in
+    let outcomes, non_disj = destructor arg ~desc model_data astate non_disj in
+    ( self
+      @ List.concat_map outcomes ~f:(fun result ->
+          let<*> state = result in
+          match state with
+          | ContinueProgram astate ->
+              move_constructor this other ~desc model_data astate
+          | _ ->
+              [Ok state] )
+    , non_disj )
 
 
   let reset (FuncArg.{arg_payload= this} as arg) value ~desc : model =
@@ -601,18 +706,46 @@ module SharedPtr = struct
     match other_typ with Some {Typ.desc= Tptr (_, Pk_rvalue_reference)} -> true | _ -> false
 
 
-  let copy_move_assignment (FuncArg.{arg_payload= this} as arg) other ~desc : model =
+  let copy_move_assignment arg other ~desc : model =
    fun ({callee_procname} as model_data) astate non_disj ->
     if is_rvalue callee_procname 1 then
-      (move_assignment this other ~desc:(desc ^ " (move)") model_data astate, non_disj)
+      move_assignment arg other ~desc:(desc ^ " (move)") model_data astate non_disj
     else copy_assignment arg other ~desc:(desc ^ " (copy)") model_data astate non_disj
 
 
   let copy_move_constructor (FuncArg.{arg_payload= this} as arg) other ~desc : model_no_non_disj =
    fun ({callee_procname} as model_data) ->
     if is_rvalue callee_procname 1 then
-      move_assignment this other ~desc:(desc ^ " (move)") model_data
+      move_constructor this other ~desc:(desc ^ " (move)") model_data
     else copy_constructor arg other ~desc:(desc ^ " (copy)") model_data
+
+
+  let aliasing_constructor (FuncArg.{arg_payload= this} as arg) owner
+      FuncArg.{arg_payload= stored; typ= stored_typ} ~desc : model_no_non_disj =
+   fun model_data astate ->
+    let<*> astate, managed =
+      to_internal_value_deref model_data.path Read model_data.location owner astate
+    in
+    let<*> astate, control =
+      to_internal_count_deref model_data.path Read model_data.location owner astate
+    in
+    let<*> astate =
+      if Option.is_some (Memory.find_edge_opt (fst control) managed_access astate) then Ok astate
+      else record_managed_pointer model_data.path model_data.location owner managed astate
+    in
+    let outcomes = copy_move_constructor arg owner ~desc model_data astate in
+    if not (Typ.is_pointer stored_typ || Typ.is_int stored_typ) then outcomes
+    else
+      List.concat_map outcomes ~f:(fun result ->
+          let<*> state = result in
+          match state with
+          | ContinueProgram astate ->
+              let<+> astate, _ =
+                write_value model_data.path model_data.location this ~value:stored ~desc astate
+              in
+              astate
+          | _ ->
+              [Ok state] )
 
 
   let swap this other ~desc : model_no_non_disj =
@@ -781,7 +914,15 @@ module WeakPtr = struct
     astate
 
 
-  let from_shared this shared ~desc : model_no_non_disj =
+  let from_tracked_shared this shared ~desc : model_no_non_disj =
+   fun {path; location} astate ->
+    let<*> astate, value = to_internal_value_deref path Read location shared astate in
+    let<*> astate, count = SharedPtr.to_internal_count_deref path Read location shared astate in
+    let<+> astate = write path location this ~value ~count ~desc astate in
+    astate
+
+
+  let from_untracked_shared this shared ~desc : model_no_non_disj =
    fun {path; location} astate ->
     let<*> astate, value = to_internal_value_deref path Read location shared astate in
     let<*> astate, count = SharedPtr.to_internal_count_deref path Read location shared astate in
@@ -803,6 +944,13 @@ module WeakPtr = struct
     in
     SatUnsat.to_list (astate_not_nullptr >>|| ExecutionDomain.continue)
     @ SatUnsat.to_list (astate_nullptr >>|| ExecutionDomain.continue)
+
+
+  let from_shared this shared ~desc : model_no_non_disj =
+   fun model_data astate ->
+    if SharedPtr.tracked_control shared astate then
+      from_tracked_shared this shared ~desc model_data astate
+    else from_untracked_shared this shared ~desc model_data astate
 
 
   let swap this other ~desc : model_no_non_disj =
@@ -829,9 +977,13 @@ module WeakPtr = struct
       expired astate
     in
     let alive_states =
+      let<**> astate = PulseArithmetic.prune_positive count_value astate in
       let<**> astate =
-        let** astate = PulseArithmetic.prune_positive count_value astate in
-        PulseArithmetic.and_positive (fst value) astate
+        if
+          Option.is_some (Memory.find_edge_opt (fst count) SharedPtr.managed_access astate)
+          || Option.is_some (PulseArithmetic.as_constant_q astate count_value)
+        then Sat (Ok astate)
+        else PulseArithmetic.and_positive (fst value) astate
       in
       alive ~value ~count:(count, count_value_hist) astate
     in
@@ -1265,6 +1417,24 @@ let matchers : matcher list =
   ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload
     $--> SharedPtr.default_constructor ~desc:"std::shared_ptr::shared_ptr()"
     |> with_non_disj
+  ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload
+    $+ any_arg_of_typ (-"std" &:: "nullptr_t")
+    $+...$--> SharedPtr.default_constructor ~desc:"std::shared_ptr::shared_ptr(nullptr)"
+    |> with_non_disj
+  ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload
+    $+ any_arg_of_typ (-"std" &:: "nullptr_t")
+    $+...$--> SharedPtr.default_constructor ~desc:"std::shared_ptr::shared_ptr(nullptr)"
+    |> with_non_disj
+  ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg
+    $+ capt_arg_payload_of_typ (-"std" &::+ SharedPtr.is_shared_ptr)
+    $+ capt_arg
+    $--> SharedPtr.aliasing_constructor ~desc:"std::shared_ptr::shared_ptr(owner, pointer)"
+    |> with_non_disj
+  ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg
+    $+ capt_arg_payload_of_typ (-"std" &::+ SharedPtr.is_shared_ptr)
+    $+ capt_arg
+    $--> SharedPtr.aliasing_constructor ~desc:"std::shared_ptr::shared_ptr(owner, pointer)"
+    |> with_non_disj
   ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg
     $+ capt_arg_payload_of_typ (-"std" &:: "__shared_ptr")
     $+...$--> SharedPtr.copy_move_constructor
@@ -1306,10 +1476,10 @@ let matchers : matcher list =
   ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload $+ capt_arg $+ capt_arg
     $+...$--> SharedPtr.assign_pointer_with_deleter ~desc:"std::shared_ptr::shared_ptr(T*, D)"
     |> with_non_disj
-  ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload $+ capt_arg_payload
+  ; -"std" &:: "__shared_ptr" &:: "__shared_ptr" $ capt_arg_payload $+ capt_arg
     $+...$--> SharedPtr.assign_pointer ~desc:"std::shared_ptr::shared_ptr(T*)"
     |> with_non_disj
-  ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload $+ capt_arg_payload
+  ; -"std" &:: "shared_ptr" &:: "shared_ptr" $ capt_arg_payload $+ capt_arg
     $+...$--> SharedPtr.assign_pointer ~desc:"std::shared_ptr::shared_ptr(T*)"
     |> with_non_disj
   ; -"std" &:: "__shared_ptr" &:: "~__shared_ptr" $ capt_arg
