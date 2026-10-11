@@ -63,5 +63,8 @@ unannotated matcher's rule; consumers must not invent a rule-selection proof.
 Scope: vector<int>, unique_ptr<int, default_delete<int>>, an LP64 synthetic source context,
 scalar allocation and iterator dereference. Typed element constructors/destructors, custom
 deleter callbacks, exceptions, compiler lowering and summary composition require end-to-end
-C++ tests. An unavailable model or callback is explicit; initialization failure exits nonzero.
+C++ tests. An unavailable model, callback, or required return binding stops the case immediately:
+exit2 emits schema1 JSON with status `adapter_refusal`, the operation stage, and refusal reason.
+Later alias uses are not attempted. Invalid input/setup failures exit1 with `adapter_failure`
+and their original cause; neither outcome is behavioral detection.
 Stopped model states are retained for evidence and do not execute later operations.
