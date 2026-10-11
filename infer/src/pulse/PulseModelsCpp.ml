@@ -1160,6 +1160,136 @@ module InitializerList = struct
 end
 
 module Vector = struct
+  let invalidate_element path location cause element astate =
+    let addresses =
+      AbductiveDomain.reachable_addresses_from
+        ~edge_filter:(function FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
+        (Seq.return (fst element))
+        astate `Post
+    in
+    AbstractValue.Set.fold
+      (fun addr astate ->
+        PulseOperations.invalidate path UntraceableAccess location cause (addr, snd element) astate )
+      addresses astate
+
+
+  let destroy_storage vector : model_no_non_disj =
+   fun {path; location} astate ->
+    let<+> astate, array = GenericArrayBackedCollection.eval path NoAccess location vector astate in
+    invalidate_element path location (StdVector Destructor) array astate
+
+
+  let element_type callee_procname =
+    match Procname.get_class_type_name callee_procname with
+    | Some (CppClass {template_spec_info= Template {args= TType typ :: _}}) ->
+        Some typ
+    | _ ->
+        None
+
+
+  let is_smart_pointer =
+    let open ProcnameDispatcher.TypName in
+    let dispatch =
+      make_dispatcher [-"std" &:: "unique_ptr" &::.*--> (); -"std" &:: "shared_ptr" &::.*--> ()]
+    in
+    fun name -> Option.is_some (dispatch () name)
+
+
+  let has_pointer_members tenv class_name =
+    let rec visit visited name =
+      if is_smart_pointer name then true
+      else if Typ.Name.Set.mem name visited || String.is_prefix (Typ.Name.name name) ~prefix:"std::"
+      then false
+      else
+        let visited = Typ.Name.Set.add name visited in
+        Option.exists (Tenv.lookup tenv name) ~f:(fun ({fields} : Struct.t) ->
+            List.exists fields ~f:(fun ({typ} : Struct.field) ->
+                match typ.Typ.desc with
+                | Tptr _ ->
+                    true
+                | Tstruct name ->
+                    visit visited name
+                | _ ->
+                    false ) )
+    in
+    visit Typ.Name.Set.empty class_name
+
+
+  let has_destructor_effects tenv class_name =
+    Tenv.find_cpp_destructor tenv class_name
+    |> Option.exists ~f:(fun proc ->
+        Option.exists (IRAttributes.load proc) ~f:(fun (attrs : ProcAttributes.t) ->
+            attrs.is_defined || not attrs.is_cpp_implicit ) )
+
+
+  let continue_with f (outcomes, non_disj) =
+    List.fold outcomes ~init:([], non_disj) ~f:(fun (prior, non_disj) outcome ->
+        let more, non_disj =
+          match outcome with
+          | Ok (ContinueProgram astate) ->
+              f astate non_disj
+          | Recoverable (ContinueProgram astate, errors) ->
+              let more, non_disj = f astate non_disj in
+              (List.map more ~f:(fun state -> PulseResult.append_errors errors state), non_disj)
+          | _ ->
+              ([outcome], non_disj)
+        in
+        (prior @ more, non_disj) )
+
+
+  let dispose_elements vector : model =
+   fun ({path; location; callee_procname} as model_data) astate non_disj ->
+    match element_type callee_procname with
+    | Some ({desc= Tstruct _} as typ) ->
+        let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+        let<*> astate, (size, _) =
+          GenericArrayBackedCollection.to_internal_size_deref path Read location vector astate
+        in
+        if PulseArithmetic.is_known_zero astate size then (Basic.ok_continue astate, non_disj)
+        else
+          let<*> astate, array =
+            GenericArrayBackedCollection.eval path Read location vector astate
+          in
+          let elements =
+            Memory.fold_edges (fst array) astate ~init:[] ~f:(fun elements (access, element) ->
+                match (access : Access.t) with
+                | ArrayAccess (_, index) -> (
+                  match PulseArithmetic.as_constant_q astate index with
+                  | Some index
+                    when Q.compare index Q.zero >= 0
+                         && Option.value_map (PulseArithmetic.as_constant_q astate size)
+                              ~default:true ~f:(fun size -> Q.compare index size < 0 ) ->
+                      element :: elements
+                  | _ ->
+                      elements )
+                | _ ->
+                    elements )
+            |> List.dedup_and_sort ~compare:(fun (a, _) (b, _) -> AbstractValue.compare a b)
+          in
+          let pointer_typ = Typ.mk (Tptr (typ, Pk_pointer)) in
+          List.fold elements
+            ~init:(Basic.ok_continue astate, non_disj)
+            ~f:(fun outcomes element ->
+              continue_with
+                (fun astate non_disj ->
+                  let arg =
+                    { FuncArg.arg_payload= ValueOrigin.unknown element
+                    ; typ= pointer_typ
+                    ; exp= Exp.Var (Ident.create_fresh Ident.kprimed) }
+                  in
+                  Basic.free_or_delete `Delete CppDelete arg model_data astate non_disj )
+                outcomes )
+    | _ ->
+        (Basic.ok_continue astate, non_disj)
+
+
+  let destructor vector : model =
+   fun model_data astate non_disj ->
+    dispose_elements vector model_data astate non_disj
+    |> continue_with (fun astate non_disj ->
+        lift_model (destroy_storage vector) model_data astate non_disj )
+
+
   let reallocate_internal_array path trace vector vector_f location astate =
     let* astate, array_address =
       GenericArrayBackedCollection.eval path NoAccess location vector astate
@@ -1211,16 +1341,28 @@ module Vector = struct
     in
     (* a move keeps the internal array so references to its elements stay valid; a copy also
        copies the elements, otherwise invalidating those of one vector would invalidate the other's *)
-    let depth_max = if is_move_constructor callee_procname then 0 else 1 in
     let<*> astate, (copy, _) =
-      PulseOperations.deep_copy ~depth_max path location init_list astate
+      if is_move_constructor callee_procname then Ok (astate, init_list)
+      else PulseOperations.deep_copy ~depth_max:1 path location init_list astate
     in
-    let<+> astate =
+    let<*> astate =
       PulseOperations.write_deref_field path location ~ref:this GenericArrayBackedCollection.field
         ~obj:(copy, Hist.add_call path location desc (snd init_list))
         astate
     in
-    astate
+    if is_move_constructor callee_procname then
+      let<*> astate =
+        PulseOperations.havoc_deref_field path location init_vector
+          GenericArrayBackedCollection.field
+          (Hist.single_call path location desc)
+          astate
+      in
+      let<++> astate =
+        GenericArrayBackedCollection.assign_size_constant path location init_vector
+          ~constant:IntLit.zero ~desc astate
+      in
+      astate
+    else Basic.ok_continue astate
 
 
   let invalidate_references vector_f vector : model_no_non_disj =
@@ -1271,6 +1413,43 @@ module Vector = struct
    fun ({ret= ret_id, _} as model_data) astate ->
     PulseOperations.write_id ret_id vector astate
     |> invalidate_references vector_f vector model_data
+
+
+  let assign vector (rhs : _ FuncArg.t) : model =
+   fun ({path; location} as model_data) astate non_disj ->
+    if is_move_constructor model_data.callee_procname then
+      let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+      let<*> astate, array =
+        GenericArrayBackedCollection.eval path Read location rhs.arg_payload astate
+      in
+      let<*> astate, size =
+        GenericArrayBackedCollection.to_internal_size_deref path Read location rhs.arg_payload
+          astate
+      in
+      lift_model (invalidate_references Assign vector) model_data astate non_disj
+      |> continue_with (fun astate non_disj ->
+          let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+          let ( let<**> ) x f = bind_sat_result non_disj x f in
+          let<*> astate =
+            PulseOperations.write_deref_field path location ~ref:vector
+              GenericArrayBackedCollection.field ~obj:array astate
+          in
+          let<*> astate =
+            GenericArrayBackedCollection.assign_size path location vector size
+              ~desc:"std::vector::operator=()" astate
+          in
+          let<*> astate =
+            PulseOperations.havoc_deref_field path location rhs.arg_payload
+              GenericArrayBackedCollection.field
+              (Hist.single_call path location "std::vector::operator=()")
+              astate
+          in
+          let<**> astate =
+            GenericArrayBackedCollection.assign_size_constant path location rhs.arg_payload
+              ~constant:IntLit.zero ~desc:"std::vector::operator=()" astate
+          in
+          (Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) vector astate), non_disj) )
+    else lift_model (invalidate_references_with_ret Assign vector) model_data astate non_disj
 
 
   let at ~desc vector index : model_no_non_disj =
@@ -1351,13 +1530,20 @@ module Vector = struct
     astate
 
 
-  let clear vector : model_no_non_disj =
+  let clear_storage vector : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
     let<**> astate =
       GenericArrayBackedCollection.assign_size_constant path location vector ~constant:IntLit.zero
         ~desc:"std::vector::clear()" astate
     in
     invalidate_references Clear vector model_data astate
+
+
+  let clear vector : model =
+   fun model_data astate non_disj ->
+    dispose_elements vector model_data astate non_disj
+    |> continue_with (fun astate non_disj ->
+        lift_model (clear_storage vector) model_data astate non_disj )
 
 
   let reserve vector : model_no_non_disj =
@@ -1370,10 +1556,44 @@ module Vector = struct
     astate
 
 
-  let pop_back vector ~desc : model_no_non_disj =
+  let pop_storage vector ~desc : model_no_non_disj =
    fun {path; location} astate ->
+    let<**> astate, last = last_index path location vector astate in
+    let<*> astate, array = GenericArrayBackedCollection.eval path Read location vector astate in
+    let<*> astate, element =
+      GenericArrayBackedCollection.eval_element path location array last astate
+    in
+    let astate = invalidate_element path location (StdVector PopBack) element astate in
+    let astate =
+      Memory.add_edge path array
+        (ArrayAccess (StdTyp.void, last))
+        (AbstractValue.mk_fresh (), Hist.single_call path location desc)
+        location astate
+    in
     let<++> astate = GenericArrayBackedCollection.decrease_size path location vector ~desc astate in
     astate
+
+
+  let pop_back vector ~desc : model =
+   fun ({path; location; callee_procname} as model_data) astate non_disj ->
+    let finish astate non_disj = lift_model (pop_storage vector ~desc) model_data astate non_disj in
+    match element_type callee_procname with
+    | Some ({desc= Tstruct _} as typ) ->
+        let ( let<**> ) x f = bind_sat_result non_disj x f in
+        let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+        let<**> astate, last = last_index path location vector astate in
+        let<*> astate, element =
+          GenericArrayBackedCollection.element path location vector last astate
+        in
+        let arg =
+          { FuncArg.arg_payload= ValueOrigin.unknown element
+          ; typ= Typ.mk (Tptr (typ, Pk_pointer))
+          ; exp= Exp.Var (Ident.create_fresh Ident.kprimed) }
+        in
+        Basic.free_or_delete `Delete CppDelete arg model_data astate non_disj
+        |> continue_with finish
+    | _ ->
+        finish astate non_disj
 
 
   let reallocate_unless_reserved path location vector vector_f ~desc astate =
@@ -1436,8 +1656,64 @@ module Vector = struct
       astate
 
 
-  let push_back_cpp vector value ~vector_f ~desc =
-    push_back_common ~value vector ~vector_f:(Some vector_f) ~desc
+  let push_back_cpp vector (value : _ FuncArg.t) ~vector_f ~desc : model =
+   fun ({path; location; callee_procname; analysis_data= {tenv}} as model_data) astate non_disj ->
+    let fallback = lift_model (push_back_common ~value vector ~vector_f:(Some vector_f) ~desc) in
+    match element_type callee_procname with
+    | Some ({desc= Tstruct class_name} as typ)
+      when (not (Tenv.is_trivially_copyable tenv typ))
+           && has_destructor_effects tenv class_name
+           && has_pointer_members tenv class_name ->
+        let pointer_typ = Typ.mk (Tptr (typ, Pk_pointer)) in
+        let source_typ =
+          match IRAttributes.load_formal_types callee_procname with
+          | [_; typ] ->
+              typ
+          | _ ->
+              value.FuncArg.typ
+        in
+        let actuals = [pointer_typ; source_typ] in
+        let constructor =
+          List.find_map Typ.overloading_resolution ~f:(fun compare ->
+              List.find (Tenv.find_cpp_constructor tenv class_name) ~f:(fun proc ->
+                  (not
+                     (Option.exists (IRAttributes.load proc) ~f:(fun (attrs : ProcAttributes.t) ->
+                          attrs.is_cpp_deleted ) ) )
+                  && List.equal compare (IRAttributes.load_formal_types proc) actuals ) )
+        in
+        if Option.is_none constructor then fallback model_data astate non_disj
+        else
+          let ( let<**> ) x f = bind_sat_result non_disj x f in
+          let<**> astate, dst = Basic.alloc_value_address typ ~desc model_data astate in
+          let fake_exp = Exp.Var (Ident.create_fresh Ident.kprimed) in
+          let args =
+            [ {FuncArg.arg_payload= ValueOrigin.unknown dst; typ= pointer_typ; exp= fake_exp}
+            ; FuncArg.map_payload ~f:ValueOrigin.unknown {value with typ= source_typ} ]
+          in
+          let constructor = Option.value_exn constructor in
+          model_data.dispatch_call_eval_args model_data.analysis_data path model_data.ret
+            (Const (Cfun constructor)) args location CallFlags.default astate non_disj
+            (Some constructor)
+          |> continue_with (fun astate non_disj ->
+              let ( let<**> ) x f = bind_sat_result non_disj x f in
+              let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+              let<**> astate =
+                GenericArrayBackedCollection.increase_size path location vector ~desc astate
+              in
+              let<*> astate =
+                reallocate_unless_reserved path location vector (Some vector_f) ~desc astate
+              in
+              let<**> astate, last = last_index path location vector astate in
+              let<*> astate, array =
+                GenericArrayBackedCollection.eval path Read location vector astate
+              in
+              let astate =
+                Memory.add_edge path array (ArrayAccess (StdTyp.void, last)) dst location astate
+              in
+              ( Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) vector astate)
+              , non_disj ) )
+    | _ ->
+        fallback model_data astate non_disj
 
 
   let push_back vector ~desc = push_back_common vector ~vector_f:None ~desc
@@ -2471,8 +2747,10 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_end ~desc:"std::vector::cend()"
       |> with_non_disj
-    ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload $--> Vector.clear |> with_non_disj
+    ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload $--> Vector.clear
       |> observe_matcher ~rule:"std.vector.clear.1"
+    ; -"std" &:: "vector" &:: "~vector" <>$ capt_arg_payload $+...$--> Vector.destructor
+      |> observe_matcher ~rule:"std.vector.destructor.1"
     ; -"std" &:: "vector" &:: "data" <>$ capt_arg_payload
       $--> Vector.data ~desc:"std::vector::data()"
       |> with_non_disj
@@ -2506,9 +2784,7 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_unknown_size Insert
       |> with_non_disj
-    ; -"std" &:: "vector" &:: "operator=" <>$ capt_arg_payload
-      $+...$--> Vector.invalidate_references_with_ret Assign
-      |> with_non_disj
+    ; -"std" &:: "vector" &:: "operator=" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.assign
       |> observe_matcher ~rule:"std.vector.assign.1"
     ; -"std" &:: "vector" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.at ~desc:"std::vector::at()"
@@ -2520,11 +2796,9 @@ let simple_matchers =
       |> observe_matcher ~rule:"std.vector.shrink_to_fit.1"
     ; -"std" &:: "vector" &:: "push_back" <>$ capt_arg_payload $+ capt_arg
       $--> Vector.push_back_cpp ~vector_f:PushBack ~desc:"std::vector::push_back()"
-      |> with_non_disj
       |> observe_matcher ~rule:"std.vector.push_back.1"
     ; -"std" &:: "vector" &:: "pop_back" <>$ capt_arg_payload
       $+...$--> Vector.pop_back ~desc:"std::vector::pop_back()"
-      |> with_non_disj
       |> observe_matcher ~rule:"std.vector.pop_back.1"
     ; -"std" &:: "vector" &:: "empty" <>$ capt_arg_payload
       $--> GenericArrayBackedCollection.empty ~desc:"std::vector::is_empty()"
