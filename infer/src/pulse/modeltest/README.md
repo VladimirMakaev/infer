@@ -42,6 +42,24 @@ unrepresented. The independent test oracle must supply the obligation; this exec
 creates an expected result from its own output. Call locations use one-based operation indices.
 Named model rules and actual dispatch routes use the opt-in observation interface.
 
+Additional object kinds are `shared`, `weak`, `string`, `view`, `optional`, and
+`nested_optional`. `model_call` invokes real dispatch with explicit parameter bindings,
+return type, and an optional rvalue parameter. Formal types are recorded so overloads
+that inspect reference qualifiers select the intended model. Separately constructed
+objects have distinct addresses. The adapter still executes no C++ CFG or summaries.
+
+```json
+{"op":"model_call","object":"owner","method":"use_count",
+ "parameters":[],"result":"count","return_type":"int"}
+```
+
+`integer` accepts an optional `pointer: true` for a typed null-pointer binding; `string`
+creates a constant character binding. Snapshots publish exact known integer constants,
+feasible bounded integer values, and null/non-null feasibility. These are observations,
+not expected answers. String iterators and contained class callbacks remain outside the
+scalar interface and require C++ tests. A model-route observation does not identify an
+unannotated matcher's rule; consumers must not invent a rule-selection proof.
+
 Scope: vector<int>, unique_ptr<int, default_delete<int>>, an LP64 synthetic source context,
 scalar allocation and iterator dereference. Typed element constructors/destructors, custom
 deleter callbacks, exceptions, compiler lowering and summary composition require end-to-end

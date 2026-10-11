@@ -44,6 +44,20 @@ let deleter_typ = Typ.mk (Tstruct (class_name "default_delete" [int_typ]))
 
 let unique_name = class_name "unique_ptr" [int_typ; deleter_typ]
 
+let char_typ = Typ.mk (Tint IChar)
+
+let shared_name = class_name "shared_ptr" [int_typ]
+
+let weak_name = class_name "weak_ptr" [int_typ]
+
+let string_name = class_name "basic_string" [char_typ]
+
+let view_name = class_name "basic_string_view" [char_typ]
+
+let optional_name = class_name "optional" [int_typ]
+
+let nested_optional_name = class_name "optional" [Typ.mk (Tstruct optional_name)]
+
 let iterator_typ = Typ.mk_ptr (Typ.mk (Tstruct (class_name "__wrap_iter" [ptr_typ])))
 
 let string key json = J.member key json |> J.to_string
@@ -108,8 +122,17 @@ let analysis_data : PulseSummary.t InterproceduralAnalysis.t =
 
 let name_of_method class_typ method_name parameters =
   let kind =
-    if String.equal method_name "vector" || String.equal method_name "unique_ptr" then
-      Procname.ObjC_Cpp.CPPConstructor None
+    if
+      List.mem
+        [ "vector"
+        ; "unique_ptr"
+        ; "shared_ptr"
+        ; "weak_ptr"
+        ; "basic_string"
+        ; "basic_string_view"
+        ; "optional" ]
+        method_name ~equal:String.equal
+    then Procname.ObjC_Cpp.CPPConstructor None
     else if String.is_prefix ~prefix:"~" method_name then Procname.ObjC_Cpp.CPPDestructor None
     else Procname.ObjC_Cpp.CPPMethod None
   in
@@ -130,6 +153,12 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
   in
   let callee = name_of_method class_typ method_name parameters in
   let args = List.map (object_slot :: parameters) ~f:arg in
+  let attrs = ProcAttributes.default proc_attrs.translation_unit callee in
+  let formals =
+    List.mapi (object_slot :: parameters) ~f:(fun i (slot : slot) ->
+        (Mangled.from_string ("arg" ^ Int.to_string i), slot.typ, Annot.Item.empty) )
+  in
+  IRAttributes.store ~proc_desc:None {attrs with formals; ret_type= return_typ} ~analysis:false ;
   let ret = Ident.create_fresh Ident.knormal in
   match PulseModels.dispatch analysis_data.tenv callee args with
   | None ->
@@ -148,7 +177,13 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
         ; ret= (ret, return_typ)
         ; call_flags= CallFlags.default }
       in
-      let outcomes, _ = model data state.heap PulseNonDisjunctiveDomain.bottom in
+      (* [havoc_id] materializes a return only when the SSA binding exists. *)
+      let heap =
+        if Option.is_some result_name then
+          PulseOperations.write_id ret (AbstractValue.mk_fresh (), history) state.heap
+        else state.heap
+      in
+      let outcomes, _ = model data heap PulseNonDisjunctiveDomain.bottom in
       List.map outcomes ~f:(fun outcome ->
           let result, errors =
             match outcome with
@@ -193,8 +228,52 @@ let operation json state =
       |> value_result
     in
     [{state with heap}]
+  else if String.equal op "string" then
+    let literal = string "value" json in
+    let heap, value = PulseArithmetic.absval_of_string state.heap literal in
+    [ bind (string "name" json)
+        {value; typ= Typ.mk_ptr char_typ; exp= Exp.Const (Cstr literal)}
+        {state with heap} ]
+  else if String.equal op "model_call" then
+    let object_name = string "object" json in
+    let params =
+      J.member "parameters" json |> J.to_list
+      |> List.map ~f:(fun value ->
+          let slot = get (J.to_string value) state in
+          match J.member "rvalue" json |> J.to_string_option with
+          | Some name when String.equal name (J.to_string value) ->
+              let typ =
+                match slot.typ.desc with
+                | Tptr (typ, _) ->
+                    Typ.mk (Tptr (typ, Pk_rvalue_reference))
+                | _ ->
+                    slot.typ
+              in
+              {slot with typ}
+          | _ ->
+              slot )
+    in
+    let return_typ =
+      match string "return_type" json with
+      | "int" ->
+          int_typ
+      | "pointer" ->
+          ptr_typ
+      | "char_pointer" ->
+          Typ.mk_ptr char_typ
+      | "object" ->
+          (get object_name state).typ
+      | "void" ->
+          Typ.mk Tvoid
+      | _ ->
+          adapter_error "unsupported return type"
+    in
+    call ~object_name ~method_name:(string "method" json) ~parameters:params
+      ~result_name:(opt_string "result" json) ~return_typ state
   else if String.equal op "integer" then
-    [fresh ~name:(string "name" json) ~typ:int_typ ~constant:(integer "value" json) state]
+    [ fresh ~name:(string "name" json)
+        ~typ:(if Poly.equal (J.member "pointer" json) (`Bool true) then ptr_typ else int_typ)
+        ~constant:(integer "value" json) state ]
   else if String.equal op "use" then
     let slot = get (string "name" json) state in
     let address = slot.value in
@@ -329,7 +408,38 @@ let snapshot state =
           [ ("name", `String name)
           ; ("value_id", `String (Format.asprintf "%a" AbstractValue.pp slot.value))
           ; ("invalid", `Bool (invalid state slot.value))
-          ; ("null", `Bool (PulseArithmetic.is_known_zero state.heap slot.value)) ] )
+          ; ("null", `Bool (PulseArithmetic.is_known_zero state.heap slot.value))
+          ; ( "integer_constant"
+            , if Typ.is_int slot.typ then
+                Option.value_map (PulseArithmetic.as_constant_q state.heap slot.value)
+                  ~default:`Null ~f:(fun q -> `String (Q.to_string q) )
+              else `Null )
+          ; ( "possible_null"
+            , `Bool
+                ( match PulseArithmetic.prune_eq_zero slot.value state.heap with
+                | Sat _ ->
+                    true
+                | Unsat _ ->
+                    false ) )
+          ; ( "possible_nonnull"
+            , `Bool
+                ( match PulseArithmetic.prune_ne_zero slot.value state.heap with
+                | Sat _ ->
+                    true
+                | Unsat _ ->
+                    false ) )
+          ; ( "integer_values_0_to_8"
+            , if Typ.is_int slot.typ then
+                `List
+                  ( List.init 9 ~f:Fn.id
+                  |> List.filter ~f:(fun n ->
+                      match PulseArithmetic.and_eq_int slot.value (IntLit.of_int n) state.heap with
+                      | Sat _ ->
+                          true
+                      | Unsat _ ->
+                          false )
+                  |> List.map ~f:(fun n -> `Int n) )
+              else `Null ) ] )
   in
   `Assoc
     [ ("slots", `List slots)
@@ -363,9 +473,39 @@ let run input =
   let initial =
     J.member "objects" input |> J.to_list
     |> List.fold ~init:initial ~f:(fun state obj ->
-        let typ = if String.equal (string "kind" obj) "vector" then vector_name else unique_name in
+        let typ =
+          match string "kind" obj with
+          | "vector" ->
+              vector_name
+          | "unique" ->
+              unique_name
+          | "shared" ->
+              shared_name
+          | "weak" ->
+              weak_name
+          | "string" ->
+              string_name
+          | "view" ->
+              view_name
+          | "optional" ->
+              optional_name
+          | "nested_optional" ->
+              nested_optional_name
+          | _ ->
+              adapter_error "unknown object kind"
+        in
         current_stage := "object:" ^ string "name" obj ;
-        object_ ~name:(string "name" obj) ~typ:(Typ.mk_ptr (Typ.mk (Tstruct typ))) state )
+        let prior = IString.Map.bindings state.slots in
+        let name = string "name" obj in
+        let state = object_ ~name ~typ:(Typ.mk_ptr (Typ.mk (Tstruct typ))) state in
+        let value = (get name state).value in
+        let heap =
+          List.fold prior ~init:state.heap ~f:(fun heap (_, (old : slot)) ->
+              PulseArithmetic.and_not_equal (AbstractValueOperand value)
+                (AbstractValueOperand old.value) heap
+              |> sat_result )
+        in
+        {state with heap} )
   in
   let states, snapshots =
     J.member "operations" input |> J.to_list
