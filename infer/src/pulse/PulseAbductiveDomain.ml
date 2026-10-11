@@ -2875,6 +2875,21 @@ module AddressAttributes = struct
     SafeAttributes.invalidate (CanonValue.canon_fst' astate addr_hist) invalidation location astate
 
 
+  let begin_cpp_lifetime v astate =
+    let v = CanonValue.canon' astate v in
+    match SafeAttributes.find_opt `Post v astate with
+    | Some attrs
+      when Option.exists (Attributes.get_invalid attrs) ~f:(fun (kind, _) ->
+               Invalidation.equal kind CppDelete ) ->
+        let attrs =
+          Attributes.filter attrs ~f:(function Invalid (CppDelete, _) -> false | _ -> true)
+        in
+        SafeAttributes.map_post_attrs astate ~f:(fun memory ->
+            BaseAddressAttributes.add v Attributes.empty memory |> BaseAddressAttributes.add v attrs )
+    | _ ->
+        astate
+
+
   let initialize v astate = SafeAttributes.initialize (CanonValue.canon' astate v) astate
 
   let uninitialize v typ astate =

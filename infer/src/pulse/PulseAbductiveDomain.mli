@@ -246,6 +246,10 @@ module AddressAttributes : sig
 
   val invalidate : AbstractValue.t * ValueHistory.t -> Invalidation.t -> Location.t -> t -> t
 
+  val begin_cpp_lifetime : AbstractValue.t -> t -> t
+  (** Remove only a post-state CppDelete invalidation when the caller has proved same-storage
+      transparent replacement. This does not renew the object's owned pointees. *)
+
   val initialize : AbstractValue.t -> t -> t
   (** Remove "Uninitialized" attribute of the given address *)
 
