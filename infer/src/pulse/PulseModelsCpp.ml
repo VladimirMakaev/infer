@@ -1199,6 +1199,19 @@ module Vector = struct
     AddressAttributes.add_one (fst vector) (StdVectorCapacity capacity) astate
 
 
+  let post_size field value astate =
+    Memory.find_edge_opt (fst value) (FieldAccess field) astate
+    |> Option.bind ~f:(fun (pointer, _) -> Memory.find_edge_opt pointer Dereference astate)
+
+
+  let tracked_positions vector astate =
+    Option.is_some (capacity_lower_bound vector astate)
+    && Option.exists (post_size GenericArrayBackedCollection.size_field vector astate)
+         ~f:(fun (size, _) ->
+           Option.exists (PulseArithmetic.as_constant_q astate size) ~f:(fun size ->
+               Q.compare size Q.zero > 0 ) )
+
+
   let default_constructor vector ~desc : model_no_non_disj =
    fun {path; location} astate ->
     let<**> astate =
@@ -1383,11 +1396,19 @@ module Vector = struct
   let init_list_constructor this init_list ~desc : model_no_non_disj =
    fun {path; location} astate ->
     let astate = record_capacity this None astate in
-    (* missing a more precise model for std::initializer_list *)
+    let size = post_size InitializerList.size_field init_list astate in
     let<**> astate =
-      GenericArrayBackedCollection.assign_size_constant path location this ~constant:IntLit.zero
-        ~desc astate
+      match size with
+      | Some size ->
+          Sat (GenericArrayBackedCollection.assign_size path location this size ~desc astate)
+      | None ->
+          GenericArrayBackedCollection.assign_size_constant path location this ~constant:IntLit.zero
+            ~desc astate
     in
+    let capacity =
+      Option.bind size ~f:(fun (size, _) -> PulseArithmetic.as_constant_q astate size)
+    in
+    let astate = record_capacity this capacity astate in
     let<+> astate = shallow_copy_init_list path location this init_list ~desc astate in
     astate
 
@@ -1399,7 +1420,10 @@ module Vector = struct
 
   let init_copy_constructor this init_vector ~desc : model_no_non_disj =
    fun {path; location; callee_procname} astate ->
-    let astate = record_capacity this None astate in
+    let move = is_move_constructor callee_procname in
+    let astate =
+      record_capacity this (if move then capacity_lower_bound init_vector astate else None) astate
+    in
     let<*> astate, init_list =
       PulseOperations.eval_deref_access path Read location init_vector
         (FieldAccess GenericArrayBackedCollection.field) astate
@@ -1414,15 +1438,33 @@ module Vector = struct
     (* a move keeps the internal array so references to its elements stay valid; a copy also
        copies the elements, otherwise invalidating those of one vector would invalidate the other's *)
     let<*> astate, (copy, _) =
-      if is_move_constructor callee_procname then Ok (astate, init_list)
+      if move then Ok (astate, init_list)
       else PulseOperations.deep_copy ~depth_max:1 path location init_list astate
+    in
+    (* Iterator witnesses belong to the source buffer. A copy gets new elements and must not
+       retain witnesses whose invalidation would affect iterators into the source. *)
+    let astate =
+      if move then astate
+      else
+        let edges =
+          Memory.fold_edges copy astate ~init:UnsafeMemory.Edges.empty
+            ~f:(fun edges (access, value) ->
+              match (access : Access.t) with
+              | FieldAccess field
+                when Fieldname.equal field
+                       GenericArrayBackedCollection.Iterator.vector_positions_field ->
+                  edges
+              | _ ->
+                  UnsafeMemory.Edges.add access value edges )
+        in
+        AbductiveDomain.set_post_edges copy edges astate
     in
     let<*> astate =
       PulseOperations.write_deref_field path location ~ref:this GenericArrayBackedCollection.field
         ~obj:(copy, Hist.add_call path location desc (snd init_list))
         astate
     in
-    if is_move_constructor callee_procname then
+    if move then
       let astate = record_capacity init_vector None astate in
       let<*> astate =
         PulseOperations.havoc_deref_field path location init_vector
@@ -1468,11 +1510,6 @@ module Vector = struct
     let desc = Format.asprintf "%a()" Invalidation.pp_std_vector_function vector_f in
     let<**> astate = GenericArrayBackedCollection.increase_size path location vector ~desc astate in
     invalidate_references vector_f vector model_data astate
-
-
-  let post_size field value astate =
-    Memory.find_edge_opt (fst value) (FieldAccess field) astate
-    |> Option.bind ~f:(fun (pointer, _) -> Memory.find_edge_opt pointer Dereference astate)
 
 
   let assign_known_size vector size ~desc model_data astate =
@@ -1673,7 +1710,7 @@ module Vector = struct
     let<**> astate = PulseArithmetic.and_eq_int index_zero IntLit.zero astate in
     let<+> astate =
       GenericArrayBackedCollection.Iterator.point_into path location event ~collection:vector ~iter
-        ~index:index_zero astate
+        ~index:index_zero ~track_vector_index:(tracked_positions vector astate) astate
     in
     astate
 
@@ -1693,11 +1730,24 @@ module Vector = struct
       PulseOperations.write_deref_field path location ~ref:iter GenericArrayBackedCollection.field
         ~obj:(arr_addr, pointer_hist) astate
     in
-    let<+> astate =
+    let<*> astate =
       PulseOperations.write_field path location ~ref:iter
         GenericArrayBackedCollection.Iterator.internal_pointer ~obj:pointer_val astate
     in
-    astate
+    match post_size GenericArrayBackedCollection.size_field vector astate with
+    | None ->
+        Basic.ok_continue astate
+    | Some _ when not (tracked_positions vector astate) ->
+        Basic.ok_continue astate
+    | Some size ->
+        let<*> astate, position =
+          PulseOperations.eval_access path NoAccess location pointer_val Dereference astate
+        in
+        let<+> astate =
+          GenericArrayBackedCollection.Iterator.record_vector_index path location position size
+            astate
+        in
+        astate
 
 
   let clear_storage vector : model_no_non_disj =
@@ -2088,8 +2138,16 @@ module Vector = struct
           | _ ->
               false
         in
+        let within_bound =
+          match (capacity, size_constant) with
+          | Some capacity, Some size ->
+              Q.compare size capacity <= 0
+          | _ ->
+              false
+        in
+        let skip_reallocation = within_bound || (reserved && not exceeds_bound) in
         let* astate =
-          if reserved && not exceeds_bound then
+          if skip_reallocation then
             (* Unknown growth retains the existing reserve approximation. Its capacity proof is
                forgotten below, so a later reserve cannot silently rely on skipped growth. *)
             Ok astate
@@ -2101,7 +2159,7 @@ module Vector = struct
         (* Write even when the callee has no bound: a caller's bound must not survive unsupported
            summary growth. Successful reallocation establishes capacity >= the resulting size. *)
         let bound =
-          if reserved && not exceeds_bound then
+          if skip_reallocation then
             match (capacity, size_constant) with Some _, Some _ -> capacity | _ -> None
           else if Option.is_some capacity then size_constant
           else None
@@ -2270,25 +2328,34 @@ module Vector = struct
      an offset, whereas [operator[]] uses the index itself, and an element edge of the internal
      array does not say which of the two it uses, so try both. *)
   let is_before_position astate array_edges index position =
+    let logical_position = GenericArrayBackedCollection.Iterator.vector_index position astate in
+    let logical_index = GenericArrayBackedCollection.Iterator.vector_index index astate in
     let provably_lt astate lhs =
       PulseArithmetic.prune_binop ~negated:false Ge (AbstractValueOperand lhs)
         (AbstractValueOperand position) astate
       |> SatUnsat.sat |> Option.is_none
     in
-    provably_lt astate index
-    || List.exists array_edges ~f:(fun (access, (first, _)) ->
-        match (access : Access.t) with
-        | ArrayAccess (_, zero) when PulseArithmetic.is_known_zero astate zero -> (
-          match
-            PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) (PlusA None)
-              (AbstractValueOperand first) (AbstractValueOperand index) astate
-          with
-          | Sat (Ok (astate, offset_from_first)) ->
-              provably_lt astate offset_from_first
-          | Sat (Recoverable _ | FatalError _) | Unsat _ ->
-              false )
-        | _ ->
-            false )
+    match logical_position with
+    | Some (position, _) ->
+        let index = Option.value_map logical_index ~default:index ~f:fst in
+        PulseArithmetic.prune_binop ~negated:false Ge (AbstractValueOperand index)
+          (AbstractValueOperand position) astate
+        |> SatUnsat.sat |> Option.is_none
+    | None ->
+        provably_lt astate index
+        || List.exists array_edges ~f:(fun (access, (first, _)) ->
+            match (access : Access.t) with
+            | ArrayAccess (_, zero) when PulseArithmetic.is_known_zero astate zero -> (
+              match
+                PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) (PlusA None)
+                  (AbstractValueOperand first) (AbstractValueOperand index) astate
+              with
+              | Sat (Ok (astate, offset_from_first)) ->
+                  provably_lt astate offset_from_first
+              | Sat (Recoverable _ | FatalError _) | Unsat _ ->
+                  false )
+            | _ ->
+                false )
 
 
   (** [erase] does not reallocate: the elements before [position] stay where they are and the others
@@ -2304,6 +2371,23 @@ module Vector = struct
     in
     let+ astate, new_array =
       GenericArrayBackedCollection.eval path NoAccess location vector astate
+    in
+    let astate =
+      match GenericArrayBackedCollection.Iterator.vector_positions (fst old_array) astate with
+      | None ->
+          astate
+      | Some registry ->
+          let astate =
+            Memory.fold_edges (fst registry) astate ~init:astate
+              ~f:(fun astate (_, (index, hist)) ->
+                if is_before_position astate [] index position then astate
+                else
+                  PulseOperations.invalidate path UntraceableAccess location (StdVector Erase)
+                    (index, hist) astate )
+          in
+          Memory.add_edge path new_array
+            (FieldAccess GenericArrayBackedCollection.Iterator.vector_positions_field) registry
+            location astate
     in
     let array_edges = Memory.fold_edges (fst old_array) astate ~init:[] ~f:(Fn.flip List.cons) in
     List.fold array_edges ~init:astate ~f:(fun astate (access, elem) ->
@@ -2335,19 +2419,89 @@ module Vector = struct
     let<*> astate, (position, _) =
       PulseOperations.eval_access path Read location pointer Dereference astate
     in
+    let logical_position = GenericArrayBackedCollection.Iterator.vector_index position astate in
     let<*> astate = erase_from path location event vector position astate in
-    (* the returned iterator is at the erased position, unless that position is the one of
+    match logical_position with
+    | Some (index, _) ->
+        let<+> astate =
+          GenericArrayBackedCollection.Iterator.point_into path location event ~collection:vector
+            ~iter ~index ~track_vector_index:true astate
+        in
+        astate
+    | None ->
+        (* the returned iterator is at the erased position, unless that position is the one of
        [begin()] and was invalidated above as the element at index 0 *)
-    if
-      AddressAttributes.find_opt `Post position astate
-      |> Option.exists ~f:(fun attrs -> Attributes.get_invalid attrs |> Option.is_some)
-    then vector_begin ~desc vector iter model_data astate
+        if
+          AddressAttributes.find_opt `Post position astate
+          |> Option.exists ~f:(fun attrs -> Attributes.get_invalid attrs |> Option.is_some)
+        then vector_begin ~desc vector iter model_data astate
+        else
+          let<+> astate =
+            GenericArrayBackedCollection.Iterator.point_at path location event ~collection:vector
+              ~iter ~position astate
+          in
+          astate
+
+
+  let insert_one vector first iter : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let desc = "std::vector::insert()" in
+    let no_reallocation =
+      match
+        ( capacity_lower_bound vector astate
+        , post_size GenericArrayBackedCollection.size_field vector astate )
+      with
+      | Some capacity, Some (size, _) ->
+          Option.exists (PulseArithmetic.as_constant_q astate size) ~f:(fun size ->
+              Q.compare (Q.add size Q.one) capacity <= 0 )
+      | _ ->
+          false
+    in
+    if not no_reallocation then invalidate_references_one_more Insert vector model_data astate
     else
-      let<+> astate =
-        GenericArrayBackedCollection.Iterator.point_at path location event ~collection:vector ~iter
-          ~position astate
+      let<*> astate, pointer =
+        GenericArrayBackedCollection.Iterator.to_internal_pointer path Read location first astate
       in
-      astate
+      let<*> astate, position =
+        PulseOperations.eval_access path Read location pointer Dereference astate
+      in
+      let at_end =
+        AddressAttributes.is_end_of_collection (fst pointer) astate
+        && Option.exists
+             (GenericArrayBackedCollection.Iterator.vector_index (fst position) astate)
+             ~f:(fun (index, _) ->
+               Option.exists (post_size GenericArrayBackedCollection.size_field vector astate)
+                 ~f:(fun (size, _) ->
+                   PulseArithmetic.prune_binop ~negated:false Ne (AbstractValueOperand index)
+                     (AbstractValueOperand size) astate
+                   |> SatUnsat.sat |> Option.is_none ) )
+      in
+      if not at_end then invalidate_references_one_more Insert vector model_data astate
+      else
+        let old_size =
+          post_size GenericArrayBackedCollection.size_field vector astate |> Option.value_exn
+        in
+        let<**> astate =
+          GenericArrayBackedCollection.increase_size path location vector ~desc astate
+        in
+        (* An insertion at end with spare capacity keeps every element in place. Only the old
+           past-the-end iterator is invalidated; a new one has a fresh position. *)
+        let astate =
+          PulseOperations.invalidate path UntraceableAccess location (StdVector Insert) position
+            astate
+        in
+        let<*> astate =
+          PulseOperations.havoc_deref_field path location vector
+            GenericArrayBackedCollection.last_field
+            (Hist.single_call path location desc)
+            astate
+        in
+        let event = Hist.call_event path location desc in
+        let<+> astate =
+          GenericArrayBackedCollection.Iterator.point_into path location event ~collection:vector
+            ~iter ~index:(fst old_size) ~track_vector_index:true astate
+        in
+        astate
 end
 
 module GenericMapCollection = struct
@@ -3203,6 +3357,9 @@ let simple_matchers =
     ; -"std" &:: "__atomic_base"
       &::+ (fun _ name -> String.is_prefix ~prefix:"operator_" name)
       <>$ capt_arg_payload $+? capt_arg_payload $--> AtomicInteger.operator_t |> with_non_disj
+    ; -"std" &:: "as_const" $ capt_arg_payload
+      $--> Basic.id_first_arg ~desc:"std::as_const()"
+      |> with_non_disj
     ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+...$--> Std.make_move_iterator
       |> with_non_disj
     ; -"std" &:: "make_pair" < capt_typ &+ capt_typ >$ capt_arg_payload $+ capt_arg_payload
@@ -3281,9 +3438,8 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ any_arg
       $+ any_arg $--> Vector.insert_count |> with_non_disj
     ; (* [insert(pos, value)], the returned iterator is passed as the last argument *)
-      -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ any_arg $+ any_arg
-      $--> Vector.invalidate_references_one_more Insert
-      |> with_non_disj
+      -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ capt_arg_payload $+ any_arg
+      $+ capt_arg_payload $--> Vector.insert_one |> with_non_disj
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_unknown_size Insert
       |> with_non_disj
