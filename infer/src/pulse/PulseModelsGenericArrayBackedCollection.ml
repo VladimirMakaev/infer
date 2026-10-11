@@ -139,6 +139,73 @@ module Iterator = struct
     (astate, pointer, index)
 
 
+  (* Logical vector positions are separate from the pointer-like values used by iterator models.
+     Keep them behind a cell so deleting a pointee never invalidates an integer constant. *)
+  let vector_index_field = Fieldname.make PulseOperations.pulse_model_type "__infer_vector_index"
+
+  let vector_index position astate =
+    Memory.find_edge_opt position (FieldAccess vector_index_field) astate
+    |> Option.bind ~f:(fun (cell, _) -> Memory.find_edge_opt cell Dereference astate)
+
+
+  let record_vector_index _path _location (position, hist) index astate =
+    (* This is model bookkeeping, not a write through the source-level iterator. *)
+    let cell = AbstractValue.mk_fresh () in
+    let edges =
+      Memory.fold_edges position astate ~init:UnsafeMemory.Edges.empty
+        ~f:(fun edges (access, value) -> UnsafeMemory.Edges.add access value edges )
+      |> UnsafeMemory.Edges.add (FieldAccess vector_index_field) (cell, hist)
+    in
+    let astate = AbductiveDomain.set_post_edges position edges astate in
+    Ok
+      (AbductiveDomain.set_post_edges cell
+         (UnsafeMemory.Edges.add Dereference index UnsafeMemory.Edges.empty)
+         astate )
+
+
+  let vector_positions_field =
+    Fieldname.make PulseOperations.pulse_model_type "__infer_vector_positions"
+
+
+  let vector_positions array astate =
+    Memory.find_edge_opt array (FieldAccess vector_positions_field) astate
+
+
+  let register_vector_position array position history astate =
+    if Option.is_none (vector_index position astate) then astate
+    else
+      let astate, registry =
+        match vector_positions array astate with
+        | Some (registry, _) ->
+            (astate, registry)
+        | None ->
+            let registry = AbstractValue.mk_fresh () in
+            let edges =
+              Memory.fold_edges array astate ~init:UnsafeMemory.Edges.empty
+                ~f:(fun edges (access, value) -> UnsafeMemory.Edges.add access value edges )
+              |> UnsafeMemory.Edges.add (FieldAccess vector_positions_field) (registry, history)
+            in
+            (AbductiveDomain.set_post_edges array edges astate, registry)
+      in
+      let edges =
+        Memory.fold_edges registry astate ~init:UnsafeMemory.Edges.empty
+          ~f:(fun edges (access, value) -> UnsafeMemory.Edges.add access value edges )
+        |> UnsafeMemory.Edges.add (ArrayAccess (StdTyp.void, position)) (position, history)
+      in
+      AbductiveDomain.set_post_edges registry edges astate
+
+
+  let offset_vector_index path location old_position binop operand new_position history astate =
+    match vector_index old_position astate with
+    | None ->
+        Sat (Ok astate)
+    | Some (index, hist) ->
+        PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) binop (AbstractValueOperand index)
+          operand astate
+        >>|= fun (astate, index) ->
+        record_vector_index path location (new_position, history) (index, hist) astate
+
+
   let check_not_end location ?index pointer astate =
     if
       AddressAttributes.is_end_of_collection (fst pointer) astate
@@ -206,7 +273,7 @@ module Iterator = struct
     >>= PulseOperations.write_deref path location ~ref:pointer ~obj:position
 
 
-  let point_into path location event ~collection ~iter ?index astate =
+  let point_into path location event ~collection ~iter ?index ?(track_vector_index = false) astate =
     let pointer_hist = Hist.add_event event (snd iter) in
     let* astate, (arr_addr, _arr_hist) = eval path Read location collection astate in
     let* astate, position =
@@ -218,7 +285,12 @@ module Iterator = struct
              pre-condition of every caller when the collection is a parameter *)
           Ok (astate, (AbstractValue.mk_fresh (), pointer_hist))
     in
-    write_position path location ~iter ~arr:arr_addr ~position pointer_hist astate
+    let* astate = write_position path location ~iter ~arr:arr_addr ~position pointer_hist astate in
+    match index with
+    | Some index when track_vector_index ->
+        record_vector_index path location position (index, pointer_hist) astate
+    | Some _ | None ->
+        Ok astate
 
 
   let point_at path location event ~collection ~iter ~position astate =
@@ -299,7 +371,9 @@ module Iterator = struct
       PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) binop (AbstractValueOperand index) n
         astate
     in
+    let** astate = offset_vector_index path location index binop n position (snd dst) astate in
     let=* astate, (arr_addr, _) = eval path Read location src astate in
+    let astate = register_vector_position arr_addr position (snd dst) astate in
     let pointer_hist = Hist.add_event event (snd dst) in
     let=* astate =
       write_position path location ~iter:dst ~arr:arr_addr ~position:(position, pointer_hist)
@@ -472,6 +546,18 @@ module Iterator = struct
     let<**> astate, index_new =
       PulseArithmetic.eval_binop (AbstractValue.mk_fresh ()) binop (AbstractValueOperand index)
         (ConstOperand (Cint IntLit.one)) astate
+    in
+    let<**> astate =
+      offset_vector_index path location index binop (ConstOperand (Cint IntLit.one)) index_new
+        (snd pointer) astate
+    in
+    let<*> astate =
+      match vector_index index_new astate with
+      | None ->
+          Ok astate
+      | Some _ ->
+          let+ astate, (array, _) = eval path Read location iter astate in
+          register_vector_position array index_new (snd pointer) astate
     in
     (* the internal pointer is shared with the copies of the iterator, and with the other [end()]
        iterators of the collection, so we replace it instead of writing through it *)

@@ -102,8 +102,8 @@ int size3_ok() {
   return 0;
 }
 
-// missing a more precise model for std::initializer_list
-int FP_size4_ok() {
+// Initializer-list metadata supplies the vector size.
+int size4_ok() {
   std::vector<int> v{0, 42};
   if (v.size() != 2) {
     int* q = nullptr;
