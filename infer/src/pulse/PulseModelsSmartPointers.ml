@@ -1202,28 +1202,37 @@ let matchers : matcher list =
     -"std" &:: "unique_ptr" &:: "unique_ptr" $ capt_arg_payload
     $--> UniquePtr.default_constructor ~desc:"std::unique_ptr::unique_ptr()"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.unique_ptr.1"
   ; -"std" &:: "unique_ptr" &:: "unique_ptr" $ capt_arg
     $+ capt_arg_payload_of_typ (-"std" &:: "unique_ptr")
     $--> UniquePtr.move_constructor ~desc:"std::unique_ptr::unique_ptr(std::unique_ptr<T>)"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.unique_ptr.2"
   ; -"std" &:: "unique_ptr" &:: "operator=" $ capt_arg
     $+ capt_arg_payload_of_typ (-"std" &:: "unique_ptr")
     $--> UniquePtr.move_assignment ~desc:"std::unique_ptr::operator=(std::unique_ptr<T>)"
+    |> observe_matcher ~rule:"std.unique_ptr.assign.1"
   ; -"std" &:: "unique_ptr" &:: "unique_ptr" $ capt_arg_payload $+ capt_arg_payload
     $--> UniquePtr.assign_pointer ~desc:"std::unique_ptr::unique_ptr(T*)"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.unique_ptr.3"
   ; -"std" &:: "unique_ptr" &:: "unique_ptr" $ capt_arg $+ capt_arg_payload $+ capt_arg_payload
     $--> UniquePtr.assign_pointer_and_deleter ~desc:"std::unique_ptr::unique_ptr(T*, D)"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.unique_ptr.4"
   ; -"std" &:: "unique_ptr" &:: "~unique_ptr" $ capt_arg
     $--> UniquePtr.destructor ~desc:"std::unique_ptr::~unique_ptr()"
+    |> observe_matcher ~rule:"std.unique_ptr.destructor.1"
   ; -"std" &:: "unique_ptr" &:: "reset" $ capt_arg
     $--> UniquePtr.default_reset ~desc:"std::unique_ptr::reset()"
+    |> observe_matcher ~rule:"std.unique_ptr.reset.1"
   ; -"std" &:: "unique_ptr" &:: "reset" $ capt_arg $+ capt_arg_payload
     $--> UniquePtr.reset ~desc:"std::unique_ptr::reset(T*)"
+    |> observe_matcher ~rule:"std.unique_ptr.reset.2"
   ; -"std" &:: "unique_ptr" &:: "release" $ capt_arg_payload
     $--> UniquePtr.release ~desc:"std::unique_ptr::release()"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.release.1"
   ; -"std" &:: "unique_ptr" &:: "get_deleter" $ capt_arg_payload
     $--> UniquePtr.get_deleter ~desc:"std::unique_ptr::get_deleter()"
     |> with_non_disj
@@ -1233,15 +1242,19 @@ let matchers : matcher list =
   ; -"std" &:: "unique_ptr" &:: "get" $ capt_arg_payload
     $--> get ~desc:"std::unique_ptr::get()"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.get.1"
   ; -"std" &:: "unique_ptr" &:: "operator*" $ capt_arg_payload
     $--> dereference ~desc:"std::unique_ptr::operator*()"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.dereference.1"
   ; -"std" &:: "unique_ptr" &:: "operator->" <>$ capt_arg_payload
     $--> dereference ~desc:"std::unique_ptr::operator->()"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.arrow.1"
   ; -"std" &:: "unique_ptr" &:: "swap" $ capt_arg $+ capt_arg_payload
     $--> UniquePtr.swap ~desc:"std::unique_ptr::swap(std::unique_ptr<T>)"
     |> with_non_disj
+    |> observe_matcher ~rule:"std.unique_ptr.swap.1"
   ; -"std" &:: "unique_ptr" &:: "operator_bool" <>$ capt_arg_payload
     $--> operator_bool ~desc:"std::unique_ptr::operator_bool()"
     |> with_non_disj
