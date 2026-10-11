@@ -1160,6 +1160,32 @@ module InitializerList = struct
 end
 
 module Vector = struct
+  (* This is a lower bound, not an exact capacity. Only concrete bounds are retained: symbolic
+     growth keeps the existing reserved-vector approximation without adding summary preconditions. *)
+  let capacity_lower_bound vector astate =
+    AddressAttributes.find_opt `Post (fst vector) astate
+    |> Option.bind ~f:Attributes.get_std_vector_capacity
+    |> Option.join
+    |> Option.map ~f:(fun capacity -> Q.of_bigint (IntLit.to_big_int capacity))
+
+
+  let record_capacity vector capacity astate =
+    let capacity =
+      Option.bind capacity ~f:(fun capacity ->
+          if Z.equal (Q.den capacity) Z.one then Some (IntLit.of_big_int (Q.num capacity)) else None )
+    in
+    AddressAttributes.add_one (fst vector) (StdVectorCapacity capacity) astate
+
+
+  let default_constructor vector ~desc : model_no_non_disj =
+   fun {path; location} astate ->
+    let<**> astate =
+      GenericArrayBackedCollection.assign_size_constant path location vector ~constant:IntLit.zero
+        ~desc astate
+    in
+    record_capacity vector (Some Q.zero) astate |> Basic.ok_continue
+
+
   let invalidate_element path location cause element astate =
     let addresses =
       AbductiveDomain.reachable_addresses_from
@@ -1175,6 +1201,7 @@ module Vector = struct
 
   let destroy_storage vector : model_no_non_disj =
    fun {path; location} astate ->
+    let astate = record_capacity vector None astate in
     let<+> astate, array = GenericArrayBackedCollection.eval path NoAccess location vector astate in
     invalidate_element path location (StdVector Destructor) array astate
 
@@ -1290,9 +1317,30 @@ module Vector = struct
         lift_model (destroy_storage vector) model_data astate non_disj )
 
 
-  let reallocate_internal_array path trace vector vector_f location astate =
+  let reallocate_internal_array path trace vector (vector_f : Invalidation.std_vector_function)
+      location astate =
     let* astate, array_address =
       GenericArrayBackedCollection.eval path NoAccess location vector astate
+    in
+    let astate =
+      match vector_f with
+      | Clear ->
+          astate
+      | ShrinkToFit ->
+          let tracked = Option.is_some (capacity_lower_bound vector astate) in
+          let size =
+            Memory.find_edge_opt (fst vector) (FieldAccess GenericArrayBackedCollection.size_field)
+              astate
+            |> Option.bind ~f:(fun (pointer, _) -> Memory.find_edge_opt pointer Dereference astate)
+          in
+          let capacity =
+            if tracked then
+              Option.bind size ~f:(fun (size, _) -> PulseArithmetic.as_constant_q astate size)
+            else None
+          in
+          record_capacity vector capacity astate
+      | _ ->
+          record_capacity vector None astate
     in
     PulseOperations.invalidate_array_elements path location (StdVector vector_f) array_address
       astate
@@ -1312,6 +1360,7 @@ module Vector = struct
 
   let init_list_constructor this init_list ~desc : model_no_non_disj =
    fun {path; location} astate ->
+    let astate = record_capacity this None astate in
     (* missing a more precise model for std::initializer_list *)
     let<**> astate =
       GenericArrayBackedCollection.assign_size_constant path location this ~constant:IntLit.zero
@@ -1328,6 +1377,7 @@ module Vector = struct
 
   let init_copy_constructor this init_vector ~desc : model_no_non_disj =
    fun {path; location; callee_procname} astate ->
+    let astate = record_capacity this None astate in
     let<*> astate, init_list =
       PulseOperations.eval_deref_access path Read location init_vector
         (FieldAccess GenericArrayBackedCollection.field) astate
@@ -1351,6 +1401,7 @@ module Vector = struct
         astate
     in
     if is_move_constructor callee_procname then
+      let astate = record_capacity init_vector None astate in
       let<*> astate =
         PulseOperations.havoc_deref_field path location init_vector
           GenericArrayBackedCollection.field
@@ -1438,6 +1489,7 @@ module Vector = struct
             GenericArrayBackedCollection.assign_size path location vector size
               ~desc:"std::vector::operator=()" astate
           in
+          let astate = record_capacity rhs.arg_payload None astate in
           let<*> astate =
             PulseOperations.havoc_deref_field path location rhs.arg_payload
               GenericArrayBackedCollection.field
@@ -1546,14 +1598,43 @@ module Vector = struct
         lift_model (clear_storage vector) model_data astate non_disj )
 
 
-  let reserve vector : model_no_non_disj =
+  let rec is_integer_literal = function
+    | Exp.Const (Cint _) ->
+        true
+    | Exp.Cast (_, exp) ->
+        is_integer_literal exp
+    | _ ->
+        false
+
+
+  let reserve vector (requested : _ FuncArg.t) : model_no_non_disj =
    fun {path; location} astate ->
-    let hist = Hist.single_call path location "std::vector::reserve()" in
-    let<+> astate =
-      reallocate_internal_array path hist vector Reserve location astate
-      >>| AddressAttributes.std_vector_reserve (fst vector)
+    let capacity = capacity_lower_bound vector astate in
+    (* Other vector models can understate size (notably initializer-list construction). Do not
+       prove a no-op from an arithmetic result or establish a growth bound on an untracked size. *)
+    let requested_constant =
+      if is_integer_literal requested.exp then
+        PulseArithmetic.as_constant_q astate (fst requested.arg_payload)
+      else None
     in
-    astate
+    let no_reallocation =
+      match (capacity, requested_constant) with
+      | Some capacity, Some requested ->
+          Q.compare requested Q.zero >= 0 && Q.compare requested capacity <= 0
+      | _ ->
+          false
+    in
+    if no_reallocation then Basic.ok_continue astate
+    else
+      let hist = Hist.single_call path location "std::vector::reserve()" in
+      let<+> astate =
+        reallocate_internal_array path hist vector Reserve location astate
+        >>| AddressAttributes.std_vector_reserve (fst vector)
+      in
+      let bound =
+        match (capacity, requested_constant) with Some _, Some _ -> requested_constant | _ -> None
+      in
+      record_capacity vector bound astate
 
 
   let pop_storage vector ~desc : model_no_non_disj =
@@ -1596,20 +1677,47 @@ module Vector = struct
         finish astate non_disj
 
 
-  let reallocate_unless_reserved path location vector vector_f ~desc astate =
-    if AddressAttributes.is_std_vector_reserved (fst vector) astate then
-      (* assume that growing the vector is ok after one called [reserve] on the same vector (a
-         perfect analysis would also make sure we don't exceed the reserved size) *)
-      Ok astate
-    else
-      match vector_f with
-      | None ->
-          Ok astate
-      | Some vector_f ->
-          (* simulate a re-allocation of the underlying array every time the vector grows *)
-          reallocate_internal_array path
-            (Hist.single_call path location desc)
-            vector vector_f location astate
+  let reallocate_unless_reserved ?size path location vector vector_f ~desc astate =
+    match vector_f with
+    | None ->
+        Ok astate
+    | Some vector_f ->
+        let capacity = capacity_lower_bound vector astate in
+        let* astate, size =
+          match size with
+          | Some size ->
+              Ok (astate, size)
+          | None ->
+              GenericArrayBackedCollection.to_internal_size_deref path Read location vector astate
+        in
+        let size_constant = PulseArithmetic.as_constant_q astate (fst size) in
+        let reserved = AddressAttributes.is_std_vector_reserved (fst vector) astate in
+        let exceeds_bound =
+          match (capacity, size_constant) with
+          | Some capacity, Some size ->
+              Q.compare size capacity > 0
+          | _ ->
+              false
+        in
+        let* astate =
+          if reserved && not exceeds_bound then
+            (* Unknown growth retains the existing reserve approximation. Its capacity proof is
+               forgotten below, so a later reserve cannot silently rely on skipped growth. *)
+            Ok astate
+          else
+            reallocate_internal_array path
+              (Hist.single_call path location desc)
+              vector vector_f location astate
+        in
+        (* Write even when the callee has no bound: a caller's bound must not survive unsupported
+           summary growth. Successful reallocation establishes capacity >= the resulting size. *)
+        let bound =
+          if reserved && not exceeds_bound then
+            match (capacity, size_constant) with Some _, Some _ -> capacity | _ -> None
+          else if Option.is_some capacity then size_constant
+          else None
+        in
+        Ok (record_capacity vector bound astate)
 
 
   let is_scalar typ = Typ.is_int typ || Typ.is_pointer typ
@@ -1740,8 +1848,12 @@ module Vector = struct
     PulseOperations.write_id ret_id (elem, Hist.single_call path location desc) astate
 
 
-  let resize vector size : model_no_non_disj =
+  let resize vector (requested : _ FuncArg.t) : model_no_non_disj =
    fun {path; location} astate ->
+    let size = requested.arg_payload in
+    let astate =
+      if is_integer_literal requested.exp then astate else record_capacity vector None astate
+    in
     let desc = "std::vector::resize()" in
     let<*> astate, (old_size, _) =
       GenericArrayBackedCollection.to_internal_size_deref path Read location vector astate
@@ -1755,7 +1867,8 @@ module Vector = struct
       |> SatUnsat.sat |> Option.is_some
     in
     let<*> astate =
-      if may_grow then reallocate_unless_reserved path location vector (Some Resize) ~desc astate
+      if may_grow then
+        reallocate_unless_reserved ~size path location vector (Some Resize) ~desc astate
       else Ok astate
     in
     let<+> astate =
@@ -2708,7 +2821,7 @@ let simple_matchers =
     ; -"std" &:: "make_pair" < capt_typ &+ capt_typ >$ capt_arg_payload $+ capt_arg_payload
       $+ capt_arg_payload $--> Pair.make_pair |> with_non_disj
     ; -"std" &:: "vector" &:: "vector" $ capt_arg_payload
-      $--> GenericArrayBackedCollection.default_constructor ~desc:"std::vector::vector()"
+      $--> Vector.default_constructor ~desc:"std::vector::vector()"
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.vector.1"
     ; -"std" &:: "vector" &:: "vector" <>$ capt_arg_payload
@@ -2803,11 +2916,11 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "empty" <>$ capt_arg_payload
       $--> GenericArrayBackedCollection.empty ~desc:"std::vector::is_empty()"
       |> with_non_disj
-    ; -"std" &:: "vector" &:: "reserve" <>$ capt_arg_payload $+...$--> Vector.reserve
+    ; -"std" &:: "vector" &:: "reserve" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.reserve
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.reserve.1"
-    ; -"std" &:: "vector" &:: "resize" <>$ capt_arg_payload $+ capt_arg_payload
-      $+...$--> Vector.resize |> with_non_disj
+    ; -"std" &:: "vector" &:: "resize" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.resize
+      |> with_non_disj
       |> observe_matcher ~rule:"std.vector.resize.1"
     ; -"std" &:: "vector" &:: "size" $ capt_arg_payload
       $--> GenericArrayBackedCollection.size ~desc:"std::vector::size()"
