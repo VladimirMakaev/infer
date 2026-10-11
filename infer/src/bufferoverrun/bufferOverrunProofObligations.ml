@@ -864,20 +864,38 @@ module ConditionSet = struct
 
   let check_one cwt = (cwt, ConditionWithTrace.check cwt)
 
-  let add_opt location val_traces latest_prune condset = function
+  let add_opt ?(report_symbolic = false) location val_traces latest_prune condset = function
     | None ->
         condset
     | Some cond ->
         let trace = ConditionTrace.make location val_traces in
         let cwt = ConditionWithTrace.make cond trace latest_prune in
-        join_one condset (check_one cwt)
+        let checked = ConditionWithTrace.check cwt in
+        let checked =
+          match checked.report_issue_type with
+          | SymbolicIssue when report_symbolic ->
+              {checked with report_issue_type= Issue IssueType.buffer_overrun_l2}
+          | Issue issue_type
+            when report_symbolic && IssueType.equal issue_type IssueType.buffer_overrun_l4 ->
+              {checked with report_issue_type= Issue IssueType.buffer_overrun_l2}
+          | _ ->
+              checked
+        in
+        join_one condset (cwt, checked)
 
 
-  let add_array_access location ~offset ~idx ~size ~last_included ~idx_traces ~arr_traces
-      ~latest_prune condset =
+  let add_array_access ?(report_symbolic = false) location ~offset ~idx ~size ~last_included
+      ~idx_traces ~arr_traces ~latest_prune condset =
+    (* Opted-in models may report an unchecked byte index, but not an unknown extent or pointer
+       offset. Keep the original symbolic condition so callers can still prove an access safe. *)
+    let report_symbolic =
+      report_symbolic && ItvPure.is_zero offset
+      && Option.exists (Itv.get_const (NonBottom size)) ~f:(fun n ->
+          Z.gt n Z.zero && Z.lt n (Z.of_int 256) )
+    in
     ArrayAccessCondition.make ~offset ~idx ~size ~last_included
     |> Condition.make_array_access
-    |> add_opt location
+    |> add_opt ~report_symbolic location
          (ValTrace.Issue.(binary location ArrayAccess) idx_traces arr_traces)
          latest_prune condset
 
