@@ -17,6 +17,10 @@ exception AdapterError of string
 
 let adapter_error reason = raise (AdapterError reason)
 
+exception AdapterRefusal of string
+
+let adapter_refusal reason = raise (AdapterRefusal reason)
+
 type slot = {value: AbstractValue.t; typ: Typ.t; exp: Exp.t}
 
 type state = {heap: Domain.t; slots: slot IString.Map.t; errors: string list}
@@ -66,7 +70,13 @@ let opt_string key json = J.member key json |> J.to_string_option
 
 let integer key json = J.member key json |> J.to_int
 
-let get name state = IString.Map.find_opt name state.slots |> Option.value_exn
+let get name state =
+  match IString.Map.find_opt name state.slots with
+  | Some slot ->
+      slot
+  | None ->
+      adapter_error ("missing binding: " ^ name)
+
 
 let bind name slot state = {state with slots= IString.Map.add name slot state.slots}
 
@@ -109,7 +119,7 @@ let proc_desc = Procdesc.from_proc_attributes proc_attrs
 
 let unsupported_call _data _path _ret _exp _args _loc _flags heap non_disj _callee =
   ignore (heap, non_disj) ;
-  adapter_error "unsupported_direct_callback"
+  adapter_refusal "unsupported_direct_callback"
 
 
 let analysis_data : PulseSummary.t InterproceduralAnalysis.t =
@@ -164,7 +174,7 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
   | None ->
       PulseTestObservability.call ~caller ~callee:(Some callee) ~loc:location ~route:"unknown"
         ~reason:"direct_model_unavailable" ;
-      [{state with errors= ("unsupported_model:" ^ method_name) :: state.errors}]
+      adapter_refusal ("unsupported_model:" ^ method_name)
   | Some model ->
       PulseTestObservability.call ~caller ~callee:(Some callee) ~loc:location ~route:"model"
         ~reason:"direct_model_dispatch" ;
@@ -204,7 +214,7 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
                         {value; typ= return_typ; exp= Exp.Var (Ident.create_fresh Ident.knormal)}
                         state
                   | None ->
-                      {state with errors= "missing_return" :: errors} )
+                      adapter_refusal ("missing_model_return:" ^ name) )
           | Some (PulseExecutionDomain.ExceptionRaised _) ->
               {state with errors= "exception" :: errors}
           | Some (PulseExecutionDomain.Stopped _) | None ->
@@ -526,20 +536,26 @@ let run input =
 
 let () =
   let input = In_channel.input_all In_channel.stdin |> Yojson.Basic.from_string in
-  let failed = ref false in
+  let exit_status = ref 0 in
+  let failure status reason =
+    Yojson.Basic.Util.(
+      `Assoc
+        [ ("schema_version", `Int 1)
+        ; ("case_id", member "case_id" input)
+        ; ("status", `String status)
+        ; ("stage", `String !current_stage)
+        ; ("reason", `String reason) ] )
+  in
   let output =
-    try run input
-    with exn ->
-      failed := true ;
-      Yojson.Basic.Util.(
-        `Assoc
-          [ ("schema_version", `Int 1)
-          ; ("case_id", member "case_id" input)
-          ; ("status", `String "adapter_failure")
-          ; ("stage", `String !current_stage)
-          ; ("reason", `String (Exn.to_string exn)) ] )
+    try run input with
+    | AdapterRefusal reason ->
+        exit_status := 2 ;
+        failure "adapter_refusal" reason
+    | exn ->
+        exit_status := 1 ;
+        failure "adapter_failure" (Exn.to_string exn)
   in
   Yojson.Basic.to_channel Out_channel.stdout output ;
   Out_channel.newline Out_channel.stdout ;
   Out_channel.flush Out_channel.stdout ;
-  if !failed then Stdlib.exit 1
+  if not (Int.equal !exit_status 0) then Stdlib.exit !exit_status
