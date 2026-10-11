@@ -208,6 +208,8 @@ let join_one_sided_attribute (attr : Attribute.t) =
     attr
   in
   match attr with
+  | Attribute.StdVectorCapacity _ ->
+      Some (Attribute.StdVectorCapacity None)
   | AlwaysReachable
   (* maybe we want to be more forgiving, at least we get a closure to call even if it comes from
      just one branch? *)
@@ -285,6 +287,13 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
   | StdMoved, StdMoved
   | StdVectorReserve, StdVectorReserve ->
       Some attr1
+  | Attribute.StdVectorCapacity capacity1, Attribute.StdVectorCapacity capacity2 ->
+      let capacity =
+        Option.both capacity1 capacity2
+        |> Option.map ~f:(fun (left, right) ->
+            if IntLit.compare left right <= 0 then left else right )
+      in
+      Some (Attribute.StdVectorCapacity capacity)
   | AddressOfCppTemporary (var1, hist1), AddressOfCppTemporary (var2, hist2) ->
       if Var.equal var1 var2 then
         let hist = join_histories hist1 hist2 in

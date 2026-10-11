@@ -240,7 +240,7 @@ void reserve_then_push_back_ok(std::vector<int>& vec) {
   std::cout << *elt << "\n";
 }
 
-void FN_reserve_too_small_bad() {
+void reserve_too_small_bad() {
   std::vector<int> vec;
   vec.reserve(1);
   vec.push_back(32);

@@ -197,6 +197,7 @@ type t =
   | UsedAsBranchCond of Procname.t * Location.t * Trace.t
   | WrittenTo of Timestamp.t * Trace.t
   | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
+  | StdVectorCapacity of IntLit.t option
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -297,6 +298,8 @@ module Attributes : sig
   val is_std_moved : t -> bool
 
   val is_std_vector_reserved : t -> bool
+
+  val get_std_vector_capacity : t -> IntLit.t option option
 
   val get_std_vector_erased : t -> Trace.t option
 

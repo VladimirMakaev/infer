@@ -271,6 +271,7 @@ module Attribute = struct
     | UsedAsBranchCond of Procname.t * Location.t * Trace.t
     | WrittenTo of Timestamp.t * Trace.t
     | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
+    | StdVectorCapacity of IntLit.t option
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -342,6 +343,8 @@ module Attribute = struct
   let std_moved_rank = Variants.stdmoved.rank
 
   let std_vector_erased_rank = Variants.stdvectorerased.rank
+
+  let std_vector_capacity_rank = Variants.stdvectorcapacity.rank
 
   let std_vector_reserve_rank = Variants.stdvectorreserve.rank
 
@@ -458,6 +461,8 @@ module Attribute = struct
         F.fprintf f "StdVectorErased(@[%a@])"
           (Trace.pp ~pp_immediate:(pp_string_if_debug "erased"))
           trace
+    | StdVectorCapacity capacity ->
+        F.fprintf f "StdVectorCapacity(%a)" (Pp.option IntLit.pp) capacity
     | StdVectorReserve ->
         F.pp_print_string f "std::vector::reserve()"
     | Tainted tainted ->
@@ -518,6 +523,7 @@ module Attribute = struct
     | StaticType _
     | StdMoved
     | StdVectorErased _
+    | StdVectorCapacity _
     | StdVectorReserve
     | Tainted _
     | TaintSanitized _
@@ -569,6 +575,7 @@ module Attribute = struct
     | StaticType _
     | StdMoved
     | StdVectorErased _
+    | StdVectorCapacity _
     | StdVectorReserve
     | Tainted _
     | TaintSanitized _
@@ -621,6 +628,7 @@ module Attribute = struct
     | StaticType _
     | StdMoved
     | StdVectorErased _
+    | StdVectorCapacity _
     | StdVectorReserve
     | TaintSanitized _
     | Uninitialized _
@@ -739,6 +747,7 @@ module Attribute = struct
       | MustBeAwaited
       | StaticType _
       | StdMoved
+      | StdVectorCapacity _
       | StdVectorReserve
       | Uninitialized _
       | UnreachableAt _ ) as attr ->
@@ -865,6 +874,7 @@ module Attribute = struct
       | StaticType _
       | StdMoved
       | StdVectorErased _
+      | StdVectorCapacity _
       | StdVectorReserve
       | Tainted _
       | TaintSanitized _
@@ -952,7 +962,9 @@ module Attributes = struct
               else Some sink2
             in
             update (MustNotBeTainted (TaintSinkMap.union aux new_sinks sinks)) attrs
-      | Invalid (OptionalEmpty, _) | WrittenTo _ ->
+      | UnknownEffect _ when Option.is_some (find_rank attrs Attribute.std_vector_capacity_rank) ->
+          add (update (StdVectorCapacity None) attrs) value
+      | Invalid (OptionalEmpty, _) | WrittenTo _ | StdVectorCapacity _ ->
           update value attrs
       | MustBeValid (_, _, Some Invalidation.FileDescriptorRelease)
         when Option.exists (find_rank attrs must_be_valid_rank) ~f:(function
@@ -1109,6 +1121,11 @@ module Attributes = struct
   let is_end_of_collection = mem_by_rank Attribute.end_of_collection_rank
 
   let is_std_moved = mem_by_rank Attribute.std_moved_rank
+
+  let get_std_vector_capacity =
+    get_by_rank Attribute.std_vector_capacity_rank ~dest:(function[@warning "-partial-match"]
+        | StdVectorCapacity capacity -> capacity )
+
 
   let is_std_vector_reserved = mem_by_rank Attribute.std_vector_reserve_rank
 
