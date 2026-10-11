@@ -204,7 +204,7 @@ std::optional<std::string> FP_cannot_be_empty() {
   return std::nullopt;
 }
 
-std::string inside_try_catch_FP(const std::string& x) {
+std::string inside_try_catch_ok(const std::string& x) {
   std::optional<std::string> foo = might_return_none(true, x);
   try {
     return foo.value();
