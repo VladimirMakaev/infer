@@ -45,6 +45,11 @@ val lift_model : model_no_non_disj -> model
 val observe_model : rule:string -> model -> model
 (** Tag a selected dispatch rule in opt-in test observations without changing model execution. *)
 
+val observe_matcher :
+     rule:string
+  -> ('a, model, 'b) ProcnameDispatcher.Call.matcher
+  -> ('a, model, 'b) ProcnameDispatcher.Call.matcher
+
 type matcher = (Tenv.t * Procname.t, model, ValueOrigin.t) ProcnameDispatcher.Call.matcher
 
 val with_non_disj :
