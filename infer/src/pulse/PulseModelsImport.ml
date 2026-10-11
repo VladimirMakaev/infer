@@ -180,6 +180,16 @@ module Basic = struct
         [err]
 
 
+  let cpp_constructor_throw : model_no_non_disj =
+   fun ({analysis_data= {proc_desc}} as model_data) astate ->
+    let attrs = Procdesc.get_attributes proc_desc in
+    if
+      (attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor)
+      && Option.equal Bool.equal attrs.cpp_constructor_is_nothrow (Some false)
+    then [Ok (ExceptionRaised astate)]
+    else early_exit model_data astate
+
+
   let unreachable : model_no_non_disj = fun _ _astate -> []
 
   let return_int ~desc : Int64.t -> model_no_non_disj =
@@ -467,7 +477,7 @@ module Basic = struct
     in
     [ -"random" <>$$--> nondet ~desc:"random"
     ; -"assert" <>$ capt_arg $--> assert_
-    ; +BuiltinDecl.(match_builtin objc_cpp_throw) <>--> early_exit
+    ; +BuiltinDecl.(match_builtin objc_cpp_throw) <>--> cpp_constructor_throw
     ; +BuiltinDecl.(match_builtin __cast) <>$ capt_arg_payload $+...$--> id_first_arg ~desc:"cast"
     ; +BuiltinDecl.(match_builtin abort) <>--> early_exit
     ; +BuiltinDecl.(match_builtin exit) <>--> early_exit
