@@ -3150,6 +3150,30 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           Procdesc.create_node procdesc try_loc (Stmt_node CXXTry)
             [Metadata (CatchEntry {try_id; loc= try_loc})]
         in
+        let optional_catch =
+          lazy
+            ( match catch_stmts with
+            | [`CXXCatchStmt (_, _, {Clang_ast_t.xcsi_variable= None})] ->
+                true
+            | [ `CXXCatchStmt
+                  (_, _, {Clang_ast_t.xcsi_variable= Some (Clang_ast_t.VarDecl (_, _, qt, _))}) ]
+              -> (
+                let typ = CType_decl.qual_type_to_sil_type trans_state.context.CContext.tenv qt in
+                let typ = match typ.Typ.desc with Tptr (pointee, _) -> pointee | _ -> typ in
+                match typ.Typ.desc with
+                | Tstruct name ->
+                    String.equal (Typ.Name.name_without_templates name) "std::bad_optional_access"
+                | _ ->
+                    false )
+            | _ ->
+                false )
+        in
+        let optional_value callee =
+          String.equal (Procname.get_method callee) "value"
+          && Option.exists (Procname.get_class_type_name callee) ~f:(fun name ->
+              String.equal (Typ.Name.name_without_templates name) "std::optional" )
+        in
+        let guarded_optional = ref Procdesc.NodeSet.empty in
         let visited = ref Procdesc.NodeSet.empty in
         let rec connect_reserve node =
           if
@@ -3164,12 +3188,35 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                     String.equal (Procname.get_method callee) "reserve"
                     && Option.exists (Procname.get_class_type_name callee) ~f:(fun name ->
                         String.equal (Typ.Name.name_without_templates name) "std::vector" )
+                    || (optional_value callee && Lazy.force optional_catch)
                 | _ ->
                     false )
-            then Procdesc.set_succs node ~normal:None ~exn:(Some [catch_entry_node]) ;
+            then (
+              Procdesc.set_succs node ~normal:None ~exn:(Some [catch_entry_node]) ;
+              if
+                Instrs.exists (Procdesc.Node.get_instrs node) ~f:(function
+                  | Call (_, Const (Cfun callee), _, _, _) ->
+                      optional_value callee && Lazy.force optional_catch
+                  | _ ->
+                      false )
+              then guarded_optional := Procdesc.NodeSet.add node !guarded_optional ) ;
             List.iter (Procdesc.Node.get_succs node) ~f:connect_reserve )
         in
         List.iter try_trans_result.control.root_nodes ~f:connect_reserve ;
+        if not (Procdesc.NodeSet.is_empty !guarded_optional) then
+          ignore
+            (Procdesc.replace_instrs procdesc ~f:(fun node instr ->
+                 match instr with
+                 | Call (ret, Const (Cfun callee), args, loc, flags)
+                   when Procdesc.NodeSet.mem node !guarded_optional && optional_value callee ->
+                     Call
+                       ( ret
+                       , Const (Cfun callee)
+                       , args
+                       , loc
+                       , {flags with cf_optional_value_caught= true} )
+                 | _ ->
+                     instr ) ) ;
         (* add catch block as exceptional successor to end of try block. not ideal, but we will at
            least reach the code in the catch block this way *)
         (* TODO (T28898377): instead, we should extend trans_state with a list of maybe-throwing

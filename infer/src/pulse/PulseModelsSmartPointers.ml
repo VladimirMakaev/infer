@@ -1324,6 +1324,19 @@ let shared_ptr_assign_unique_ptr (FuncArg.{arg_payload= this} as arg) other ~des
   , non_disj )
 
 
+let unique_ptr_constructor tenv FuncArg.{arg_payload= this; typ} args ~desc =
+  if Option.is_none (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) then None
+  else
+    let this = ValueOrigin.addr_hist this in
+    match args with
+    | [] ->
+        Some (UniquePtr.default_constructor this ~desc)
+    | [FuncArg.{typ= {desc= Tptr (_, Pk_pointer) | Tint _}; arg_payload= value}] ->
+        Some (UniquePtr.assign_pointer this (ValueOrigin.addr_hist value) ~desc)
+    | _ ->
+        None
+
+
 let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
   let is_unique = Option.is_some (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) in
   if is_unique || Option.is_some (SharedPtr.find_element_type tenv typ) then

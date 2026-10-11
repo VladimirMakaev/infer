@@ -68,3 +68,11 @@ exit2 emits schema1 JSON with status `adapter_refusal`, the operation stage, and
 Later alias uses are not attempted. Invalid input/setup failures exit1 with `adapter_failure`
 and their original cause; neither outcome is behavioral detection.
 Stopped model states are retained for evidence and do not execute later operations.
+
+The optional pilot exposes checked `value_catch`: direct `model_call` for `value` supplies
+its matching-handler prerequisite by default. `optional_value_caught: false` tests the
+unchecked warning policy. The C++ layer verifies actual capture, handler selection and
+reachability; the direct layer checks the modeled exceptional outcome.
+
+Caught optional exceptions skip the unsuccessful result access and resume subsequent operations.
+Snapshots expose their count. Uncaught exceptional outcomes retain their heap and stop execution.
