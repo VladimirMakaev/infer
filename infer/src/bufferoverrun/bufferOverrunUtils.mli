@@ -79,7 +79,8 @@ end
 
 module Check : sig
   val array_access :
-       arr:Dom.Val.t
+       ?report_symbolic:bool
+    -> arr:Dom.Val.t
     -> idx:Dom.Val.t
     -> is_plus:bool
     -> last_included:bool
@@ -89,7 +90,8 @@ module Check : sig
     -> PO.ConditionSet.checked_t
 
   val lindex :
-       IntegerWidths.t
+       ?report_symbolic:bool
+    -> IntegerWidths.t
     -> array_exp:Exp.t
     -> index_exp:Exp.t
     -> last_included:bool
