@@ -64,9 +64,9 @@ void emplace_back_fd_ok(std::vector<int>& fds, const char* path) {
   fds.emplace_back(fd);
 }
 
-// the descriptor stored in the local vector is not reported when the vector
-// goes away
-void FN_push_back_fd_into_local_vector_bad(const char* path) {
+// The vector does not own file descriptors, so destroying it leaves
+// this descriptor open.
+void push_back_fd_into_local_vector_bad(const char* path) {
   std::vector<int> fds;
   int fd = open(path, O_RDONLY);
   if (fd == -1) {

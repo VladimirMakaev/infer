@@ -1509,12 +1509,25 @@ module PulseTransferFunctions = struct
 
   let check_modified_before_destructor args call_exp astate astate_n =
     match ((call_exp : Exp.t), args) with
-    | (Const (Cfun proc_name) | Closure {name= proc_name}), (Exp.Lvar pvar, _) :: _
-      when Procname.is_destructor proc_name ->
+    | (Const (Cfun proc_name) | Closure {name= proc_name}), _ :: (Exp.Lvar pvar, _) :: _
+      when Pvar.is_cpp_temporary pvar
+           && Option.exists (IRAttributes.load proc_name) ~f:(fun (attrs : ProcAttributes.t) ->
+               attrs.is_cpp_move_ctor && attrs.is_cpp_implicit ) ->
+        (* An implicit move consumes a compiler temporary before its destructor. Inspect the
+           copy before transferring its fields, as we do before destroying it. *)
         let var = Var.of_pvar pvar in
         PulseNonDisjunctiveOperations.mark_modified_copies_and_parameters_on_abductive [var] astate
           astate_n
         |> NonDisjDomain.checked_via_destructor var
+    | (Const (Cfun proc_name) | Closure {name= proc_name}), (Exp.Lvar pvar, _) :: _
+      when Procname.is_destructor proc_name ->
+        let var = Var.of_pvar pvar in
+        if Pvar.is_cpp_temporary pvar && NonDisjDomain.is_checked_via_destructor var astate_n then
+          astate_n
+        else
+          PulseNonDisjunctiveOperations.mark_modified_copies_and_parameters_on_abductive [var]
+            astate astate_n
+          |> NonDisjDomain.checked_via_destructor var
     | _ ->
         astate_n
 
