@@ -461,6 +461,28 @@ module BasicString = struct
     assign_ret (length, Hist.add_event event hist)
 
 
+  let size this : model =
+   fun ({path; location; ret= ret_id, _} as model_data) astate non_disj ->
+    let known_length =
+      Memory.find_edge_opt (fst this) (FieldAccess PulseOperations.ModeledField.string_length)
+        astate
+      |> Option.exists ~f:(fun (length, _) ->
+          Option.is_some (PulseArithmetic.as_constant_q astate length) )
+    in
+    if known_length then
+      let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+      let<*> astate, (length, hist) =
+        PulseOperations.eval_access path Read location this
+          (FieldAccess PulseOperations.ModeledField.string_length) astate
+      in
+      ( Basic.ok_continue
+          (PulseOperations.write_id ret_id
+             (length, Hist.add_call path location "std::basic_string::size()" hist)
+             astate )
+      , non_disj )
+    else lift_model (Basic.nondet ~desc:"std::basic_string::size") model_data astate non_disj
+
+
   let address ~desc ptr_hist (idx, _) : model_no_non_disj =
    fun ({ret= ret_id, _} as model_env) astate ->
     let astate_zero_idx =
@@ -3133,9 +3155,7 @@ let simple_matchers =
     ; -"std" &:: "basic_string" &:: "substr"
       &--> Basic.nondet ~desc:"std::basic_string::substr"
       |> with_non_disj
-    ; -"std" &:: "basic_string" &:: "size"
-      &--> Basic.nondet ~desc:"std::basic_string::size"
-      |> with_non_disj
+    ; -"std" &:: "basic_string" &:: "size" $ capt_arg_payload $--> BasicString.size
     ; -"std" &:: "basic_string" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.address ~desc:"std::basic_string::operator[]"
       |> with_non_disj
