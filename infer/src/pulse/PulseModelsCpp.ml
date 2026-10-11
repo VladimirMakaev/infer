@@ -1448,6 +1448,82 @@ module Vector = struct
     invalidate_references vector_f vector model_data astate
 
 
+  let post_size field value astate =
+    Memory.find_edge_opt (fst value) (FieldAccess field) astate
+    |> Option.bind ~f:(fun (pointer, _) -> Memory.find_edge_opt pointer Dereference astate)
+
+
+  let assign_known_size vector size ~desc model_data astate =
+    match size with
+    | Some size ->
+        GenericArrayBackedCollection.assign_size model_data.path model_data.location vector size
+          ~desc astate
+    | None ->
+        havoc_size model_data.path model_data.location vector ~desc astate
+
+
+  let assign_initializer_list vector list : model_no_non_disj =
+   fun model_data astate ->
+    let size = post_size InitializerList.size_field list astate in
+    let<*> astate = assign_known_size vector size ~desc:"std::vector::assign()" model_data astate in
+    invalidate_references Assign vector model_data astate
+
+
+  let insert_count vector (count : _ FuncArg.t) : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let rec literal = function
+      | Exp.Cast (_, exp) ->
+          literal exp
+      | Exp.Const (Cint _) ->
+          true
+      | _ ->
+          false
+    in
+    if
+      (not (Typ.is_int count.typ))
+      || (not (literal count.exp))
+      || Option.is_none (capacity_lower_bound vector astate)
+    then invalidate_references_unknown_size Insert vector model_data astate
+    else
+      let<**> astate =
+        match post_size GenericArrayBackedCollection.size_field vector astate with
+        | None ->
+            Sat (havoc_size path location vector ~desc:"std::vector::insert()" astate)
+        | Some (old, hist) ->
+            let size = AbstractValue.mk_fresh () in
+            let** astate, size =
+              PulseArithmetic.eval_binop_absval size (PlusA None) old (fst count.arg_payload) astate
+            in
+            Sat
+              (GenericArrayBackedCollection.assign_size path location vector (size, hist)
+                 ~desc:"std::vector::insert()" astate )
+      in
+      invalidate_references Insert vector model_data astate
+
+
+  let insert_initializer_list vector list : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let<**> astate =
+      match
+        ( ( if Option.is_some (capacity_lower_bound vector astate) then
+              post_size GenericArrayBackedCollection.size_field vector astate
+            else None )
+        , post_size InitializerList.size_field list astate )
+      with
+      | Some (old, hist), Some (count, _) ->
+          let size = AbstractValue.mk_fresh () in
+          let** astate, size =
+            PulseArithmetic.eval_binop_absval size (PlusA None) old count astate
+          in
+          Sat
+            (GenericArrayBackedCollection.assign_size path location vector (size, hist)
+               ~desc:"std::vector::insert()" astate )
+      | _ ->
+          Sat (havoc_size path location vector ~desc:"std::vector::insert()" astate)
+    in
+    invalidate_references Insert vector model_data astate
+
+
   let assign_count vector FuncArg.{arg_payload= count; typ} : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
     (* [assign(first, last)] has the same arity *)
@@ -1501,7 +1577,27 @@ module Vector = struct
               ~constant:IntLit.zero ~desc:"std::vector::operator=()" astate
           in
           (Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) vector astate), non_disj) )
-    else lift_model (invalidate_references_with_ret Assign vector) model_data astate non_disj
+    else
+      let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+      let rec object_typ typ =
+        match typ.Typ.desc with Tptr (typ, _) -> object_typ typ | _ -> typ
+      in
+      let size =
+        if InitializerList.is_type (object_typ rhs.typ) then
+          post_size InitializerList.size_field rhs.arg_payload astate
+        else if Option.is_some (capacity_lower_bound rhs.arg_payload astate) then
+          post_size GenericArrayBackedCollection.size_field rhs.arg_payload astate
+        else None
+      in
+      let<*> astate =
+        match size with
+        | Some size ->
+            GenericArrayBackedCollection.assign_size path location vector size
+              ~desc:"std::vector::operator=()" astate
+        | None ->
+            Ok astate
+      in
+      lift_model (invalidate_references_with_ret Assign vector) model_data astate non_disj
 
 
   let at ~desc vector index : model_no_non_disj =
@@ -3105,6 +3201,9 @@ let simple_matchers =
       $+...$--> Vector.init_copy_constructor ~desc:"std::vector::vector()"
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.vector.3"
+    ; -"std" &:: "vector" &:: "assign" $ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> Vector.assign_initializer_list |> with_non_disj
     ; -"std" &:: "vector" &:: "assign" $ capt_arg_payload $+ capt_arg $+ any_arg
       $--> Vector.assign_count |> with_non_disj
     ; -"std" &:: "vector" &:: "assign" $ capt_arg_payload
@@ -3157,10 +3256,10 @@ let simple_matchers =
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.front.1"
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg
-      $+ any_arg_of_typ (-"std" &:: "initializer_list")
-      $+ any_arg
-      $--> Vector.invalidate_references_unknown_size Insert
-      |> with_non_disj
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $+ any_arg $--> Vector.insert_initializer_list |> with_non_disj
+    ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ any_arg
+      $+ any_arg $--> Vector.insert_count |> with_non_disj
     ; (* [insert(pos, value)], the returned iterator is passed as the last argument *)
       -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ any_arg $+ any_arg
       $--> Vector.invalidate_references_one_more Insert
