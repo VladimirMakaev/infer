@@ -495,8 +495,8 @@ int FN_map_erase_key_reference_bad(std::map<int, int>& map) {
   return value;
 }
 
-// the presence of individual keys is not tracked
-int FN_map_find_absent_key_bad() {
+// Looking up a known-absent key returns the past-the-end iterator.
+int map_find_absent_key_bad() {
   std::map<int, int> map;
   map[2] = 3;
   return map.find(1)->second;
