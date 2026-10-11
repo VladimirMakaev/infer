@@ -335,12 +335,12 @@ module Exec = struct
 end
 
 module Check = struct
-  let check_access ~size ~idx ~offset ~arr_traces ~idx_traces ~last_included ~latest_prune location
-      cond_set =
+  let check_access ?(report_symbolic = false) ~size ~idx ~offset ~arr_traces ~idx_traces
+      ~last_included ~latest_prune location cond_set =
     match (size, idx) with
     | NonBottom length, NonBottom idx ->
-        PO.ConditionSet.add_array_access location ~size:length ~offset ~idx ~last_included
-          ~idx_traces ~arr_traces ~latest_prune cond_set
+        PO.ConditionSet.add_array_access ~report_symbolic location ~size:length ~offset ~idx
+          ~last_included ~idx_traces ~arr_traces ~latest_prune cond_set
     | _ ->
         cond_set
 
@@ -360,7 +360,8 @@ module Check = struct
         offset
 
 
-  let array_access ~arr ~idx ~is_plus ~last_included ~latest_prune location cond_set =
+  let array_access ?(report_symbolic = false) ~arr ~idx ~is_plus ~last_included ~latest_prune
+      location cond_set =
     let idx_traces = Dom.Val.get_traces idx in
     let idx =
       let idx_itv = Dom.Val.get_itv idx in
@@ -371,13 +372,14 @@ module Check = struct
       let size = ArrayBlk.ArrInfo.get_size arr_info in
       let offset = offsetof arr_info in
       log_array_access allocsite size offset idx ;
-      check_access ~size ~idx ~offset ~arr_traces ~idx_traces ~last_included ~latest_prune location
-        acc
+      check_access ~report_symbolic ~size ~idx ~offset ~arr_traces ~idx_traces ~last_included
+        ~latest_prune location acc
     in
     ArrayBlk.fold array_access1 (Dom.Val.get_array_blk arr) cond_set
 
 
-  let lindex integer_type_widths ~array_exp ~index_exp ~last_included mem location cond_set =
+  let lindex ?(report_symbolic = false) integer_type_widths ~array_exp ~index_exp ~last_included mem
+      location cond_set =
     let idx = Sem.eval integer_type_widths index_exp mem in
     let arr =
       if Language.curr_language_is Java then
@@ -386,7 +388,8 @@ module Check = struct
       else Sem.eval_arr integer_type_widths array_exp mem
     in
     let latest_prune = Dom.Mem.get_latest_prune mem in
-    array_access ~arr ~idx ~is_plus:true ~last_included ~latest_prune location cond_set
+    array_access ~report_symbolic ~arr ~idx ~is_plus:true ~last_included ~latest_prune location
+      cond_set
 
 
   let array_access_byte ~arr ~idx ~is_plus ~last_included ~latest_prune location cond_set =
