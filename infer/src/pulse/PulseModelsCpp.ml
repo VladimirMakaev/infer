@@ -318,6 +318,15 @@ module BasicString = struct
     constructor_from_constant_dsl this_hist init_hist
 
 
+  let fill_constructor ~desc this_hist length : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* contents = fresh () in
+    store_field ~ref:this_hist ModeledField.internal_string contents
+    @@> write_field ~ref:this_hist ModeledField.string_length length
+
+
   let copy_constructor_dsl (this, hist) src_hist : unit PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
     let* this_hist = add_model_call hist in
@@ -3024,6 +3033,9 @@ let map_matchers =
     [ -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload
       $+ capt_arg_payload_of_prim_typ char_ptr_typ
       $+...$--> BasicString.constructor_from_constant ~desc:"std::basic_string::basic_string()"
+    ; -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload $+ capt_arg_payload
+      $+ any_arg_of_prim_typ (Typ.mk (Tint IChar))
+      $+...$--> BasicString.fill_constructor ~desc:"std::basic_string::basic_string()"
     ; -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.copy_constructor ~desc:"std::basic_string::basic_string()"
     ; -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload
