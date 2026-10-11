@@ -64,6 +64,7 @@ codetoanalyze/cpp/liveness/non_type_template_param.cpp, X<3>::isZeroBad, 1, DEAD
 codetoanalyze/cpp/liveness/non_type_template_param.cpp, X<7>::isZeroBad, 1, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
 codetoanalyze/cpp/liveness/non_type_template_param.cpp, instanciateTemplateBad, 3, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
 codetoanalyze/cpp/liveness/non_type_template_param.cpp, instanciateTemplateConstOk_FP, 1, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
+codetoanalyze/cpp/liveness/out_parameter_switch.cpp, output_switch::known_output_bad, 5, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
 codetoanalyze/cpp/liveness/pointer_alias.cpp, pointer_alias::unused_alias_bad, 3, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
 codetoanalyze/cpp/liveness/pointer_alias.cpp, pointer_alias::reassigned_alias_bad, 3, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int*`)]
 codetoanalyze/cpp/liveness/pointer_alias.cpp, pointer_alias::reassigned_alias_bad, 4, DEAD_STORE, no_bucket, ERROR, [Write of unused value (type `int`)]
