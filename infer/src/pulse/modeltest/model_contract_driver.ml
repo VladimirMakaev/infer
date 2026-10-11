@@ -23,7 +23,12 @@ let adapter_refusal reason = raise (AdapterRefusal reason)
 
 type slot = {value: AbstractValue.t; typ: Typ.t; exp: Exp.t}
 
-type state = {heap: Domain.t; slots: slot IString.Map.t; errors: string list}
+type state =
+  { heap: Domain.t
+  ; slots: slot IString.Map.t
+  ; errors: string list
+  ; skipped_result: string option
+  ; caught_exceptions: int }
 
 let int_typ = Typ.mk (Tint IInt)
 
@@ -151,7 +156,8 @@ let name_of_method class_typ method_name parameters =
        (List.map parameters ~f:(fun (s : slot) -> Procname.Parameter.of_typ s.typ)) )
 
 
-let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
+let call ?(optional_value_caught = false) ~object_name ~method_name ~parameters ~result_name
+    ~return_typ state =
   let location = !operation_location in
   let object_slot = get object_name state in
   let class_typ =
@@ -185,7 +191,7 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
         ; callee_procname= callee
         ; location
         ; ret= (ret, return_typ)
-        ; call_flags= CallFlags.default }
+        ; call_flags= {CallFlags.default with cf_optional_value_caught= optional_value_caught} }
       in
       (* [havoc_id] materializes a return only when the SSA binding exists. *)
       let heap =
@@ -215,8 +221,13 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
                         state
                   | None ->
                       adapter_refusal ("missing_model_return:" ^ name) )
-          | Some (PulseExecutionDomain.ExceptionRaised _) ->
-              {state with errors= "exception" :: errors}
+          | Some (PulseExecutionDomain.ExceptionRaised heap) when optional_value_caught ->
+              { state with
+                heap
+              ; skipped_result= result_name
+              ; caught_exceptions= state.caught_exceptions + 1 }
+          | Some (PulseExecutionDomain.ExceptionRaised heap) ->
+              {state with heap; errors= "exception" :: errors}
           | Some (PulseExecutionDomain.Stopped _) | None ->
               {state with errors= "stopped" :: errors} )
 
@@ -224,7 +235,16 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
 let operation json state =
   let location = !operation_location in
   let op = string "op" json in
-  if List.mem state.errors "stopped" ~equal:String.equal then [state]
+  let skipped =
+    String.equal op "use"
+    && Option.exists state.skipped_result ~f:(fun name -> String.equal name (string "name" json))
+  in
+  let state = {state with skipped_result= None} in
+  if skipped then [state]
+  else if
+    List.mem state.errors "stopped" ~equal:String.equal
+    || List.mem state.errors "exception" ~equal:String.equal
+  then [state]
   else if String.equal op "allocate" then
     let name = string "name" json in
     let state = object_ ~name ~typ:ptr_typ state in
@@ -278,7 +298,15 @@ let operation json state =
       | _ ->
           adapter_error "unsupported return type"
     in
-    call ~object_name ~method_name:(string "method" json) ~parameters:params
+    let method_name = string "method" json in
+    (* The pilot's value operation is value_catch. Its direct projection supplies the handler
+       prerequisite; C++ controls independently verify handler selection and reachability. *)
+    let optional_value_caught =
+      J.member "optional_value_caught" json
+      |> J.to_bool_option
+      |> Option.value ~default:(String.equal method_name "value")
+    in
+    call ~optional_value_caught ~object_name ~method_name ~parameters:params
       ~result_name:(opt_string "result" json) ~return_typ state
   else if String.equal op "integer" then
     [ fresh ~name:(string "name" json)
@@ -454,6 +482,7 @@ let snapshot state =
   `Assoc
     [ ("slots", `List slots)
     ; ("vectors", `List vector_facts)
+    ; ("caught_exceptions", `Int state.caught_exceptions)
     ; ("errors", `List (List.map (List.rev state.errors) ~f:(fun e -> `String e))) ]
 
 
@@ -478,7 +507,11 @@ let run input =
   AnalysisGlobalState.initialize proc_desc analysis_data.tenv ;
   AnalysisState.set_remaining_disjuncts 64 ;
   let initial =
-    {heap= Domain.mk_initial analysis_data.tenv proc_attrs; slots= IString.Map.empty; errors= []}
+    { heap= Domain.mk_initial analysis_data.tenv proc_attrs
+    ; slots= IString.Map.empty
+    ; errors= []
+    ; skipped_result= None
+    ; caught_exceptions= 0 }
   in
   let initial =
     J.member "objects" input |> J.to_list
