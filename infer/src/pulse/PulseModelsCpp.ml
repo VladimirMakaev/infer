@@ -2425,14 +2425,17 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "vector" $ capt_arg_payload
       $--> GenericArrayBackedCollection.default_constructor ~desc:"std::vector::vector()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.vector.1"
     ; -"std" &:: "vector" &:: "vector" <>$ capt_arg_payload
       $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
       $+...$--> Vector.init_list_constructor ~desc:"std::vector::vector()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.vector.2"
     ; -"std" &:: "vector" &:: "vector" <>$ capt_arg_payload
       $+ capt_arg_payload_of_typ (-"std" &:: "vector")
       $+...$--> Vector.init_copy_constructor ~desc:"std::vector::vector()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.vector.3"
     ; -"std" &:: "vector" &:: "assign" $ capt_arg_payload $+ capt_arg $+ any_arg
       $--> Vector.assign_count |> with_non_disj
     ; -"std" &:: "vector" &:: "assign" $ capt_arg_payload
@@ -2444,24 +2447,29 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "back" <>$ capt_arg_payload
       $--> Vector.back ~desc:"std::vector::back()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.back.1"
     ; -"std" &:: "vector" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_begin ~desc:"std::vector::begin()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.begin.1"
     ; -"std" &:: "vector" &:: "cbegin" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_begin ~desc:"std::vector::cbegin()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_end ~desc:"std::vector::end()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.end.1"
     ; -"std" &:: "vector" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_end ~desc:"std::vector::cend()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload
       $--> Vector.invalidate_references Clear
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.clear.1"
     ; -"std" &:: "vector" &:: "data" <>$ capt_arg_payload
       $--> Vector.data ~desc:"std::vector::data()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.data.1"
     ; -"std" &:: "vector" &:: "emplace" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_one_more Emplace
       |> with_non_disj
@@ -2471,11 +2479,14 @@ let simple_matchers =
     ; (* the returned iterator is passed as the last argument *)
       -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
       $--> Vector.erase ~range:false |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.erase.1"
     ; -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
       $+ capt_arg_payload $--> Vector.erase ~range:true |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.erase.2"
     ; -"std" &:: "vector" &:: "front" <>$ capt_arg_payload
       $--> Vector.front ~desc:"std::vector::front()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.front.1"
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg
       $+ any_arg_of_typ (-"std" &:: "initializer_list")
       $+ any_arg
@@ -2491,28 +2502,36 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "operator=" <>$ capt_arg_payload
       $+...$--> Vector.invalidate_references_with_ret Assign
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.assign.1"
     ; -"std" &:: "vector" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.at ~desc:"std::vector::at()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.subscript.1"
     ; -"std" &:: "vector" &:: "shrink_to_fit" <>$ capt_arg_payload
       $--> Vector.invalidate_references ShrinkToFit
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.shrink_to_fit.1"
     ; -"std" &:: "vector" &:: "push_back" <>$ capt_arg_payload $+ capt_arg
       $--> Vector.push_back_cpp ~vector_f:PushBack ~desc:"std::vector::push_back()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.push_back.1"
     ; -"std" &:: "vector" &:: "pop_back" <>$ capt_arg_payload
       $+...$--> Vector.pop_back ~desc:"std::vector::pop_back()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.pop_back.1"
     ; -"std" &:: "vector" &:: "empty" <>$ capt_arg_payload
       $--> GenericArrayBackedCollection.empty ~desc:"std::vector::is_empty()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "reserve" <>$ capt_arg_payload $+...$--> Vector.reserve
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.reserve.1"
     ; -"std" &:: "vector" &:: "resize" <>$ capt_arg_payload $+ capt_arg_payload
       $+...$--> Vector.resize |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.resize.1"
     ; -"std" &:: "vector" &:: "size" $ capt_arg_payload
       $--> GenericArrayBackedCollection.size ~desc:"std::vector::size()"
       |> with_non_disj
+      |> observe_matcher ~rule:"std.vector.size.1"
     ; -"std"
       &::+ PointerIterator.is_function_on_pointers ["distance"]
       $ capt_arg_payload $+ capt_arg_payload

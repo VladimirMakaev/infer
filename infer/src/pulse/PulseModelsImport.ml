@@ -53,6 +53,12 @@ let observe_model ~rule (model : model) : model =
   else model
 
 
+let observe_matcher ~rule matcher =
+  if Config.pulse_test_observability then
+    ProcnameDispatcher.Call.map_matcher ~f:(observe_model ~rule) matcher
+  else matcher
+
+
 let with_non_disj model = ProcnameDispatcher.Call.map_matcher ~f:lift_model model
 
 module Hist = struct
