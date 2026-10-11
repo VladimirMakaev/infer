@@ -284,6 +284,7 @@ module BuildMethodSignature = struct
     ; is_cpp_const_member_fun
     ; is_cpp_copy_assignment
     ; is_cpp_copy_ctor
+    ; cpp_constructor_is_nothrow= CMethodProperties.cpp_constructor_is_nothrow method_decl
     ; is_cpp_move_ctor
     ; is_static_ctor
     ; is_cpp_deleted
