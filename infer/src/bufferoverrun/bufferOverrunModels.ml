@@ -510,8 +510,34 @@ module StdArray = struct
         false
 
 
-  let at elt_typ size {exp= array_exp} {exp= index_exp} =
+  let at ?(unchecked = false) elt_typ size {exp= array_exp} {exp= index_exp} =
     let {exec; check} = at ~size array_exp index_exp in
+    let check ({tenv; integer_type_widths; location} as model_env) mem cond_set =
+      let report_symbolic =
+        unchecked && is_array_typ tenv elt_typ
+        && Int64.(size > zero && size < of_int 256)
+        &&
+        match Sem.eval integer_type_widths index_exp mem |> Dom.Val.get_itv with
+        | Bottom ->
+            false
+        | NonBottom idx -> (
+          (* An unpruned byte parameter is promoted to size_t at the call. Do not mistake that
+             promotion for a wide index, or discard a guard by replacing its symbolic interval. *)
+          match Bounds.Bound.get_same_one_symbol (Itv.ItvPure.lb idx) (Itv.ItvPure.ub idx) with
+          | Some (Symb.SymbolPath.Normal path) -> (
+            match Dom.Mem.typ_of_param_path path mem with
+            | Some {desc= Tint IUChar} ->
+                Int.equal (IntegerWidths.width_of_ikind integer_type_widths Typ.IUChar) 8
+            | _ ->
+                false )
+          | _ ->
+              false )
+      in
+      if report_symbolic then
+        BoUtils.Check.lindex ~report_symbolic integer_type_widths ~array_exp ~index_exp
+          ~last_included:false mem location cond_set
+      else check model_env mem cond_set
+    in
     let exec ({tenv} as model_env) ~ret:((id, _) as ret) mem =
       let mem = exec model_env ~ret mem in
       let elt_v = Dom.Mem.find (Loc.of_id id) mem in
@@ -2175,7 +2201,8 @@ module Call = struct
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "array" &--> StdArray.constructor
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "size" &--> Container.integer_size
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "max_size" &--> Container.integer_size
-      ; -"std" &:: "array" < capt_typ &+ capt_int >:: "at" $ capt_arg $+ capt_arg $!--> StdArray.at
+      ; -"std" &:: "array" < capt_typ &+ capt_int >:: "at" $ capt_arg $+ capt_arg
+        $!--> StdArray.at ~unchecked:false
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "back" $ capt_arg $!--> StdArray.back
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "begin" $ capt_arg $!--> StdArray.begin_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "cbegin" $ capt_arg $!--> StdArray.begin_
@@ -2183,7 +2210,7 @@ module Call = struct
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "end" $ capt_arg $!--> StdArray.end_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "front" $ capt_arg $!--> StdArray.begin_
       ; -"std" &:: "array" < capt_typ &+ capt_int >:: "operator[]" $ capt_arg $+ capt_arg
-        $!--> StdArray.at
+        $!--> StdArray.at ~unchecked:true
       ; -"std" &:: "array" &::.*--> no_model
       ; -"std" &:: "basic_string" &:: "compare" &--> by_value Dom.Val.Itv.top
       ; -"std" &:: "basic_string" < capt_typ &+...>:: "basic_string" $ capt_arg
