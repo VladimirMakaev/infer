@@ -2232,6 +2232,7 @@ int ASTExporter<ATDWriter>::CXXMethodDeclTupleSize() {
 //@atd   ~is_copy_assignment : bool;
 //@atd   ~is_copy_constructor : bool;
 //@atd   ~is_move_constructor : bool;
+//@atd   ?constructor_is_nothrow : bool option;
 //@atd   ~cxx_ctor_initializers : cxx_ctor_initializer list;
 //@atd   ~overriden_methods : decl_ref list;
 //@atd } <ocaml field_prefix="xmdi_">
@@ -2244,6 +2245,28 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   const CXXConstructorDecl *C = dyn_cast<CXXConstructorDecl>(D);
   bool isCopyConstructor = C && C->isCopyConstructor();
   bool isMoveConstructor = C && C->isMoveConstructor();
+  bool HasConstructorExceptionSpec = false;
+  bool ConstructorIsNothrow = false;
+  if (isCopyConstructor || isMoveConstructor) {
+    if (const auto *FPT = C->getType()->getAs<FunctionProtoType>()) {
+      // Deferred/dependent specifications are not safe to evaluate during export.
+      switch (FPT->getExceptionSpecType()) {
+      case EST_BasicNoexcept:
+      case EST_NoexceptTrue:
+      case EST_DynamicNone:
+        HasConstructorExceptionSpec = true;
+        ConstructorIsNothrow = true;
+        break;
+      case EST_None:
+      case EST_NoexceptFalse:
+      case EST_Dynamic:
+        HasConstructorExceptionSpec = true;
+        break;
+      default:
+        break;
+      }
+    }
+  }
   bool isConst = D->isConst();
   bool HasCtorInitializers = C && C->init_begin() != C->init_end();
   auto OB = D->begin_overridden_methods();
@@ -2251,7 +2274,8 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   ObjectScope Scope(OF,
                     IsVirtual + IsStatic + isConst + isCopyAssignment +
                         isCopyConstructor + isMoveConstructor +
-                        HasCtorInitializers + (OB != OE));
+                        HasCtorInitializers + (OB != OE) +
+                        HasConstructorExceptionSpec);
 
   OF.emitFlag("is_virtual", IsVirtual);
   OF.emitFlag("is_static", IsStatic);
@@ -2259,6 +2283,10 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   OF.emitFlag("is_copy_assignment", isCopyAssignment);
   OF.emitFlag("is_copy_constructor", isCopyConstructor);
   OF.emitFlag("is_move_constructor", isMoveConstructor);
+  if (HasConstructorExceptionSpec) {
+    OF.emitTag("constructor_is_nothrow");
+    OF.emitBoolean(ConstructorIsNothrow);
+  }
   if (HasCtorInitializers) {
     OF.emitTag("cxx_ctor_initializers");
     ArrayScope Scope(OF, std::distance(C->init_begin(), C->init_end()));
