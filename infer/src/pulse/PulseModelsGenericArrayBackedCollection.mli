@@ -27,6 +27,8 @@ val field : Fieldname.t
 
 val size_field : Fieldname.t
 
+val last_field : Fieldname.t
+
 val element :
      PathContext.t
   -> Location.t
@@ -99,6 +101,22 @@ val assign_size_constant :
   -> AbductiveDomain.t PulseOperationResult.t
 
 module Iterator : sig
+  val vector_positions_field : Fieldname.t
+
+  val vector_positions :
+    AbstractValue.t -> AbductiveDomain.t -> (AbstractValue.t * ValueHistory.t) option
+
+  val vector_index :
+    AbstractValue.t -> AbductiveDomain.t -> (AbstractValue.t * ValueHistory.t) option
+
+  val record_vector_index :
+       PathContext.t
+    -> Location.t
+    -> AbstractValue.t * ValueHistory.t
+    -> AbstractValue.t * ValueHistory.t
+    -> AbductiveDomain.t
+    -> AbductiveDomain.t AccessResult.t
+
   val internal_pointer : Fieldname.t
 
   val check_not_end :
@@ -144,6 +162,7 @@ module Iterator : sig
     -> collection:AbstractValue.t * ValueHistory.t
     -> iter:AbstractValue.t * ValueHistory.t
     -> ?index:AbstractValue.t
+    -> ?track_vector_index:bool
     -> AbductiveDomain.t
     -> AbductiveDomain.t AccessResult.t
   (** make [iter] point to the element at [index], or at an unknown position if not given, in the
