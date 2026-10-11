@@ -162,6 +162,68 @@ let get_template_arg typ =
       None
 
 
+let post_fields optional astate =
+  let peek access =
+    Memory.find_edge_opt (fst optional) access astate
+    |> Option.bind ~f:(fun (cell, _) -> Memory.find_edge_opt cell Dereference astate)
+  in
+  Option.both (peek internal_value_access) (peek has_value_access)
+
+
+let std_tag name typ =
+  let typ =
+    match typ.Typ.desc with
+    | Tptr (pointee, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+        pointee
+    | _ ->
+        typ
+  in
+  match typ.Typ.desc with
+  | Tstruct (CppClass {name= qual_name}) ->
+      QualifiedCppName.Match.match_qualifiers
+        (QualifiedCppName.Match.of_fuzzy_qual_names ["std::" ^ name])
+        qual_name
+  | _ ->
+      false
+
+
+let storage_field = Fieldname.make PulseOperations.pulse_model_type "__infer_optional_storage"
+
+let storage_access = Access.FieldAccess storage_field
+
+let renew_storage address astate =
+  let addresses =
+    AbductiveDomain.reachable_addresses_from
+      ~edge_filter:(function FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
+      (Seq.return (fst address))
+      astate `Post
+  in
+  AbstractValue.Set.fold
+    (fun address astate -> AddressAttributes.begin_cpp_lifetime address astate)
+    addresses astate
+
+
+let lifetime_supported typ =
+  match typ.Typ.desc with Tstruct _ -> std_tag "unique_ptr" typ | _ -> true
+
+
+let saved_storage optional astate =
+  Option.bind (post_fields optional astate) ~f:(fun (_, (flag, _)) ->
+      if PulseArithmetic.is_known_zero astate flag then
+        Memory.find_edge_opt (fst optional) storage_access astate
+      else None )
+
+
+let reuse_storage path location optional address astate =
+  match PulseOperations.check_addr_access path Read location optional astate with
+  | Ok astate ->
+      Sat (Ok (renew_storage address astate, address))
+  | Recoverable (astate, errors) ->
+      Sat (Recoverable ((astate, address), errors))
+  | FatalError _ as error ->
+      Sat error
+
+
 let assign_precise_value FuncArg.{typ; arg_payload= this_payload}
     (FuncArg.{arg_payload= other_payload} as other) ~desc : model =
  (* This model marks the optional object to be non-empty by storing value. *)
@@ -171,7 +233,19 @@ let assign_precise_value FuncArg.{typ; arg_payload= this_payload}
   match (get_template_arg typ, IRAttributes.load_formal_types callee_procname |> List.last) with
   | Some ({desc= Tstruct class_name} as typ), Some actual ->
       (* assign the value pointer to the field of the shared_ptr *)
-      let<**> astate, value_address = Basic.alloc_value_address ~desc typ model_data astate in
+      let saved = saved_storage (ValueOrigin.addr_hist this_payload) astate in
+      let<**> astate, value_address =
+        match saved with
+        | Some address ->
+            reuse_storage path location (ValueOrigin.addr_hist this_payload) address astate
+        | None ->
+            Basic.alloc_value_address ~desc typ model_data astate
+      in
+      let actual =
+        if Option.is_some saved && std_tag "optional" actual then
+          match actual.Typ.desc with Tptr (_, kind) -> Typ.mk (Tptr (typ, kind)) | _ -> actual
+        else actual
+      in
       let<*> astate, _ =
         write_value path location
           (ValueOrigin.addr_hist this_payload)
@@ -190,7 +264,21 @@ let assign_precise_value FuncArg.{typ; arg_payload= this_payload}
   | Some _, Some _ ->
       L.d_printfln "Class not found" ;
       let<**> astate, address =
-        Basic.deep_copy path location ~value:(ValueOrigin.addr_hist other_payload) ~desc astate
+        match saved_storage (ValueOrigin.addr_hist this_payload) astate with
+        | None ->
+            Basic.deep_copy path location ~value:(ValueOrigin.addr_hist other_payload) ~desc astate
+        | Some address ->
+            reuse_storage path location (ValueOrigin.addr_hist this_payload) address astate
+            >>|= fun (astate, address) ->
+            let* astate, value =
+              PulseOperations.eval_access path Read location
+                (ValueOrigin.addr_hist other_payload)
+                Dereference astate
+            in
+            let+ astate =
+              PulseOperations.write_deref path location ~ref:address ~obj:value astate
+            in
+            (astate, address)
       in
       let<*> astate, _ =
         write_value path location
@@ -418,6 +506,262 @@ let destruct FuncArg.{arg_payload= this; typ} ~desc : model =
       (Basic.ok_continue astate, non_disj)
 
 
+let forwarded_types ~in_place callee args =
+  let formals =
+    IRAttributes.load_formal_types callee |> fun xs -> List.drop xs (if in_place then 2 else 1)
+  in
+  if Int.equal (List.length formals) (List.length args) then formals
+  else List.map args ~f:(fun arg -> arg.FuncArg.typ)
+
+
+let forwarded_type typ =
+  match typ.Typ.desc with
+  | Tptr
+      (({desc= Tptr _ | Tint _ | Tfloat _} as scalar), (Pk_lvalue_reference | Pk_rvalue_reference))
+    ->
+      scalar
+  | _ ->
+      typ
+
+
+let can_construct_contained model_data (FuncArg.{typ} as arg) args ~desc =
+  match get_template_arg typ with
+  | None ->
+      false
+  | Some ({desc= Tstruct class_name} as contained_typ) when std_tag "unique_ptr" contained_typ ->
+      let formals = forwarded_types ~in_place:false model_data.callee_procname args in
+      let formals = List.map formals ~f:forwarded_type in
+      let args = List.map2_exn args formals ~f:(fun arg typ -> {arg with FuncArg.typ}) in
+      let arg = {arg with FuncArg.typ= Typ.mk_ptr contained_typ} in
+      Option.is_some
+        (PulseModelsSmartPointers.unique_ptr_constructor model_data.analysis_data.tenv arg args
+           ~desc )
+      || List.exists Typ.overloading_resolution ~f:(fun comparator ->
+          List.exists (Tenv.find_cpp_constructor model_data.analysis_data.tenv class_name)
+            ~f:(fun constructor ->
+              List.equal comparator (IRAttributes.load_formal_types constructor) (arg.typ :: formals) ) )
+  | Some {desc= Tstruct _} ->
+      false
+  | Some _ ->
+      true
+
+
+let construct_contained ?existing ?(in_place = false) (FuncArg.{typ; arg_payload= this} as arg) args
+    ~desc : model =
+ fun ({path; location; callee_procname} as model_data) astate non_disj ->
+  let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+  let ( let<**> ) x f = bind_sat_result non_disj x f in
+  match get_template_arg typ with
+  | None ->
+      assign_value (arg :: args) ~desc model_data astate non_disj
+  | Some contained_typ ->
+      let<**> astate, address =
+        match existing with
+        | Some address ->
+            reuse_storage path location (ValueOrigin.addr_hist this) address astate
+        | None ->
+            Basic.alloc_value_address contained_typ ~desc model_data astate
+      in
+      let<*> astate, _ =
+        write_value path location (ValueOrigin.addr_hist this) ~value:address ~engaged:true ~desc
+          astate
+      in
+      let this_arg =
+        {arg with FuncArg.typ= Typ.mk_ptr contained_typ; arg_payload= ValueOrigin.unknown address}
+      in
+      let outcomes, non_disj =
+        if std_tag "optional" contained_typ then
+          match args with
+          | [] ->
+              (assign_none ValueHistory.epoch this_arg.arg_payload ~desc model_data astate, non_disj)
+          | [value] when std_tag "nullopt_t" value.FuncArg.typ ->
+              (assign_none ValueHistory.epoch this_arg.arg_payload ~desc model_data astate, non_disj)
+          | [value] ->
+              assign_precise_value this_arg value ~desc model_data astate non_disj
+          | _ ->
+              assign_value (this_arg :: args) ~desc model_data astate non_disj
+        else
+          match contained_typ.desc with
+          | Tstruct class_name -> (
+              let formals = forwarded_types ~in_place callee_procname args in
+              let<*> astate, formals, args =
+                PulseResult.list_fold (List.zip_exn formals args) ~init:(astate, [], [])
+                  ~f:(fun (astate, types, actuals) (formal, (actual : ValueOrigin.t FuncArg.t)) ->
+                    match formal.Typ.desc with
+                    | Tptr
+                        ( ({desc= Tptr _ | Tint _ | Tfloat _} as scalar)
+                        , (Pk_lvalue_reference | Pk_rvalue_reference) ) ->
+                        let+ astate, value =
+                          PulseOperations.eval_access path Read location
+                            (ValueOrigin.addr_hist actual.arg_payload)
+                            Dereference astate
+                        in
+                        ( astate
+                        , scalar :: types
+                        , {actual with typ= scalar; arg_payload= ValueOrigin.unknown value}
+                          :: actuals )
+                    | _ ->
+                        Ok (astate, formal :: types, actual :: actuals) )
+              in
+              let actuals = this_arg.typ :: List.rev formals in
+              let args = List.rev args in
+              match
+                PulseModelsSmartPointers.unique_ptr_constructor model_data.analysis_data.tenv
+                  this_arg args ~desc
+              with
+              | Some constructor ->
+                  (constructor model_data astate, non_disj)
+              | None ->
+                  Basic.call_constructor class_name actuals (this_arg :: args)
+                    (Var (Ident.create_fresh Ident.kprimed))
+                    model_data astate non_disj )
+          | _ ->
+              let initial =
+                match args with
+                | [] ->
+                    let astate, zero = PulseArithmetic.absval_of_int astate IntLit.zero in
+                    Ok (astate, (zero, ValueHistory.epoch))
+                | value :: _ ->
+                    let value_hist = ValueOrigin.addr_hist value.FuncArg.arg_payload in
+                    if Typ.is_pointer value.FuncArg.typ then
+                      PulseOperations.eval_access path Read location value_hist Dereference astate
+                    else Ok (astate, value_hist)
+              in
+              let<*> astate, value = initial in
+              let<*> astate =
+                PulseOperations.write_deref path location ~ref:address ~obj:value astate
+              in
+              (Basic.ok_continue astate, non_disj)
+      in
+      let clear_exception astate =
+        List.map (assign_none ValueHistory.epoch this ~desc model_data astate) ~f:(fun result ->
+            PulseResult.map result ~f:(function
+              | ContinueProgram astate ->
+                  ExceptionRaised astate
+              | state ->
+                  state ) )
+      in
+      ( List.concat_map outcomes ~f:(function
+          | Ok (ExceptionRaised astate) ->
+              clear_exception astate
+          | Recoverable (ExceptionRaised astate, errors) ->
+              List.map (clear_exception astate) ~f:(PulseResult.append_errors errors)
+          | result ->
+              [result] )
+      , non_disj )
+
+
+let std_in_place arg args ~desc = construct_contained ~in_place:true arg args ~desc
+
+let std_reset (FuncArg.{arg_payload= this} as arg) ~desc : model =
+ fun model_data astate non_disj ->
+  let known_engaged =
+    post_fields (ValueOrigin.addr_hist this) astate
+    |> Option.exists ~f:(fun (_, (flag, _)) -> is_known_engaged flag astate)
+  in
+  let supported = Option.exists (get_template_arg arg.typ) ~f:lifetime_supported in
+  if not (known_engaged && supported) then
+    (assign_none ValueHistory.epoch this ~desc model_data astate, non_disj)
+  else
+    let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+    let storage = fst (Option.value_exn (post_fields (ValueOrigin.addr_hist this) astate)) in
+    let<*> astate =
+      PulseOperations.write_field model_data.path model_data.location
+        ~ref:(ValueOrigin.addr_hist this) storage_field ~obj:storage astate
+    in
+    let outcomes, non_disj = destruct arg ~desc model_data astate non_disj in
+    ( List.concat_map outcomes ~f:(function
+        | Ok (ContinueProgram astate) ->
+            assign_none ValueHistory.epoch this ~desc model_data astate
+        | Recoverable (ContinueProgram astate, errors) ->
+            List.map
+              (assign_none ValueHistory.epoch this ~desc model_data astate)
+              ~f:(PulseResult.append_errors errors)
+        | result ->
+            [result] )
+    , non_disj )
+
+
+let std_emplace (FuncArg.{arg_payload= this; typ} as arg) args ~desc : model =
+ fun ({path; location; analysis_data= {tenv}; dispatch_call_eval_args} as model_data) astate
+     non_disj ->
+  (* Only replace contained classes whose construction is covered here. Other classes require
+     subobject lifetime renewal; keep their prior approximation instead of retaining dead fields. *)
+  if not (can_construct_contained model_data arg args ~desc) then
+    (emplace this ~desc model_data astate, non_disj)
+  else
+    let known = post_fields (ValueOrigin.addr_hist this) astate in
+    let active =
+      Option.bind known ~f:(fun (value, (flag, _)) ->
+          if is_known_engaged flag astate then Some value else None )
+    in
+    let saved = saved_storage (ValueOrigin.addr_hist this) astate in
+    let existing = match active with Some _ -> active | None -> saved in
+    let outcomes, non_disj =
+      match (active, get_template_arg typ) with
+      | Some value, Some {desc= Tstruct class_name} -> (
+        match Tenv.find_cpp_destructor tenv class_name with
+        | None ->
+            (Basic.ok_continue astate, non_disj)
+        | Some destructor ->
+            let deleted =
+              { arg with
+                typ= Typ.mk_ptr (Option.value_exn (get_template_arg typ))
+              ; arg_payload= ValueOrigin.unknown value }
+            in
+            dispatch_call_eval_args model_data.analysis_data path model_data.ret
+              (Const (Cfun destructor)) [deleted] location CallFlags.default astate non_disj
+              (Some destructor) )
+      | _ ->
+          (Basic.ok_continue astate, non_disj)
+    in
+    List.fold outcomes ~init:([], non_disj) ~f:(fun (all, non_disj) result ->
+        let more, non_disj =
+          match result with
+          | Ok (ContinueProgram astate) ->
+              construct_contained ?existing arg args ~desc model_data astate non_disj
+          | Recoverable (ContinueProgram astate, errors) ->
+              let outcomes, non_disj =
+                construct_contained ?existing arg args ~desc model_data astate non_disj
+              in
+              (List.map outcomes ~f:(PulseResult.append_errors errors), non_disj)
+          | _ ->
+              ([result], non_disj)
+        in
+        (all @ more, non_disj) )
+
+
+let std_value optional ~desc : model_no_non_disj =
+ fun ({path; location; analysis_data= {proc_desc}; call_flags} as model_data) astate ->
+  let known_empty =
+    post_fields (ValueOrigin.addr_hist optional) astate
+    |> Option.exists ~f:(fun (_, (flag, _)) -> PulseArithmetic.is_known_zero astate flag)
+  in
+  if not (known_empty && call_flags.cf_optional_value_caught) then
+    value optional ~desc model_data astate
+  else
+    let<*> astate =
+      PulseOperations.check_addr_access path Read location (ValueOrigin.addr_hist optional) astate
+    in
+    let exception_addr = AbstractValue.mk_fresh () in
+    let name =
+      Typ.Name.Cpp.from_qual_name NoTemplate ~is_union:false
+        (QualifiedCppName.of_list ["std"; "bad_optional_access"])
+    in
+    let astate =
+      PulseArithmetic.and_dynamic_type_is_unsafe exception_addr (Typ.mk_struct name) location astate
+    in
+    let astate, ref =
+      PulseOperations.eval_var path location (Procdesc.get_ret_var proc_desc) astate
+    in
+    let<*> astate =
+      PulseOperations.write_deref path location ~ref
+        ~obj:(exception_addr, Hist.single_call path location desc)
+        astate
+    in
+    [Ok (ExceptionRaised astate)]
+
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   [ -"boost" &:: "optional" &:: "optional" <>$ capt_arg_payload
@@ -525,6 +869,9 @@ let matchers : matcher list =
   ; -"std" &:: "optional" &:: "optional" $ capt_arg
     $+ capt_arg_of_typ (-"std" &:: "optional")
     $--> copy_assignment ~desc:"std::optional::optional(std::optional<Value> arg)"
+  ; -"std" &:: "optional" &:: "optional" $ capt_arg
+    $+ any_arg_of_typ (-"std" &:: "in_place_t")
+    $++$--> std_in_place ~desc:"std::optional::optional(in_place)"
   ; -"std" &:: "optional" &:: "optional"
     &++> assign_value ~desc:"std::optional::optional(Value arg)"
   ; -"std" &:: "optional" &:: "operator=" $ capt_arg_payload
@@ -536,9 +883,8 @@ let matchers : matcher list =
     $--> copy_assignment ~desc:"std::optional::operator=(std::optional<Value> arg)"
   ; -"std" &:: "optional" &:: "operator="
     &++> assign_value ~desc:"std::optional::operator=(Value arg)"
-  ; -"std" &:: "optional" &:: "emplace" $ capt_arg_payload
-    $+...$--> emplace ~desc:"std::optional::emplace()"
-    |> with_non_disj
+  ; -"std" &:: "optional" &:: "emplace" $ capt_arg
+    $++$--> std_emplace ~desc:"std::optional::emplace()"
   ; -"std" &:: "optional" &:: "has_value" <>$ capt_arg_payload
     $+...$--> has_value ~desc:"std::optional::has_value()"
     |> with_non_disj
@@ -548,15 +894,13 @@ let matchers : matcher list =
   ; -"std" &:: "optional" &:: "operator_bool" <>$ capt_arg_payload
     $+...$--> has_value ~desc:"std::optional::operator_bool()"
     |> with_non_disj
-  ; -"std" &:: "optional" &:: "reset" <>$ capt_arg_payload
-    $+...$--> assign_none ValueHistory.epoch ~desc:"std::optional::reset()"
-    |> with_non_disj
+  ; -"std" &:: "optional" &:: "reset" <>$ capt_arg
+    $+...$--> std_reset ~desc:"std::optional::reset()"
   ; (* libc++ brings [reset] into [std::optional] from this base class with a using-declaration *)
-    -"std" &:: "__optional_destruct_base" &:: "reset" <>$ capt_arg_payload
-    $+...$--> assign_none ValueHistory.epoch ~desc:"std::optional::reset()"
-    |> with_non_disj
+    -"std" &:: "__optional_destruct_base" &:: "reset" <>$ capt_arg
+    $+...$--> std_reset ~desc:"std::optional::reset()"
   ; -"std" &:: "optional" &:: "value" <>$ capt_arg_payload
-    $+...$--> value ~desc:"std::optional::value()"
+    $+...$--> std_value ~desc:"std::optional::value()"
     |> with_non_disj
   ; -"std" &:: "optional" &:: "operator*" <>$ capt_arg_payload
     $+...$--> value ~desc:"std::optional::operator*()"

@@ -12,6 +12,15 @@ open PulseModelsImport
 
 val matchers : matcher list
 
+val unique_ptr_constructor :
+     Tenv.t
+  -> ValueOrigin.t FuncArg.t
+  -> ValueOrigin.t FuncArg.t list
+  -> desc:string
+  -> model_no_non_disj option
+(** Standard default and adopting-pointer constructors, including when their declarations were not
+    captured. Arguments have already undergone reference forwarding. *)
+
 val nullable_return :
   Tenv.t -> (AbstractValue.t * ValueHistory.t) FuncArg.t -> desc:string -> model_no_non_disj option
 (** [nullable_return tenv dest ~desc]: the null and non-null results that a callee returning a
