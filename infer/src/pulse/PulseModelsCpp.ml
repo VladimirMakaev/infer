@@ -284,6 +284,49 @@ module AtomicInteger = struct
 end
 
 module BasicString = struct
+  (* Derived data pointers stay reachable from the buffer cell, without sharing the character
+     contents of independently owned strings. *)
+  let invalidate_offsets path location cause buffer astate =
+    let rec visit seen buffer astate =
+      Memory.fold_edges (fst buffer) astate ~init:(seen, astate)
+        ~f:(fun (seen, astate) (access, child) ->
+          match access with
+          | ArrayAccess _ when not (AbstractValue.Set.mem (fst child) seen) ->
+              let seen = AbstractValue.Set.add (fst child) seen in
+              let astate =
+                PulseOperations.invalidate path
+                  (MemoryAccess {pointer= buffer; access; hist_obj_default= snd child})
+                  location cause child astate
+              in
+              visit seen child astate
+          | _ ->
+              (seen, astate) )
+    in
+    visit (AbstractValue.Set.singleton (fst buffer)) buffer astate |> snd
+
+
+  let offset data index : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* {path; location} = get_data in
+    exec_partial_operation (fun astate ->
+        let astate, element = Memory.eval_edge data (ArrayAccess (StdTyp.void, fst index)) astate in
+        let++ astate, address =
+          PulseArithmetic.eval_binop (fst element) PlusPI
+            (AbstractValueOperand (fst data))
+            (AbstractValueOperand (fst index))
+            astate
+        in
+        let element = (address, Hist.add_call path location "string buffer offset" (snd data)) in
+        let astate =
+          AddressAttributes.find_opt `Post (fst data) astate
+          |> Option.bind ~f:Attributes.get_invalid
+          |> Option.value_map ~default:astate ~f:(fun (cause, trace) ->
+              AddressAttributes.add_one address (Invalid (cause, trace)) astate )
+        in
+        ( Memory.add_edge path data (ArrayAccess (StdTyp.void, fst index)) element location astate
+        , element ) )
+
+
   let constructor_from_constant_dsl (this, this_hist) init_hist : unit PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
     let* this_hist' = add_model_call this_hist in
@@ -404,6 +447,7 @@ module BasicString = struct
     in
     let string_hist = Hist.add_event call_event string_hist in
     exec_partial_command (fun astate ->
+        let astate = invalidate_offsets path location CppDelete (string_addr, string_hist) astate in
         Sat
           (PulseOperations.check_and_invalidate path
              (MemoryAccess
@@ -425,6 +469,10 @@ module BasicString = struct
       (AbstractValue.mk_fresh (), Hist.single_call path location desc)
     in
     let<*> astate =
+      let* astate, buffer =
+        PulseOperations.eval_access path NoAccess location this (FieldAccess internal_string) astate
+      in
+      let astate = invalidate_offsets path location (StdString string_f) buffer astate in
       PulseOperations.invalidate_access path location (StdString string_f) this
         (FieldAccess internal_string) astate
       |> PulseOperations.write_field path location ~ref:this internal_string ~obj:new_buffer
@@ -510,12 +558,43 @@ end
     the viewed [std::basic_string]. Copies of a view share that pointer, so they see the
     invalidation of the viewed buffer. *)
 module BasicStringView = struct
+  let supports callee =
+    match Procname.get_class_type_name callee with
+    | Some (CppClass {template_spec_info= Template {args= [TType char; TType traits]}})
+      when Typ.equal char StdTyp.char -> (
+      match traits.Typ.desc with
+      | Tstruct (CppClass {name; template_spec_info= Template {args= [TType trait_char]}}) ->
+          String.is_prefix (QualifiedCppName.to_qual_string name) ~prefix:"std::"
+          && Option.exists (QualifiedCppName.extract_last name) ~f:(fun (last, _) ->
+              String.equal
+                (String.lsplit2 last ~on:'<' |> Option.value_map ~default:last ~f:fst)
+                "char_traits" )
+          && Typ.equal trait_char char
+      | _ ->
+          false )
+    | _ ->
+        false
+
+
   let data_field = Fieldname.make PulseOperations.pulse_model_type "__infer_model_string_view_data"
+
+  let lifetime_field =
+    Fieldname.make PulseOperations.pulse_model_type "__infer_model_string_view_lifetime"
+
 
   let store_data this_hist (data, data_hist) : unit PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
     let* data_hist = add_model_call data_hist in
     store_field ~ref:this_hist data_field (data, data_hist)
+    @@> store_field ~ref:this_hist lifetime_field (data, data_hist)
+
+
+  let default_constructor ~desc this_hist : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* zero = int 0 in
+    write_field ~ref:this_hist ModeledField.string_length zero @@> store_data this_hist zero
 
 
   let constructor_from_char_ptr ~desc this_hist ptr_hist : model =
@@ -544,6 +623,8 @@ module BasicStringView = struct
     BasicString.copy_constructor_dsl this_hist src_hist
     @@> let* data = load_access src_hist (FieldAccess data_field) in
         store_data this_hist data
+        @@> let* lifetime = load_access src_hist (FieldAccess lifetime_field) in
+            store_field ~ref:this_hist lifetime_field lifetime
 
 
   let copy_constructor ~desc this_hist src_hist : model =
@@ -575,6 +656,55 @@ module BasicStringView = struct
     let* data, data_hist = load_access this_hist (FieldAccess data_field) in
     let* hist = add_model_call data_hist in
     assign_ret (data, hist)
+
+
+  let length ~desc this_hist : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* length = access Read this_hist (FieldAccess ModeledField.string_length) in
+    assign_ret length
+
+
+  let empty this_hist : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model "std::basic_string_view::empty()"
+    @@ fun () ->
+    let* length = access Read this_hist (FieldAccess ModeledField.string_length) in
+    disj
+      [prune_eq_zero length @@> assign_ret @= int 1; prune_positive length @@> assign_ret @= int 0]
+
+
+  let address this_hist index : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model "std::basic_string_view::operator[]()"
+    @@ fun () ->
+    let* lifetime = load_access this_hist (FieldAccess lifetime_field) in
+    check_valid (ValueOrigin.unknown lifetime)
+    @@> let* data = load_access this_hist (FieldAccess data_field) in
+        let* element = BasicString.offset data index in
+        assign_ret element
+
+
+  let substr this_hist pos count result : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model "std::basic_string_view::substr()"
+    @@ fun () ->
+    let* length = access Read this_hist (FieldAccess ModeledField.string_length) in
+    disj
+      [ prune_gt pos length @@> throw
+      ; ( prune_le pos length
+        @@> let* remaining = binop (MinusA None) length pos in
+            let* data = load_access this_hist (FieldAccess data_field) in
+            let* lifetime = load_access this_hist (FieldAccess lifetime_field) in
+            let* data = BasicString.offset data pos in
+            store_data result data
+            @@> store_field ~ref:result lifetime_field lifetime
+            @@> disj
+                  [ prune_le count remaining
+                    @@> write_field ~ref:result ModeledField.string_length count
+                  ; prune_gt count remaining
+                    @@> write_field ~ref:result ModeledField.string_length remaining ] ) ]
 end
 
 module Function = struct
@@ -3030,6 +3160,15 @@ let map_matchers =
   let vector_it_matcher = -"folly" <>:: "f14" <>:: "detail" <>:: "VectorContainerIterator" in
   let basic_string_matchers =
     let char_ptr_typ = Typ.mk (Tptr (Typ.mk (Tint IChar), Pk_pointer)) in
+    let view_method method_name =
+      -"std"
+      &::+ (fun (_, procname) name ->
+      String.equal
+        (String.lsplit2 name ~on:'<' |> Option.value_map ~default:name ~f:fst)
+        "basic_string_view"
+      && BasicStringView.supports procname )
+      &:: method_name
+    in
     [ -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload
       $+ capt_arg_payload_of_prim_typ char_ptr_typ
       $+...$--> BasicString.constructor_from_constant ~desc:"std::basic_string::basic_string()"
@@ -3047,6 +3186,8 @@ let map_matchers =
       $--> BasicString.data ~desc:"std::basic_string::data()"
     ; -"std" &:: "basic_string" &:: "c_str" <>$ capt_arg_payload
       $--> BasicString.data ~desc:"std::basic_string::c_str()"
+    ; view_method "basic_string_view" $ capt_arg_payload
+      $--> BasicStringView.default_constructor ~desc:"std::basic_string_view::basic_string_view()"
     ; -"std" &:: "basic_string_view" &:: "basic_string_view" $ capt_arg_payload
       $+ capt_arg_payload_of_prim_typ char_ptr_typ
       $--> BasicStringView.constructor_from_char_ptr
@@ -3064,6 +3205,14 @@ let map_matchers =
       $--> BasicStringView.assign ~desc:"std::basic_string_view::operator=()"
     ; -"std" &:: "basic_string_view" &:: "data" <>$ capt_arg_payload
       $--> BasicStringView.data ~desc:"std::basic_string_view::data()"
+    ; view_method "size" <>$ capt_arg_payload
+      $--> BasicStringView.length ~desc:"std::basic_string_view::size()"
+    ; view_method "length" <>$ capt_arg_payload
+      $--> BasicStringView.length ~desc:"std::basic_string_view::length()"
+    ; view_method "empty" <>$ capt_arg_payload $--> BasicStringView.empty
+    ; view_method "operator[]" <>$ capt_arg_payload $+ capt_arg_payload $--> BasicStringView.address
+    ; view_method "substr" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+      $+ capt_arg_payload $--> BasicStringView.substr
     ; -"std" &:: "basic_string" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.begin_ ~desc:"std::basic_string::begin()"
     ; -"std" &:: "basic_string" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
