@@ -572,9 +572,10 @@ module CheckerTransferFunctions = struct
   module Base = TransferFunctions (CheckerMode) (CFG)
   include Base
 
-  type analysis_data = Procdesc.t * PassedByRefAnalyzer.invariant_map
+  type analysis_data = Procdesc.t * PassedByRefAnalyzer.invariant_map * AliasCFG.Node.IdSet.t
 
-  let exec_instr astate (proc_desc, aliases_map) node index (instr : Sil.instr) =
+  let exec_instr astate (proc_desc, aliases_map, infeasible_switches) node index (instr : Sil.instr)
+      =
     let aliases, escaped =
       PassedByRefAnalyzer.extract_pre (alias_node_id node) aliases_map
       |> Option.value_map ~default:(LocalAliases.Domain.empty, VarSet.empty)
@@ -602,7 +603,13 @@ module CheckerTransferFunctions = struct
       | _ ->
           astate
     in
-    let astate = Base.exec_instr astate proc_desc node index instr in
+    let astate =
+      match instr with
+      | Prune _ when AliasCFG.Node.IdSet.mem (alias_node_id node) infeasible_switches ->
+          ExtendedDomain.bottom
+      | _ ->
+          Base.exec_instr astate proc_desc node index instr
+    in
     let add_pointees exp astate =
       VarSet.fold Domain.add (LocalAliases.locals (LocalAliases.address aliases exp)) astate
     in
@@ -765,10 +772,11 @@ let names_read_by_closures proc_desc =
 
 let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   let passed_by_ref_invariant_map = get_passed_by_ref_invariant_map proc_desc in
+  let infeasible_switches = LivenessOutParameters.infeasible_switches proc_desc in
   let cfg = CFG.from_pdesc proc_desc in
   let invariant_map =
     CheckerAnalyzer.exec_cfg cfg
-      (proc_desc, passed_by_ref_invariant_map)
+      (proc_desc, passed_by_ref_invariant_map, infeasible_switches)
       ~initial:ExtendedDomain.bottom
   in
   (* Integer negation uses the captured target widths: unsigned values wrap, while signed
