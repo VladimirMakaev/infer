@@ -17,7 +17,7 @@ exception AdapterError of string
 
 let adapter_error reason = raise (AdapterError reason)
 
-type slot = {value: AbstractValue.t; typ: Typ.t}
+type slot = {value: AbstractValue.t; typ: Typ.t; exp: Exp.t}
 
 type state = {heap: Domain.t; slots: slot IString.Map.t; errors: string list}
 
@@ -74,19 +74,17 @@ let sat_result = function
 let fresh ~name ~typ ~constant state =
   let value = AbstractValue.mk_fresh () in
   let heap = PulseArithmetic.and_eq_int value (IntLit.of_int constant) state.heap |> sat_result in
-  bind name {value; typ} {state with heap}
+  bind name {value; typ; exp= Exp.Const (Cint (IntLit.of_int constant))} {state with heap}
 
 
 let object_ ~name ~typ state =
   let value = AbstractValue.mk_fresh () in
   let heap = PulseArithmetic.and_positive value state.heap |> sat_result in
-  bind name {value; typ} {state with heap}
+  bind name {value; typ; exp= Exp.Var (Ident.create_fresh Ident.knormal)} {state with heap}
 
 
 let arg slot =
-  { FuncArg.arg_payload= ValueOrigin.unknown (slot.value, history)
-  ; exp= Exp.Var (Ident.create_fresh Ident.knormal)
-  ; typ= slot.typ }
+  {FuncArg.arg_payload= ValueOrigin.unknown (slot.value, history); exp= slot.exp; typ= slot.typ}
 
 
 let caller = Procname.from_string_c_fun "model_contract_driver"
@@ -167,7 +165,9 @@ let call ~object_name ~method_name ~parameters ~result_name ~return_typ state =
               Option.value_map result_name ~default:state ~f:(fun name ->
                   match PulseOperations.read_id ret heap with
                   | Some (value, _) ->
-                      bind name {value; typ= return_typ} state
+                      bind name
+                        {value; typ= return_typ; exp= Exp.Var (Ident.create_fresh Ident.knormal)}
+                        state
                   | None ->
                       {state with errors= "missing_return" :: errors} )
           | Some (PulseExecutionDomain.ExceptionRaised _) ->
