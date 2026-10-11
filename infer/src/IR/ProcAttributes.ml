@@ -148,7 +148,8 @@ type t =
   ; has_added_return_param: bool  (** whether or not a return param was added *)
   ; is_ret_type_pod: bool  (** whether or not the return type is POD *)
   ; is_ret_constexpr: bool  (** whether the (C++) function or method is declared as [constexpr] *)
-  }
+  ; cpp_constructor_is_nothrow: bool option
+        (** resolved exception specification of a copy/move constructor; None when unavailable *) }
 
 let get_access attributes = attributes.access
 
@@ -233,7 +234,8 @@ let default translation_unit proc_name =
   ; ret_type= StdTyp.void
   ; ret_annots= Annot.Item.empty
   ; is_ret_type_pod= true
-  ; is_ret_constexpr= false }
+  ; is_ret_constexpr= false
+  ; cpp_constructor_is_nothrow= None }
 
 
 let pp_parameters =
@@ -289,7 +291,8 @@ let pp f
      ; ret_type
      ; ret_annots
      ; is_ret_type_pod
-     ; is_ret_constexpr }
+     ; is_ret_constexpr
+     ; cpp_constructor_is_nothrow }
      [@warning "+missing-record-field-pattern"] ) =
   let default = default translation_unit proc_name in
   let pp_bool_default ~default title b f () =
@@ -386,6 +389,8 @@ let pp f
     F.fprintf f "; ret_annots= %a@," Annot.Item.pp ret_annots ;
   pp_bool_default ~default:default.is_ret_type_pod "is_ret_type_pod" is_ret_type_pod f () ;
   pp_bool_default ~default:default.is_ret_constexpr "is_ret_constexpr" is_ret_constexpr f () ;
+  Option.iter cpp_constructor_is_nothrow ~f:(fun value ->
+      F.fprintf f "; cpp_constructor_is_nothrow= %b@," value ) ;
   F.fprintf f "; proc_id= %a }@]" Procname.pp_unique_id proc_name
 
 
