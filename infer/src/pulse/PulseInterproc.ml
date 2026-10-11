@@ -1272,7 +1272,7 @@ let invalidates_all_elements call_state array_callee callee_attrs =
   | Some (StdVector (PushBack | EmplaceBack | Resize), _) ->
       (* like the models of these functions, assume that [reserve] made enough space *)
       not (is_std_vector_reserved_in_caller call_state array_callee)
-  | Some (StdVector (Assign | Clear | Emplace | Insert | Reserve | ShrinkToFit), _) ->
+  | Some (StdVector (Assign | Clear | Destructor | Emplace | Insert | Reserve | ShrinkToFit), _) ->
       true
   | Some (StdVector Erase, _) | Some _ | None ->
       (* an erased element, not an array *)
@@ -1293,7 +1293,19 @@ let elements_of_reallocated_arrays call_state =
               ~f:(fun elems (access, (elem, _)) ->
                 match (access : Access.t) with
                 | ArrayAccess _ ->
-                    (addr_caller, elem) :: elems
+                    let destroyed =
+                      match Attributes.get_invalid callee_attrs with
+                      | Some (StdVector Destructor, _) ->
+                          AbductiveDomain.reachable_addresses_from
+                            ~edge_filter:(function
+                              | FieldAccess _ | ArrayAccess _ -> true | Dereference -> false )
+                            (Seq.return elem) call_state.astate `Post
+                      | _ ->
+                          AbstractValue.Set.singleton elem
+                    in
+                    AbstractValue.Set.fold
+                      (fun elem elems -> (addr_caller, elem) :: elems)
+                      destroyed elems
                 | _ ->
                     elems ) )
       else elems )
