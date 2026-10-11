@@ -33,7 +33,8 @@ module ConditionSet : sig
   val pp_summary : Format.formatter -> summary_t -> unit
 
   val add_array_access :
-       Location.t
+       ?report_symbolic:bool
+    -> Location.t
     -> offset:ItvPure.t
     -> idx:ItvPure.t
     -> size:ItvPure.t
