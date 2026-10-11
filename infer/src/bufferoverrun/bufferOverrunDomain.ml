@@ -2129,6 +2129,12 @@ module MemReach = struct
         typ_of_global_array pvar )
 
 
+  let typ_of_param_path : SPath.partial -> _ t0 -> Typ.t option =
+   fun path m ->
+    GOption.value_map m.oenv ~default:None ~f:(fun {OndemandEnv.typ_of_param_path} ->
+        typ_of_param_path path )
+
+
   let is_array_field : Typ.t -> Fieldname.t -> t -> bool =
    fun struct_typ fn m ->
     let {OndemandEnv.tenv} = GOption.value m.oenv in
@@ -2642,6 +2648,10 @@ module Mem = struct
 
   let typ_of_global_array : Pvar.t -> _ t0 -> Typ.t option =
    fun pvar -> f_lift_default ~default:None (MemReach.typ_of_global_array pvar)
+
+
+  let typ_of_param_path : SPath.partial -> _ t0 -> Typ.t option =
+   fun path -> f_lift_default ~default:None (MemReach.typ_of_param_path path)
 
 
   let is_array_field : Typ.t -> Fieldname.t -> t -> bool =
