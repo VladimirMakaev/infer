@@ -3150,6 +3150,26 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           Procdesc.create_node procdesc try_loc (Stmt_node CXXTry)
             [Metadata (CatchEntry {try_id; loc= try_loc})]
         in
+        let visited = ref Procdesc.NodeSet.empty in
+        let rec connect_reserve node =
+          if
+            (not (Procdesc.NodeSet.mem node !visited))
+            && not (Procdesc.Node.equal node try_exit_node)
+          then (
+            visited := Procdesc.NodeSet.add node !visited ;
+            if
+              List.is_empty (Procdesc.Node.get_exn node)
+              && Instrs.exists (Procdesc.Node.get_instrs node) ~f:(function
+                | Call (_, Const (Cfun callee), _, _, _) ->
+                    String.equal (Procname.get_method callee) "reserve"
+                    && Option.exists (Procname.get_class_type_name callee) ~f:(fun name ->
+                        String.equal (Typ.Name.name_without_templates name) "std::vector" )
+                | _ ->
+                    false )
+            then Procdesc.set_succs node ~normal:None ~exn:(Some [catch_entry_node]) ;
+            List.iter (Procdesc.Node.get_succs node) ~f:connect_reserve )
+        in
+        List.iter try_trans_result.control.root_nodes ~f:connect_reserve ;
         (* add catch block as exceptional successor to end of try block. not ideal, but we will at
            least reach the code in the catch block this way *)
         (* TODO (T28898377): instead, we should extend trans_state with a list of maybe-throwing
@@ -6389,6 +6409,24 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let res_control, _ = exec_trans_instrs trans_state' instrs_trans in
     (* liveness must not report stores that only a discarded branch reads *)
     let attributes = Procdesc.get_attributes context.CContext.procdesc in
+    ( if
+        (attributes.is_cpp_copy_ctor || attributes.is_cpp_move_ctor)
+        && Option.equal Bool.equal attributes.cpp_constructor_is_nothrow (Some false)
+      then
+        let exception_sink =
+          lazy
+            (Procdesc.create_node context.CContext.procdesc
+               (Procdesc.get_loc context.CContext.procdesc)
+               Procdesc.Node.exn_sink_kind [] )
+        in
+        Procdesc.iter_nodes
+          (fun node ->
+            match Procdesc.Node.get_kind node with
+            | Stmt_node ObjCCPPThrow when List.is_empty (Procdesc.Node.get_exn node) ->
+                Procdesc.set_succs node ~normal:None ~exn:(Some [Lazy.force exception_sink])
+            | _ ->
+                () )
+          context.CContext.procdesc ) ;
     let vars_in_discarded_branches = !(context.CContext.vars_in_discarded_branches) in
     attributes.locals <-
       List.map attributes.locals ~f:(fun (local : ProcAttributes.var_data) ->

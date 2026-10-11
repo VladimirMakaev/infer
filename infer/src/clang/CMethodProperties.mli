@@ -33,6 +33,8 @@ val is_cpp_copy_ctor : Clang_ast_t.decl -> bool
 
 val is_cpp_move_ctor : Clang_ast_t.decl -> bool
 
+val cpp_constructor_is_nothrow : Clang_ast_t.decl -> bool option
+
 val is_static_ctor : Clang_ast_t.decl -> bool
 
 val is_cpp_deleted : Clang_ast_t.decl -> bool

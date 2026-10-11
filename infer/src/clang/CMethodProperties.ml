@@ -185,6 +185,13 @@ let is_cpp_move_ctor method_decl =
       false
 
 
+let cpp_constructor_is_nothrow = function
+  | Clang_ast_t.CXXConstructorDecl (_, _, _, _, {xmdi_constructor_is_nothrow}) ->
+      xmdi_constructor_is_nothrow
+  | _ ->
+      None
+
+
 let is_static_ctor method_decl =
   let open Clang_ast_t in
   match method_decl with

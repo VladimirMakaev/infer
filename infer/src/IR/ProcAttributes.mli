@@ -101,7 +101,8 @@ type t =
   ; has_added_return_param: bool  (** whether or not a return param was added *)
   ; is_ret_type_pod: bool  (** whether or not the return type is POD *)
   ; is_ret_constexpr: bool  (** whether the (C++) function or method is declared as [constexpr] *)
-  }
+  ; cpp_constructor_is_nothrow: bool option
+        (** resolved exception specification of a copy/move constructor; None when unavailable *) }
 
 val default : SourceFile.t -> Procname.t -> t
 (** Create a proc_attributes with default values. *)
