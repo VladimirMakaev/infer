@@ -141,7 +141,7 @@ void aliasing_member_not_null_ok() {
   // Also we should not report dangling pointer because q is still alive
   q->baz();
 }
-void aliasing_member_null_bad_FN() {
+void aliasing_member_null_bad() {
   auto q = ERROR_aliasing_construct_from_internal();
   // q is known here so we should report null deref
   // Also we should not report dangling pointer because q is still alive
