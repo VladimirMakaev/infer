@@ -1607,7 +1607,7 @@ module Vector = struct
         false
 
 
-  let reserve vector (requested : _ FuncArg.t) : model_no_non_disj =
+  let reserve_storage vector (requested : _ FuncArg.t) : model_no_non_disj =
    fun {path; location} astate ->
     let capacity = capacity_lower_bound vector astate in
     (* Other vector models can understate size (notably initializer-list construction). Do not
@@ -1635,6 +1635,277 @@ module Vector = struct
         match (capacity, requested_constant) with Some _, Some _ -> requested_constant | _ -> None
       in
       record_capacity vector bound astate
+
+
+  (* A direct capacity()+1 argument cannot be a non-reallocating reserve. Recognize only adjacent
+     calls in one CFG node with identical receivers and no intervening writes/calls. *)
+  let immediate_capacity_growth (model_data : model_data) (requested : _ FuncArg.t) =
+    let rec uncast (exp : Exp.t) = match exp with Exp.Cast (_, exp) -> uncast exp | exp -> exp in
+    let one exp = match uncast exp with Exp.Const (Cint n) -> IntLit.isone n | _ -> false in
+    let capacity_id =
+      match uncast requested.exp with
+      | Exp.BinOp (PlusA _, left, right) -> (
+        match (uncast left, uncast right) with
+        | Exp.Var id, _ when one right ->
+            Some id
+        | _, Exp.Var id when one left ->
+            Some id
+        | _ ->
+            None )
+      | _ ->
+          None
+    in
+    Option.exists capacity_id ~f:(fun capacity_id ->
+        List.exists (Procdesc.get_nodes model_data.analysis_data.proc_desc) ~f:(fun node ->
+            let same_receiver loads (left : Exp.t) (right : Exp.t) =
+              let left, right = (uncast left, uncast right) in
+              Exp.equal left right
+              ||
+              match (left, right) with
+              | Exp.Var left, Exp.Var right ->
+                  Option.exists (Ident.Map.find_opt left loads) ~f:(fun source ->
+                      Option.exists (Ident.Map.find_opt right loads) ~f:(Exp.equal source) )
+              | _ ->
+                  false
+            in
+            let supported_handler =
+              (not
+                 (Instrs.exists (Procdesc.Node.get_instrs node) ~f:(function
+                   | Sil.Call (_, Exp.Const (Cfun proc), _, _, _) ->
+                       Procname.is_destructor proc
+                   | _ ->
+                       false )) )
+              && (not (List.is_empty (Procdesc.Node.get_exn node)))
+              &&
+              let visited = ref Procdesc.NodeSet.empty in
+              let rec clear_path node =
+                if Procdesc.NodeSet.mem node !visited then true
+                else (
+                  visited := Procdesc.NodeSet.add node !visited ;
+                  if
+                    Instrs.exists (Procdesc.Node.get_instrs node) ~f:(function
+                      | Sil.Metadata (TryExit _) ->
+                          true
+                      | _ ->
+                          false )
+                  then true
+                  else if
+                    Instrs.exists (Procdesc.Node.get_instrs node) ~f:(function
+                      | Sil.Call (_, Exp.Const (Cfun proc), _, _, _) ->
+                          Procname.is_destructor proc
+                      | _ ->
+                          false )
+                  then false
+                  else List.for_all (Procdesc.Node.get_succs node) ~f:clear_path )
+              in
+              List.for_all (Procdesc.Node.get_succs node) ~f:clear_path
+            in
+            let rec scan loads previous = function
+              | [] ->
+                  false
+              | Sil.Call ((ret, _), Exp.Const (Cfun callee), [(receiver, _); (count, _)], loc, _)
+                :: rest
+                when Ident.equal ret (fst model_data.ret)
+                     && Procname.equal callee model_data.callee_procname
+                     && Location.equal loc model_data.location
+                     && Exp.equal count requested.exp -> (
+                match previous with
+                | Some (id, capacity_callee, capacity_receiver)
+                  when Ident.equal id capacity_id
+                       && String.equal (Procname.get_method capacity_callee) "capacity"
+                       && Option.equal Typ.Name.equal
+                            (Procname.get_class_type_name capacity_callee)
+                            (Procname.get_class_type_name callee)
+                       && same_receiver loads receiver capacity_receiver ->
+                    true
+                | _ ->
+                    scan Ident.Map.empty None rest )
+              | Sil.Call ((ret, _), Exp.Const (Cfun callee), [(receiver, _)], _, _) :: rest ->
+                  if String.equal (Procname.get_method callee) "capacity" then
+                    scan loads (Some (ret, callee, receiver)) rest
+                  else scan Ident.Map.empty None rest
+              | Sil.Load {id; e} :: rest ->
+                  scan (Ident.Map.add id e loads) previous rest
+              | Sil.Metadata _ :: rest ->
+                  scan loads previous rest
+              | _ :: rest ->
+                  scan Ident.Map.empty None rest
+            in
+            supported_handler
+            && scan Ident.Map.empty None
+                 (Array.to_list
+                    (Instrs.get_underlying_not_reversed (Procdesc.Node.get_instrs node)) ) ) )
+
+
+  let relocation_constructor (model_data : model_data) =
+    let standard_allocator =
+      let open ProcnameDispatcher.TypName in
+      make_dispatcher [-"std" &:: "allocator" &::.*--> ()]
+    in
+    match Procname.get_class_type_name model_data.callee_procname with
+    | Some
+        (CppClass
+           { template_spec_info=
+               Template
+                 {args= TType ({desc= Tstruct name} as typ) :: TType {desc= Tstruct allocator} :: _}
+           } )
+      when Option.is_some (standard_allocator () allocator)
+           && Option.value_map
+                ( Tenv.find_cpp_destructor model_data.analysis_data.tenv name
+                |> Option.bind ~f:IRAttributes.load )
+                ~default:false
+                ~f:(fun attrs -> attrs.ProcAttributes.is_cpp_implicit) -> (
+        let rec scalar typ =
+          match typ.Typ.desc with
+          | Tint _ | Tfloat _ ->
+              true
+          | Tarray {elt} ->
+              scalar elt
+          | _ ->
+              false
+        in
+        if
+          not
+            (Option.exists (Tenv.lookup model_data.analysis_data.tenv name)
+               ~f:(fun (info : Struct.t) ->
+                 List.is_empty info.supers
+                 && List.for_all info.fields ~f:(fun (field : Struct.field) -> scalar field.typ) )
+            )
+        then None
+        else
+          let constructors =
+            Tenv.find_cpp_constructor model_data.analysis_data.tenv name
+            |> List.filter_map ~f:(fun proc ->
+                IRAttributes.load proc
+                |> Option.map ~f:(fun (attrs : ProcAttributes.t) -> (proc, attrs)) )
+          in
+          let supported (attrs : ProcAttributes.t) =
+            attrs.ProcAttributes.is_defined && (not attrs.is_cpp_deleted)
+            && ProcAttributes.equal_access attrs.access Public
+            && Int.equal (List.length attrs.formals) 2
+            && Option.is_some attrs.cpp_constructor_is_nothrow
+          in
+          let copies =
+            List.filter constructors ~f:(fun (_, (attrs : ProcAttributes.t)) ->
+                attrs.is_cpp_copy_ctor && supported attrs
+                && List.mem attrs.const_formals 1 ~equal:Int.equal )
+          in
+          let moves =
+            List.filter constructors ~f:(fun (_, (attrs : ProcAttributes.t)) ->
+                (not attrs.is_cpp_deleted)
+                && ( attrs.is_cpp_move_ctor
+                   || List.exists attrs.formals ~f:(fun (_, formal, _) ->
+                       Typ.equal formal (Typ.mk (Tptr (typ, Pk_rvalue_reference))) ) ) )
+          in
+          match (copies, moves) with
+          | [copy], [] ->
+              Some (typ, copy)
+          | [copy], [((_, attrs) as move)] when attrs.is_cpp_move_ctor && supported attrs -> (
+            match attrs.cpp_constructor_is_nothrow with
+            | Some true ->
+                Some (typ, move)
+            | Some false ->
+                Some (typ, copy)
+            | None ->
+                None )
+          | _ ->
+              None )
+    | _ ->
+        None
+
+
+  let reserve vector requested : model =
+   fun ({path; location} as model_data) astate non_disj ->
+    let fallback = lift_model (reserve_storage vector requested) in
+    let tracked_singleton =
+      Option.is_some (capacity_lower_bound vector astate)
+      && Option.exists
+           ( Memory.find_edge_opt (fst vector) (FieldAccess GenericArrayBackedCollection.size_field)
+               astate
+           |> Option.bind ~f:(fun (pointer, _) -> Memory.find_edge_opt pointer Dereference astate)
+           )
+           ~f:(fun (size, _) ->
+             Option.exists (PulseArithmetic.as_constant_q astate size) ~f:(Q.equal Q.one) )
+    in
+    if (not tracked_singleton) || not (immediate_capacity_growth model_data requested) then
+      fallback model_data astate non_disj
+    else
+      match relocation_constructor model_data with
+      | None ->
+          fallback model_data astate non_disj
+      | Some (typ, (constructor, attrs))
+        when Option.exists (Procdesc.load constructor) ~f:(fun desc ->
+                 not
+                   (Procdesc.fold_instrs desc ~init:false ~f:(fun found _ instr ->
+                        found || match instr with Sil.Metadata (TryEntry _) -> true | _ -> false )
+                   ) ) ->
+          let ( let<**> ) x f = bind_sat_result non_disj x f in
+          let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+          let<**> astate, dst =
+            Basic.alloc_value_address typ ~desc:"std::vector::reserve()" model_data astate
+          in
+          let index = AbstractValue.mk_fresh () in
+          let<**> astate = PulseArithmetic.and_eq_int index IntLit.zero astate in
+          let<*> astate, source =
+            GenericArrayBackedCollection.element path location vector index astate
+          in
+          let<**> astate = PulseArithmetic.and_positive (fst source) astate in
+          let arg value typ =
+            { FuncArg.arg_payload= ValueOrigin.unknown value
+            ; typ
+            ; exp= Exp.Var (Ident.create_fresh Ident.kprimed) }
+          in
+          let this_type, source_type =
+            match attrs.formals with
+            | [(_, this_type, _); (_, source_type, _)] ->
+                (this_type, source_type)
+            | _ ->
+                assert false
+          in
+          model_data.dispatch_call_eval_args model_data.analysis_data path model_data.ret
+            (Const (Cfun constructor))
+            [arg dst this_type; arg source source_type]
+            location CallFlags.default astate non_disj (Some constructor)
+          |> fun (outcomes, non_disj) ->
+          let outcomes =
+            if Option.value attrs.cpp_constructor_is_nothrow ~default:false then
+              List.concat_map outcomes ~f:(function
+                | Ok (ExceptionRaised astate) ->
+                    Basic.early_exit model_data astate
+                | Recoverable (ExceptionRaised astate, errors) ->
+                    Basic.early_exit model_data astate
+                    |> List.map ~f:(fun state -> PulseResult.append_errors errors state)
+                | state ->
+                    [state] )
+            else outcomes
+          in
+          let unsupported_exit =
+            Option.equal Bool.equal attrs.cpp_constructor_is_nothrow (Some false)
+            && List.exists outcomes ~f:(function
+              | Ok (Stopped (ExitProgram _)) | Recoverable (Stopped (ExitProgram _), _) ->
+                  true
+              | _ ->
+                  false )
+          in
+          if unsupported_exit then fallback model_data astate non_disj
+          else
+            continue_with
+              (fun astate non_disj ->
+                fallback model_data astate non_disj
+                |> continue_with (fun astate non_disj ->
+                    let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+                    let<*> astate, array =
+                      GenericArrayBackedCollection.eval path Read location vector astate
+                    in
+                    let astate =
+                      Memory.add_edge path array
+                        (ArrayAccess (StdTyp.void, index))
+                        dst location astate
+                    in
+                    (Basic.ok_continue astate, non_disj) ) )
+              (outcomes, non_disj)
+      | Some _ ->
+          fallback model_data astate non_disj
 
 
   let pop_storage vector ~desc : model_no_non_disj =
@@ -2917,7 +3188,6 @@ let simple_matchers =
       $--> GenericArrayBackedCollection.empty ~desc:"std::vector::is_empty()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "reserve" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.reserve
-      |> with_non_disj
       |> observe_matcher ~rule:"std.vector.reserve.1"
     ; -"std" &:: "vector" &:: "resize" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.resize
       |> with_non_disj
