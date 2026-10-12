@@ -13,8 +13,11 @@ module L = Logging
 module F = Format
 open Option.Monad_infix
 
-(* always incremented before use *)
-let nesting = AnalysisGlobalState.make_dls ~init:(fun () -> -1)
+(* Always incremented before use. Deliberately a plain key and not an [AnalysisGlobalState] one:
+   the latter is re-initialised for each on-demand analysis, which reset the depth to -1 on entry
+   to every nested analysis, so the traces and the task bar reported depth 0 everywhere.
+   [preprocess], [postprocess] and [log_error_and_continue] keep it balanced instead. *)
+let nesting = DLS.new_key (fun () -> -1)
 
 let max_nesting_to_print = 8
 
@@ -184,7 +187,9 @@ let update_taskbar proc_name_opt source_file_opt =
     match (proc_name_opt, source_file_opt) with
     | Some pname, Some src_file ->
         let nesting =
-          let n = DLS.get nesting in
+          (* [max 0] so that an unbalanced decrement can never turn the task bar into an
+             [Invalid_argument] from [String.make]; the depth is only cosmetic here *)
+          let n = max 0 (DLS.get nesting) in
           if n <= max_nesting_to_print then String.make n '>' else Printf.sprintf "%d>" n
         in
         F.asprintf "%s%a: %a" nesting SourceFile.pp src_file Procname.pp pname
@@ -270,6 +275,8 @@ let run_proc_analysis tenv analysis_req specialization_context ?caller_pname cal
     summary
   in
   let log_error_and_continue summary =
+    (* this returns instead of reraising, so it owes the same bookkeeping as [postprocess] *)
+    DLS.decr nesting ;
     let new_summary = Summary.OnDisk.store analysis_req summary in
     ActiveProcedures.remove {proc_name= callee_pname; specialization} ;
     log_elapsed_time () ;
@@ -299,7 +306,10 @@ let run_proc_analysis tenv analysis_req specialization_context ?caller_pname cal
         match exn with
         | RecursiveCycleException.RecursiveCycle _
         | RestartSchedulerException.ProcnameAlreadyLocked _
-        | MissingDependencyException.MissingDependencyException ->
+        | MissingDependencyException.MissingDependencyException
+        (* the total budget belongs to the toplevel analysis, so unwind out of this one even
+           under --keep-going, which would otherwise swallow it here *)
+        | Timer.TotalTimeout _ ->
             DLS.decr nesting ;
             ActiveProcedures.remove {proc_name= callee_pname; specialization} ;
             true
@@ -587,8 +597,18 @@ let analyze_callee analysis_req ~specialization ?caller_summary ?from_file_analy
      should keep counting restarts within that dependency chain (or cycle). If it's not set then
      this is a "toplevel" analysis of [callee_pname] so we start fresh. *)
   if Option.is_none caller_summary then DLS.set number_of_recursion_restarts 0 ;
-  let res =
+  let run () =
     analyze_callee analysis_req ~specialization ?caller_summary ?from_file_analysis callee_pname
+  in
+  let res =
+    (* the same notion of "toplevel" as above: the total budget covers this analysis and every
+       on-demand analysis it pulls in, so it bounds the work the worker took on *)
+    if Option.is_some caller_summary then run ()
+    else
+      Timer.with_total_budget ~f:run ~on_timeout:(fun span ->
+          L.debug Analysis Quiet "TOTAL TIMEOUT after %fs analyzing %a and its on-demand callees@\n"
+            span Procname.pp callee_pname ;
+          Error AnalysisResult.AnalysisFailed )
   in
   if Config.trace_mutual_recursion_cycle_checker then
     L.progress "@]@\nDONE with analysing %a with specialization %a%s" Procname.pp callee_pname

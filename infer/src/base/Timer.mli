@@ -13,10 +13,19 @@ type state
 
 exception Timeout of float
 
+(** raised when the budget of the enclosing {!with_total_budget} is exhausted; unlike {!Timeout} it
+    is not caught by {!time}, so it unwinds the whole unit of work instead of one checker *)
+exception TotalTimeout of float
+
 val check_timeout : unit -> unit
-(** check if the timer has been running for more than {!Config.timeout} seconds *)
+(** check if the timer has been running for more than {!Config.timeout} seconds, and if the
+    enclosing {!with_total_budget} has been running for more than {!Config.timeout_total} seconds *)
 
 val time : Timeable.t -> on_timeout:(float -> 'a) -> f:(unit -> 'a) -> 'a
+
+val with_total_budget : on_timeout:(float -> 'a) -> f:(unit -> 'a) -> 'a
+(** run [f] under a {!Config.timeout_total} budget which, unlike the one of {!time}, the nested
+    calls to {!time} underneath it do not restart. A no-op when {!Config.timeout_total} is unset. *)
 
 val suspend : unit -> state
 
