@@ -2683,6 +2683,8 @@ let analyze specialization ({InterproceduralAnalysis.proc_desc} as analysis_data
             match exn with
             | Timer.Timeout _ ->
                 "timeout"
+            | Timer.TotalTimeout _ ->
+                "total_timeout"
             | AboutToOOM ->
                 "heap_budget"
             | _ ->

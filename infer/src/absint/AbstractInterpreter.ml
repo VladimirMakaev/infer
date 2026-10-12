@@ -651,7 +651,8 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
           | RecursiveCycleException.RecursiveCycle _
           | RestartSchedulerException.ProcnameAlreadyLocked _
           | MissingDependencyException.MissingDependencyException
-          | Timer.Timeout _ ->
+          | Timer.Timeout _
+          | Timer.TotalTimeout _ ->
               (* this isn't an error; don't log it *)
               ()
           | _ ->
