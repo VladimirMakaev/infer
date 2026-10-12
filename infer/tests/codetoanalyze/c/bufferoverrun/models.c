@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <stdarg.h>
+#include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/uio.h>
@@ -803,4 +804,129 @@ void snprintf_derived_size_Good() {
     return;
   }
   snprintf(dst + i, 8 - i, "%s", "x");
+}
+
+void sprintf_literal_fits_Good() {
+  char dst[32];
+  sprintf(dst, "short");
+}
+
+void sprintf_exact_fit_Good() {
+  char dst[6];
+  sprintf(dst, "hello");
+}
+
+void sprintf_literal_too_long_Bad() {
+  char dst[8];
+  sprintf(dst, "this literal does not fit");
+}
+
+void sprintf_off_by_one_Bad() {
+  char dst[5];
+  sprintf(dst, "hello");
+}
+
+void sprintf_percent_literal_Bad() {
+  char dst[2];
+  sprintf(dst, "a%%b");
+}
+
+void sprintf_around_conversion_Bad(const char* s) {
+  char dst[8];
+  sprintf(dst, "prefix %s suffix", s);
+}
+
+// the conversion may produce nothing, so the format on its own says nothing about the
+// length and a destination of any size is accepted here
+void sprintf_conversion_only_Good(const char* s) {
+  char dst[2];
+  sprintf(dst, "%s", s);
+}
+
+void vsprintf_literal_too_long_Bad(const char* fmt, va_list ap) {
+  char dst[8];
+  vsprintf(dst, "this literal does not fit", ap);
+}
+
+// a format ends at its first null character, whatever the string literal holds after it
+void sprintf_embedded_nul_Good() {
+  char dst[2];
+  sprintf(dst, "x\0yyyyyyyyyyyyyyyy");
+}
+
+void sprintf_initial_nul_Good() {
+  char dst[2];
+  sprintf(dst, "\0yyyyyyyyyyyyyyyy");
+}
+
+void sprintf_nul_inside_conversion_Good() {
+  char dst[2];
+  sprintf(dst, "%\0dyyyyyyyyyyyyyyyy");
+}
+
+// a wide conversion can stop on an encoding error, after which the text that follows it is not
+// written; giving up the text before it as well can only miss an overflow, never invent one
+void sprintf_wide_char_then_literal_Good(wchar_t wc) {
+  char dst[2];
+  sprintf(dst, "%lcabcdefgh", wc);
+}
+
+void sprintf_wide_string_then_literal_Good(wchar_t* ws) {
+  char dst[2];
+  sprintf(dst, "%lsabcdefgh", ws);
+}
+
+// a long modifier on a narrow conversion is not a wide conversion
+void sprintf_long_int_then_literal_Bad(long v) {
+  char dst[2];
+  sprintf(dst, "%ldabcdefgh", v);
+}
+
+// an oversized width may stop output before the following literal text is written
+void sprintf_oversize_width_Good() {
+  char dst[2];
+  sprintf(dst, "%2147483648dabcdefgh", 0);
+}
+
+void sprintf_oversize_precision_Good() {
+  char dst[2];
+  sprintf(dst, "%.2147483648fabcdefgh", 0.0);
+}
+
+// a width taken from an argument can be out of range in the same way
+// FN: refusing all argument widths also misses this valid overflowing call
+void FN_sprintf_star_width_Bad() {
+  char dst[2];
+  sprintf(dst, "%*dabcdefgh", 5, 0);
+}
+
+// a width that is an int is not rejected, so the text after the conversion is still counted
+void sprintf_width_then_literal_Bad() {
+  char dst[2];
+  sprintf(dst, "%2147483647dabcdefgh", 0);
+}
+
+// the return value is negative on an encoding error, so this branch is reachable
+void sprintf_negative_return_Bad(wchar_t wc) {
+  char dst[32];
+  int n = sprintf(dst, "%lc", wc);
+  if (n < 0) {
+    char local[2];
+    local[8] = 'x';
+  }
+}
+
+extern int* opaque_int_pointer(void);
+extern char* opaque_char_pointer(void);
+
+// c_strlen of an unknown destination must not replace the contents of an unknown integer cell
+void sprintf_unknown_negative_write_Bad(void) {
+  int* p = opaque_int_pointer();
+  char* dst = opaque_char_pointer();
+  *p = -1;
+  sprintf(dst, "abc");
+  if (*p < 0) {
+    char local[2];
+    local[8] = 0;
+  }
 }

@@ -419,6 +419,89 @@ let snprintf dest_exp size_exp =
   {exec; check}
 
 
+(* The characters a format string must emit whatever its arguments are: text outside a conversion
+   emits itself and ["%%"] emits one ['%'], while a conversion may emit nothing at all, so it
+   counts for zero.  Deliberately a LOWER bound: it is enough to catch a destination that cannot
+   hold even the literal text, and never over-counts, so it cannot report a call that fits.  A
+   conversion runs up to its conversion character; if there is none the rest is not counted. *)
+let format_min_length fmt =
+  (* a format ends at its first null character, whatever the string literal holds after it *)
+  let length = Option.value (String.index fmt '\000') ~default:(String.length fmt) in
+  let is_conversion c = String.mem "diouxXeEfFgGaAcCsSpn" c in
+  (* a conversion of a wide character or string can stop on an encoding error, and the library
+     then writes however much of the output it had reached - it may well have written the text
+     before the conversion, but nothing after it is owed *)
+  let is_wide ~long c = Char.equal c 'C' || Char.equal c 'S' || (long && String.mem "cs" c) in
+  (* a width and a precision are each an [int], and a library handed a literal one too large to
+     be an [int] can reject it after writing earlier text. No later text is owed, so the whole
+     format is refused. A [*] takes its value from an argument this does not know, which can be
+     out of range in the same way *)
+  let rec digits_end index =
+    if index < length && Char.is_digit fmt.[index] then digits_end (index + 1) else index
+  in
+  let fits_an_int index stop =
+    match int_of_string_opt (String.sub fmt ~pos:index ~len:(stop - index)) with
+    | Some value ->
+        value <= 2147483647
+    | None ->
+        false
+  in
+  let rec count index acc =
+    if index >= length then acc
+    else if not (Char.equal fmt.[index] '%') then count (index + 1) (acc + 1)
+    else if index + 1 < length && Char.equal fmt.[index + 1] '%' then count (index + 2) (acc + 1)
+    else
+      (* flags, width, precision and length modifiers are all before the conversion character *)
+      let rec skip index ~long =
+        if index >= length then None
+        else
+          let c = fmt.[index] in
+          if is_conversion c then if is_wide ~long c then None else Some (index + 1)
+          else if Char.equal c '*' then None
+          else if Char.is_digit c then
+            let stop = digits_end index in
+            if fits_an_int index stop then skip stop ~long else None
+          else skip (index + 1) ~long:(long || Char.equal c 'l')
+      in
+      (* claim nothing at all rather than the text before a conversion whose output is not owed:
+         an incomplete conversion, one the library rejects out of hand, and one that stops on an
+         encoding error all leave the rest of the format unwritten.  Giving up the text before it
+         too is the safe direction - it can only miss an overflow, never invent one *)
+      match skip (index + 1) ~long:false with
+      | None ->
+          0
+      | Some index ->
+          count index acc
+  in
+  count 0 0
+
+
+let sprintf dest_exp format_exp =
+  (* [sprintf] writes as many bytes as its output needs, so there is no size to check against
+     like [snprintf] has.  What can still be checked is that the destination holds the characters
+     the format emits on its own, plus the null one. *)
+  let exec {location} ~ret mem =
+    (* [sprintf] was unmodelled, and an unknown call leaves the destination's string length
+       unconstrained; keep doing that, as this model says nothing about the length written.  The
+       return value stays unknown too: it is negative when an encoding error occurs, so assuming
+       it nonnegative would make the caller's error branch unreachable. *)
+    let dest_locs = Sem.eval_arg_locs dest_exp mem in
+    mem |> BoUtils.Exec.forget_c_strlen dest_locs |> Dom.Mem.add_unknown ret ~location
+  and check {integer_type_widths; location} mem cond_set =
+    match format_exp with
+    | Exp.Const (Const.Cstr fmt) ->
+        let arr = Sem.eval_arr integer_type_widths dest_exp mem in
+        let latest_prune = Dom.Mem.get_latest_prune mem in
+        (* the null character lands at the index after the characters that were emitted *)
+        let idx = Dom.Val.of_int (format_min_length fmt) in
+        BoUtils.Check.array_access_byte ~arr ~idx ~is_plus:true ~last_included:false ~latest_prune
+          location cond_set
+    | _ ->
+        cond_set
+  in
+  {exec; check}
+
+
 let realloc src_exp size_exp =
   let exec ({location; tenv; integer_type_widths} as model_env) ~ret:(id, _) mem =
     let size_exp = BiabductionProp.exp_normalize_noabs tenv size_exp in
@@ -2187,6 +2270,7 @@ module Call = struct
       ; -"memset" <>$ capt_exp $+ any_arg $+ capt_exp $!--> memset
       ; -"realloc" <>$ capt_exp $+ capt_exp $+...$--> realloc
       ; -"snprintf" <>$ capt_exp $+ capt_exp $+...$--> snprintf
+      ; -"sprintf" <>$ capt_exp $+ capt_exp $+...$--> sprintf
       ; -"strcat" <>$ capt_exp $+ capt_exp $+...$--> strcat
       ; -"strcpy" <>$ capt_exp $+ capt_exp $+...$--> strcpy
       ; -"strlen" <>$ capt_exp $!--> strlen
@@ -2194,6 +2278,7 @@ module Call = struct
       ; -"strncpy" <>$ capt_exp $+ capt_exp $+ capt_exp $+...$--> strncpy
       ; -"strndup" <>$ capt_exp $+ capt_exp $+...$--> strndup
       ; -"vsnprintf" <>$ capt_exp $+ capt_exp $+...$--> snprintf
+      ; -"vsprintf" <>$ capt_exp $+ capt_exp $+...$--> sprintf
       ; (* ObjC models *)
         +BuiltinDecl.(match_builtin __objc_alloc_no_fail) <>$ capt_exp $+...$--> objc_malloc
       ; -"CFArrayCreate" <>$ any_arg $+ capt_exp $+ capt_exp
