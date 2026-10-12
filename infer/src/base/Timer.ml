@@ -10,6 +10,8 @@ module L = Logging
 
 exception Timeout of float
 
+exception TotalTimeout of float
+
 type timer =
   { last_start_time: Mtime.t (* Last time the timer was started *)
   ; previous_time_spent: Mtime.span (* Duration already recorded before last start *) }
@@ -45,6 +47,17 @@ let get () =
       Float.(Mtime.Span.to_float_ns (time_since start_time) / 1_000_000_000.0)
 
 
+(** When a total budget is configured, the instant the current unit of work started. Unlike [timer]
+    it is never suspended, so it keeps running across the on-demand analyses of the callees, which
+    is the whole point: [timer] gives each of those a fresh budget of its own. *)
+let total_start = DLS.new_key (fun () -> None)
+
+let check_total_timeout total_timeout =
+  Option.iter (DLS.get total_start) ~f:(fun start ->
+      let span = Float.(Mtime.Span.to_float_ns (Mtime.span (now ()) start) / 1_000_000_000.0) in
+      if Float.(span >. total_timeout) then raise (TotalTimeout span) )
+
+
 let check_timeout () =
   let check_timeout timeout =
     let span = get () in
@@ -52,7 +65,18 @@ let check_timeout () =
       Stats.incr_timeouts () ;
       raise (Timeout span) )
   in
+  Option.iter ~f:check_total_timeout Config.timeout_total ;
   Option.iter ~f:check_timeout Config.timeout
+
+
+let with_total_budget ~on_timeout ~f =
+  if Option.is_none Config.timeout_total then f ()
+  else
+    let previous = DLS.get total_start in
+    DLS.set total_start (Some (now ())) ;
+    Exn.protect
+      ~f:(fun () -> try f () with TotalTimeout span -> on_timeout span)
+      ~finally:(fun () -> DLS.set total_start previous)
 
 
 let time timeable ~on_timeout ~f =
