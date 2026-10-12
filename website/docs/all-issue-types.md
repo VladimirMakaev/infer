@@ -586,9 +586,9 @@ A flow of data was detected to a sink.
 
 This error is reported in Java, and in C, C++, and Objective-C code that uses
 pthread mutexes or the C++ standard library mutexes. A deadlock occurs when two
-distinct threads try to acquire two locks in reverse orders. The following code
-illustrates a textbook example. Of course, in real deadlocks, the lock
-acquisitions may be separated by deeply nested call chains.
+distinct threads try to acquire the same two distinct lock objects in reverse
+orders. The following code illustrates a textbook example. Of course, in real
+deadlocks, the lock acquisitions may be separated by deeply nested call chains.
 
 ```java
   public void lockAThenB() {
@@ -607,6 +607,9 @@ acquisitions may be separated by deeply nested call chains.
     }
   }
 ```
+
+Here, `lockA` and `lockB` refer to the same objects in both methods. Acquiring
+unrelated lock objects in the two threads does not form this cycle.
 
 The standard solution to a deadlock is to fix an order of lock acquisition and
 adhere to that order in all cases. Another solution may be to shrink the
@@ -1046,17 +1049,27 @@ class C implements I {
 
 This is an error reported on C++ and Objective C classes whenever:
 
-- Some class method directly uses locking primitives (not transitively).
+- Some class method directly uses locking primitives (not transitively), or a
+  defined method writes while protected by a required receiver-field capability.
 - It has a public method which writes to some member `x` while holding a lock.
 - It has a public method which reads `x` without holding a lock.
 
 The above may happen through a chain of calls. Above, `x` may also be a
 container (an array, a vector, etc).
 
+These conditions describe the current reporting rule. RacerD tracks held-lock
+counts and does not distinguish lock identities when pairing accesses. It can
+miss a genuine race when the read and write hold different locks. Correct
+synchronization requires at least one common lock held by both accesses.
+
 A method annotated with the clang thread safety attribute `requires_capability`
 (eg `REQUIRES(mu)`), meaning that its callers must hold `mu`, is reported on as
 if `mu` were held on entry, so its writes count as writes under a lock. Calls
 to it are checked with the locks that the caller holds.
+
+Without direct lock use, new class-level evidence is limited to simple receiver
+fields in available method bodies. Caller-supplied, global and complex capability
+expressions retain the existing class-selection approximation.
 
 A function that is not defined in the analyzed code takes or releases the
 capabilities named by its `acquire_capability`, `release_capability` or
@@ -3190,4 +3203,3 @@ Replace `weakSelf` with `self`:
 
 *Limitations:* To keep this check simple and intra-procedural, we rely on names to find `weakSelf`:
 we assume that any captured weak pointer whose name contains "self" is a weak reference to `self`.
-
