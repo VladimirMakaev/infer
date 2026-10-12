@@ -72,6 +72,9 @@ module ThreadsDomain : sig
   (** return true if two accesses with these thread values can run concurrently *)
 
   val is_any : t -> bool
+
+  val update_for_lock_use : t -> t
+  (** a lock establishes a concurrent context, while preserving known thread confinement *)
 end
 
 module OwnershipAbstractValue : sig
