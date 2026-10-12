@@ -721,7 +721,12 @@ let protected_methods_with_locked_callers ~analyze summaries =
     in
     let callees_locked =
       List.fold summaries ~init:Procname.Map.empty ~f:(fun acc (caller, {accesses}) ->
-          AccessDomain.fold (add_call_site caller) accesses acc )
+          let locks_held_on_entry = RacerDModels.num_required_capabilities caller in
+          AccessDomain.fold
+            (fun snapshot acc ->
+              AccessSnapshot.with_locks_held_on_entry locks_held_on_entry snapshot
+              |> fun snapshot -> add_call_site caller snapshot acc )
+            accesses acc )
     in
     let locked_methods =
       Procname.Map.fold
@@ -782,6 +787,11 @@ let make_results_table ~analyze summaries =
     (* report on the procedure as if its callers held the locks it requires, but leave its summary
        alone so that callers that do not hold them are reported *)
     let locks_held_on_entry = RacerDModels.num_required_capabilities procname in
+    (* An entry lock also makes the method concurrent for the per-location reporting gate.
+       Its summary keeps the original context so unguarded callers remain checked. *)
+    let threads =
+      if locks_held_on_entry > 0 then ThreadsDomain.update_for_lock_use threads else threads
+    in
     (* like a private method, since its callers carry its accesses with their lock held *)
     let drop_unprotected = Procname.Set.mem procname locked_protected_methods in
     AccessDomain.fold
