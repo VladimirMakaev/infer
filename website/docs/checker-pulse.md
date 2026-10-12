@@ -214,6 +214,8 @@ The following issue types are reported by this checker:
 - [RETAIN_CYCLE](/docs/next/all-issue-types#retain_cycle)
 - [RETAIN_CYCLE_NO_WEAK_INFO](/docs/next/all-issue-types#retain_cycle_no_weak_info)
 - [SENSITIVE_DATA_FLOW](/docs/next/all-issue-types#sensitive_data_flow)
+- [SPAN_OUT_OF_BOUNDS](/docs/next/all-issue-types#span_out_of_bounds)
+- [SPAN_OUT_OF_BOUNDS_LATENT](/docs/next/all-issue-types#span_out_of_bounds_latent)
 - [STACK_VARIABLE_ADDRESS_ESCAPE](/docs/next/all-issue-types#stack_variable_address_escape)
 - [SWIFT_NPE](/docs/next/all-issue-types#swift_npe)
 - [SWIFT_NPE_LATENT](/docs/next/all-issue-types#swift_npe_latent)

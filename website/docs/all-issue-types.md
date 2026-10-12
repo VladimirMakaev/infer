@@ -2743,6 +2743,55 @@ Instead it's better to use the `weakSelf`/`strongSelf` pattern.
 *Category: [Sensitive data flow](/docs/next/all-categories#sensitive-data-flow). Reported as "Sensitive Data Flow" by [pulse](/docs/next/checker-pulse).*
 
 A flow of sensitive data was detected from a source.
+## SPAN_OUT_OF_BOUNDS
+
+*Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Span Out Of Bounds" by [pulse](/docs/next/checker-pulse).*
+
+A subview of a `std::span` leaves the sequence the span covers, so reading or
+writing through it accesses memory outside that sequence. `first(count)` and
+`last(count)` require `count` to be at most the extent of the span, and
+`subspan(offset, count)` requires `offset` to be at most the extent and `count`
+to be at most what is left after `offset`; going past either is undefined
+behaviour, even though neither function throws.
+
+```cpp
+int subspan_out_of_bounds_bad() {
+  int a[3] = {1, 2, 3};
+  std::span<int> s(a);
+  auto t = s.subspan(5); // bad: the span only covers 3 elements
+  return t[0];
+}
+
+int first_out_of_bounds_bad(std::vector<int>& v) {
+  v.resize(2);
+  return std::span<int>(v).first(5)[0]; // bad: only 2 elements to take from
+}
+```
+
+The extent is compared only when it is known: a span built from a pointer and a
+count that the analysis cannot pin down makes no bounds claim, so the following
+is not reported.
+
+```cpp
+int unknown_extent_ok(int* p, std::size_t n) {
+  std::span<int> s(p, n);
+  return s.subspan(4)[0]; // not reported: `n` is unknown, so `4` may be in range
+}
+```
+
+Element access through `operator[]`, `front()` and `back()` is not bounds
+checked, as for `std::vector`.
+
+A span that dangles because the sequence it views was destroyed or reallocated
+is reported as
+[`VECTOR_INVALIDATION`](#vector_invalidation) instead, together with the other
+ways of holding on to a container's storage for too long.
+
+## SPAN_OUT_OF_BOUNDS_LATENT
+
+*Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Span Out Of Bounds Latent" by [pulse](/docs/next/checker-pulse).*
+
+A latent [SPAN_OUT_OF_BOUNDS](#span_out_of_bounds). See the [documentation on Pulse latent issues](/docs/next/checker-pulse#latent-issues).
 ## STACK_VARIABLE_ADDRESS_ESCAPE
 
 *Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Stack Variable Address Escape" by [pulse](/docs/next/checker-pulse).*
@@ -3143,8 +3192,9 @@ A latent [USE_AFTER_LIFETIME](#use_after_lifetime). See the [documentation on Pu
 
 *Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Vector Invalidation" by [pulse](/docs/next/checker-pulse).*
 
-An address pointing into a C++ `std::vector` might have become
-invalid. This can happen when an address is taken into a vector, then
+An address pointing into a C++ `std::vector`, or into another container
+of the standard library (see below), might have become invalid. This
+can happen when an address is taken into a vector, then
 the vector is mutated in a way that might invalidate the address, for
 example by adding elements to the vector, which might trigger a
 re-allocation of the entire vector contents (thereby invalidating the
@@ -3162,6 +3212,57 @@ void deref_vector_element_after_push_back_bad(std::vector<int>& vec) {
   std::cout << *y << "\n"; // bad: y might be invalid
 }
 ```
+
+The same applies to the buffer of a `std::basic_string`: the pointer
+returned by `data()` or `c_str()`, an iterator returned by `begin()`,
+or the pointer returned by `data()` of a `std::string_view` of the
+string, might become invalid after a call to a mutating member
+function such as `append()`, `clear()`, `push_back()`, `operator+=`,
+`operator=` or `reserve()`, as the standard allows. Unlike for
+`std::vector`, this is reported even after a call to `reserve()`.
+
+```cpp
+char deref_c_str_after_append_bad(std::string& s) {
+  const char* p = s.c_str();
+  s.append(1000, 'x'); // may re-allocate the buffer
+  return *p;           // bad: p might be invalid
+}
+```
+
+This issue is also reported for other containers of the standard library
+(`std::deque`, `std::list`, `std::map`, `std::set`, `std::unordered_map`,
+etc.) when an iterator or a reference to an element is used after an operation
+that invalidates it, for instance after the element was removed with `erase()`
+or `clear()`, or after an insertion into a `std::deque`, which invalidates all
+its iterators. Dereferencing the `end()` iterator of a container is reported
+too.
+
+```cpp
+void erase_in_loop_bad(std::map<int, int>& map) {
+  for (auto it = map.begin(); it != map.end(); ++it) {
+    if (it->second == 0) {
+      map.erase(it); // bad: `it` is invalid after this, so `++it` is too
+    }
+  }
+}
+```
+
+A `std::span` views a sequence it does not own, so it is reported too when the
+owner of that sequence destroys or reallocates it.
+
+```cpp
+int span_of_destroyed_vector_bad() {
+  std::span<int> s;
+  {
+    std::vector<int> v = {1, 2, 3};
+    s = std::span<int>(v);
+  }
+  return s[0]; // bad: the vector that owned the elements is gone
+}
+```
+
+A subview that leaves the extent of the span it was taken from is reported as
+[`SPAN_OUT_OF_BOUNDS`](#span_out_of_bounds) instead.
 
 ## VECTOR_INVALIDATION_LATENT
 
