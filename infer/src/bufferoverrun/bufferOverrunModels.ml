@@ -314,6 +314,79 @@ let strcat dest_exp src_exp =
   {exec; check}
 
 
+let strncat dest_exp src_exp size_exp =
+  (* [strncat] appends at most [size] characters of [src], stopping at its null character, and
+     then writes a null character of its own. *)
+  let src_strlen_and_size integer_type_widths mem =
+    let src_strlen = Dom.Mem.get_c_strlen (Sem.eval_arg_locs src_exp mem) mem in
+    let size = Sem.eval_arg integer_type_widths size_exp mem in
+    let traces = Trace.Set.join (Dom.Val.get_traces src_strlen) (Dom.Val.get_traces size) in
+    (Dom.Val.get_itv src_strlen, Dom.Val.get_itv size, traces)
+  in
+  let appended integer_type_widths mem =
+    let src_strlen, size, traces = src_strlen_and_size integer_type_widths mem in
+    Dom.Val.of_itv ~traces (Itv.min_sem src_strlen size)
+  in
+  let last_char_read integer_type_widths mem =
+    (* [src] need not be null-terminated: [strncat] stops at its null character or after [size]
+       characters, whichever comes first, so the highest index it reads is
+       [min (strlen src, size - 1)]. *)
+    let src_strlen, size, traces = src_strlen_and_size integer_type_widths mem in
+    let last = Itv.max_sem Itv.zero (Itv.decr size) in
+    Dom.Val.of_itv ~traces (Itv.min_sem src_strlen last)
+  in
+  let new_strlen integer_type_widths mem =
+    let dest_strlen = Dom.Mem.get_c_strlen (Sem.eval_arg_locs dest_exp mem) mem in
+    Dom.Val.plus_a dest_strlen (appended integer_type_widths mem)
+  in
+  let exec {integer_type_widths} ~ret:(id, _) mem =
+    let src_loc = Sem.eval_arg_locs src_exp mem in
+    let dest_loc = Sem.eval_arg_locs dest_exp mem in
+    let new_contents =
+      Dom.Val.join (Dom.Mem.find_set dest_loc mem) (Dom.Mem.find_set src_loc mem)
+    in
+    let strlen = new_strlen integer_type_widths mem in
+    mem
+    |> Dom.Mem.update_mem dest_loc new_contents
+    |> Dom.Mem.update_mem (PowLoc.of_c_strlen dest_loc) strlen
+    |> Dom.Mem.add_stack (Loc.of_id id) (Sem.eval_arg integer_type_widths dest_exp mem)
+  and check {integer_type_widths; location} mem cond_set =
+    let access_last_char arr idx cond_set =
+      let latest_prune = Dom.Mem.get_latest_prune mem in
+      BoUtils.Check.array_access ~arr ~idx ~is_plus:true ~last_included:false ~latest_prune location
+        cond_set
+    in
+    cond_set
+    |> access_last_char
+         (Sem.eval_arg integer_type_widths dest_exp mem)
+         (new_strlen integer_type_widths mem)
+    |> access_last_char
+         (Sem.eval_arg integer_type_widths src_exp mem)
+         (last_char_read integer_type_widths mem)
+  in
+  {exec; check}
+
+
+let snprintf dest_exp size_exp =
+  (* [snprintf] writes at most [size] bytes to [dest], the last of them a null character, so it
+     may touch any index in [0, size-1].  Handing it a [size] bigger than [dest] is the usual way
+     to overflow the destination. *)
+  let written_range integer_type_widths mem =
+    let size = Sem.eval_arg integer_type_widths size_exp mem in
+    let last = Itv.max_sem Itv.zero (Itv.decr (Dom.Val.get_itv size)) in
+    Dom.Val.of_itv ~traces:(Dom.Val.get_traces size) (Itv.join Itv.zero last)
+  in
+  let exec _ ~ret:(id, _) mem = Dom.Mem.add_stack (Loc.of_id id) Dom.Val.Itv.nat mem
+  and check {integer_type_widths; location} mem cond_set =
+    let arr = Sem.eval_arr integer_type_widths dest_exp mem in
+    let latest_prune = Dom.Mem.get_latest_prune mem in
+    BoUtils.Check.array_access_byte ~arr
+      ~idx:(written_range integer_type_widths mem)
+      ~is_plus:true ~last_included:false ~latest_prune location cond_set
+  in
+  {exec; check}
+
+
 let realloc src_exp size_exp =
   let exec ({location; tenv; integer_type_widths} as model_env) ~ret:(id, _) mem =
     let size_exp = BiabductionProp.exp_normalize_noabs tenv size_exp in
@@ -2072,13 +2145,14 @@ module Call = struct
       ; -"memmove" <>$ capt_exp $+ capt_exp $+ capt_exp $+...$--> memcpy
       ; -"memset" <>$ capt_exp $+ any_arg $+ capt_exp $!--> memset
       ; -"realloc" <>$ capt_exp $+ capt_exp $+...$--> realloc
-      ; -"snprintf" <>--> by_value Dom.Val.Itv.nat
+      ; -"snprintf" <>$ capt_exp $+ capt_exp $+...$--> snprintf
       ; -"strcat" <>$ capt_exp $+ capt_exp $+...$--> strcat
       ; -"strcpy" <>$ capt_exp $+ capt_exp $+...$--> strcpy
       ; -"strlen" <>$ capt_exp $!--> strlen
+      ; -"strncat" <>$ capt_exp $+ capt_exp $+ capt_exp $+...$--> strncat
       ; -"strncpy" <>$ capt_exp $+ capt_exp $+ capt_exp $+...$--> strncpy
       ; -"strndup" <>$ capt_exp $+ capt_exp $+...$--> strndup
-      ; -"vsnprintf" <>--> by_value Dom.Val.Itv.nat
+      ; -"vsnprintf" <>$ capt_exp $+ capt_exp $+...$--> snprintf
       ; (* ObjC models *)
         +BuiltinDecl.(match_builtin __objc_alloc_no_fail) <>$ capt_exp $+...$--> objc_malloc
       ; -"CFArrayCreate" <>$ any_arg $+ capt_exp $+ capt_exp
