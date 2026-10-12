@@ -52,3 +52,20 @@ void erase_in_loop_bad(std::map<int, int>& map) {
   }
 }
 ```
+
+A `std::span` views a sequence it does not own, so it is reported too when the
+owner of that sequence destroys or reallocates it.
+
+```cpp
+int span_of_destroyed_vector_bad() {
+  std::span<int> s;
+  {
+    std::vector<int> v = {1, 2, 3};
+    s = std::span<int>(v);
+  }
+  return s[0]; // bad: the vector that owned the elements is gone
+}
+```
+
+A subview that leaves the extent of the span it was taken from is reported as
+[`SPAN_OUT_OF_BOUNDS`](#span_out_of_bounds) instead.

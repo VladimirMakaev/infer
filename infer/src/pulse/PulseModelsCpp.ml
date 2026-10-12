@@ -283,6 +283,30 @@ module AtomicInteger = struct
     PulseOperations.write_id ret_id (old_int, Hist.add_event event old_hist) astate
 end
 
+(** the address of the element at [index] of the buffer [data], kept reachable from [data] so that
+    invalidating the buffer invalidates the derived pointers too *)
+let buffer_offset ~desc data index : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+  let open PulseModelsDSL.Syntax in
+  let* {path; location} = get_data in
+  exec_partial_operation (fun astate ->
+      let astate, element = Memory.eval_edge data (ArrayAccess (StdTyp.void, fst index)) astate in
+      let++ astate, address =
+        PulseArithmetic.eval_binop (fst element) PlusPI
+          (AbstractValueOperand (fst data))
+          (AbstractValueOperand (fst index))
+          astate
+      in
+      let element = (address, Hist.add_call path location desc (snd data)) in
+      let astate =
+        AddressAttributes.find_opt `Post (fst data) astate
+        |> Option.bind ~f:Attributes.get_invalid
+        |> Option.value_map ~default:astate ~f:(fun (cause, trace) ->
+            AddressAttributes.add_one address (Invalid (cause, trace)) astate )
+      in
+      ( Memory.add_edge path data (ArrayAccess (StdTyp.void, fst index)) element location astate
+      , element ) )
+
+
 module BasicString = struct
   (* Derived data pointers stay reachable from the buffer cell, without sharing the character
      contents of independently owned strings. *)
@@ -305,27 +329,7 @@ module BasicString = struct
     visit (AbstractValue.Set.singleton (fst buffer)) buffer astate |> snd
 
 
-  let offset data index : PulseModelsDSL.aval PulseModelsDSL.model_monad =
-    let open PulseModelsDSL.Syntax in
-    let* {path; location} = get_data in
-    exec_partial_operation (fun astate ->
-        let astate, element = Memory.eval_edge data (ArrayAccess (StdTyp.void, fst index)) astate in
-        let++ astate, address =
-          PulseArithmetic.eval_binop (fst element) PlusPI
-            (AbstractValueOperand (fst data))
-            (AbstractValueOperand (fst index))
-            astate
-        in
-        let element = (address, Hist.add_call path location "string buffer offset" (snd data)) in
-        let astate =
-          AddressAttributes.find_opt `Post (fst data) astate
-          |> Option.bind ~f:Attributes.get_invalid
-          |> Option.value_map ~default:astate ~f:(fun (cause, trace) ->
-              AddressAttributes.add_one address (Invalid (cause, trace)) astate )
-        in
-        ( Memory.add_edge path data (ArrayAccess (StdTyp.void, fst index)) element location astate
-        , element ) )
-
+  let offset data index = buffer_offset ~desc:"string buffer offset" data index
 
   let constructor_from_constant_dsl (this, this_hist) init_hist : unit PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
@@ -2643,6 +2647,229 @@ module Vector = struct
         astate
 end
 
+(** A [std::span] is a view of a contiguous sequence it does not own. It gets the representation of
+    the array-backed collections, with [GenericArrayBackedCollection.field] holding the array it
+    views and [size_field] its extent. That array is the array of the sequence's owner, so
+    destroying the owner, or reallocating its storage, invalidates accesses through the span too. *)
+module Span = struct
+  let size_access = Access.FieldAccess GenericArrayBackedCollection.size_field
+
+  let get_array collection : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    load_access collection (FieldAccess GenericArrayBackedCollection.field)
+
+
+  let get_size collection : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* size_pointer = access Read collection size_access in
+    load size_pointer
+
+
+  let set_view this ~array ~size : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    store_field ~ref:this GenericArrayBackedCollection.field array
+    @@> let* size_pointer = access Read this size_access in
+        store ~ref:size_pointer size
+
+
+  (** the extent of [std::span<T, N>], taken from the template arguments of a constructor such as
+      [span(T (&)[N])] and [span(std::array<T, N>&)], or from those of the class itself *)
+  let static_extent callee_procname =
+    let extent_of (template_spec_info : Typ.template_spec_info) =
+      match template_spec_info with
+      | NoTemplate ->
+          None
+      | Template {args} ->
+          List.find_map args ~f:(function
+            | Typ.TInt extent when Int64.is_non_negative extent ->
+                Int64.to_int extent
+            | _ ->
+                None )
+    in
+    let of_method =
+      match (callee_procname : Procname.t) with
+      | ObjC_Cpp {template_args} ->
+          extent_of template_args
+      | _ ->
+          None
+    in
+    match of_method with
+    | Some _ as extent ->
+        extent
+    | None -> (
+      match Procname.get_class_type_name callee_procname with
+      | Some (CppClass {template_spec_info}) ->
+          extent_of template_spec_info
+      | _ ->
+          None )
+
+
+  (** the extent of an argument of C array type, as in [span(T (&arr)[N])] *)
+  let rec extent_of_typ ({desc} : Typ.t) =
+    match desc with
+    | Tarray {length= Some length} ->
+        IntLit.to_int length
+    | Tptr (pointee, _) ->
+        extent_of_typ pointee
+    | _ ->
+        None
+
+
+  let extent_size extent : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    match extent with Some extent -> int extent | None -> fresh_nonneg ()
+
+
+  let default_constructor ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* array = fresh () in
+    let* size = int 0 in
+    set_view this ~array ~size
+
+
+  let copy_view ~from:collection this : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* array = get_array collection in
+    let* size = get_size collection in
+    set_view this ~array ~size
+
+
+  (** [std::span(C& c)] where [c] is another span or one of the array-backed collections: both view
+      the same array, so the span sees the invalidations of the storage of [c] *)
+  let constructor_from_collection ~desc this collection : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> copy_view ~from:collection this
+
+
+  let assign ~desc this other : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> copy_view ~from:other this @@> assign_ret this
+
+
+  (** [std::span(It first, size_type count)], and the iterator-pair constructor, whose extent is
+      left unknown *)
+  let constructor_from_iterator ~desc this first (count : PulseModelsDSL.aval FuncArg.t) : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* size = if Typ.is_int count.typ then ret count.arg_payload else fresh_nonneg () in
+    set_view this ~array:first ~size
+
+
+  (** [std::span(T (&arr)[N])], [std::span(std::array<T, N>& arr)] and the constructors from the
+      sequences that Pulse does not model: the span views the argument itself *)
+  let constructor_from_array ~desc this (arr : PulseModelsDSL.aval FuncArg.t) : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* {callee_procname} = get_data in
+    let extent =
+      match extent_of_typ arr.typ with
+      | Some _ as extent ->
+          extent
+      | None ->
+          static_extent callee_procname
+    in
+    let* size = extent_size extent in
+    set_view this ~array:arr.arg_payload ~size
+
+
+  let data ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> get_array this >>= assign_ret
+
+
+  (** a view that starts or ends outside the sequence the span covers: its array is invalid, so
+      reading or writing through the view is reported *)
+  let out_of_bounds result : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* {path; location} = get_data in
+    let* array = fresh () in
+    exec_command (PulseOperations.invalidate path UntraceableAccess location OutOfBounds array)
+    @@> let* size = fresh_nonneg () in
+        set_view result ~array ~size
+
+
+  let offset_array array offset : PulseModelsDSL.aval PulseModelsDSL.model_monad =
+    buffer_offset ~desc:"std::span offset" array offset
+
+
+  (** Whether [request] is known to be past [limit]. Only constants are compared: assuming that a
+      symbolic range is out of bounds would both report on the many correct programs whose extent
+      Pulse cannot see and, because the assumption is made in the procedure itself, report it as a
+      manifest issue rather than a latent one. *)
+  let known_past ~request ~limit : bool PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* request = as_constant_q request in
+    let* limit = as_constant_q limit in
+    match (request, limit) with
+    | Some request, Some limit ->
+        ret (Q.compare request limit > 0)
+    | _ ->
+        ret false
+
+
+  (** [std::dynamic_extent], the default [count] of [subspan], is [size_t(-1)] *)
+  let is_dynamic_extent count : bool PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* count = as_constant_q count in
+    match count with
+    | Some count ->
+        ret (Q.compare count Q.zero < 0 || Q.compare count (Q.of_bigint Z.(shift_left one 63)) >= 0)
+    | None ->
+        ret false
+
+
+  (** [std::span::first(count)] *)
+  let first ~desc this count result : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* size = get_size this in
+    let* past_the_end = known_past ~request:count ~limit:size in
+    if past_the_end then out_of_bounds result
+    else
+      let* array = get_array this in
+      set_view result ~array ~size:count
+
+
+  (** [std::span::last(count)] *)
+  let last ~desc this count result : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* size = get_size this in
+    let* past_the_end = known_past ~request:count ~limit:size in
+    if past_the_end then out_of_bounds result
+    else
+      let* array = get_array this in
+      let* offset = binop (MinusA None) size count in
+      let* array = offset_array array offset in
+      set_view result ~array ~size:count
+
+
+  (** [std::span::subspan(offset, count)] *)
+  let subspan ~desc this offset count result : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* size = get_size this in
+    let* remaining = binop (MinusA None) size offset in
+    let* to_the_end = is_dynamic_extent count in
+    let* past_the_end = known_past ~request:offset ~limit:size in
+    let* past_the_end =
+      if past_the_end || to_the_end then ret past_the_end
+      else known_past ~request:count ~limit:remaining
+    in
+    if past_the_end then out_of_bounds result
+    else
+      let* array = get_array this in
+      let* array = offset_array array offset in
+      set_view result ~array ~size:(if to_the_end then remaining else count)
+end
+
 module GenericMapCollection = struct
   let pair_field = Fieldname.make PulseOperations.pulse_model_type "__infer_map_pair"
 
@@ -3632,6 +3859,51 @@ let simple_matchers =
       $--> GenericArrayBackedCollection.size ~desc:"std::vector::size()"
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.size.1"
+      (* [std::span]: the constructors are function templates, so they are matched with any
+         template arguments, and the order of the two-argument ones matters. *)
+    ; -"std" &:: "span" &:: "span" $ capt_arg_payload
+      $+ capt_arg_payload_of_typ_exists [-"std" &:: "span"; -"std" &:: "vector"]
+      $--> Span.constructor_from_collection ~desc:"std::span::span()"
+    ; -"std" &:: "span" &:: "span" $ capt_arg_payload $+ capt_arg_payload $+ capt_arg
+      $--> Span.constructor_from_iterator ~desc:"std::span::span()"
+    ; -"std" &:: "span" &:: "span" $ capt_arg_payload $+ capt_arg
+      $--> Span.constructor_from_array ~desc:"std::span::span()"
+    ; -"std" &:: "span" &:: "span" $ capt_arg_payload
+      $--> Span.default_constructor ~desc:"std::span::span()"
+    ; -"std" &:: "span" &:: "operator=" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "span")
+      $--> Span.assign ~desc:"std::span::operator=()"
+    ; (* a span does not own what it views *)
+      -"std" &:: "span" &:: "~span" <>$ any_arg $--> Basic.skip |> with_non_disj
+    ; -"std" &:: "span" &:: "data" <>$ capt_arg_payload $--> Span.data ~desc:"std::span::data()"
+    ; -"std" &:: "span" &:: "size" <>$ capt_arg_payload
+      $--> GenericArrayBackedCollection.size ~desc:"std::span::size()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "empty" <>$ capt_arg_payload
+      $--> GenericArrayBackedCollection.empty ~desc:"std::span::empty()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.at ~desc:"std::span::operator[]()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "front" <>$ capt_arg_payload
+      $--> Vector.front ~desc:"std::span::front()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "back" <>$ capt_arg_payload
+      $--> Vector.back ~desc:"std::span::back()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.vector_begin ~desc:"std::span::begin()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.vector_end ~desc:"std::span::end()"
+      |> with_non_disj
+    ; -"std" &:: "span" &:: "first" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+      $--> Span.first ~desc:"std::span::first()"
+    ; -"std" &:: "span" &:: "last" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+      $--> Span.last ~desc:"std::span::last()"
+    ; -"std" &:: "span" &:: "subspan" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+      $+ capt_arg_payload
+      $--> Span.subspan ~desc:"std::span::subspan()"
     ; -"std"
       &::+ PointerIterator.is_function_on_pointers ["distance"]
       $ capt_arg_payload $+ capt_arg_payload

@@ -303,6 +303,8 @@ val self_in_block_passed_to_init : t
 
 val sensitive_data_flow : t
 
+val span_out_of_bounds : latent:bool -> t
+
 val stack_variable_address_escape : t
 
 val starvation : t
