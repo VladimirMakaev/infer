@@ -8,6 +8,11 @@ This is an error reported on C++ and Objective C classes whenever:
 The above may happen through a chain of calls. Above, `x` may also be a
 container (an array, a vector, etc).
 
+These conditions describe the current reporting rule. RacerD tracks held-lock
+counts and does not distinguish lock identities when pairing accesses. It can
+miss a genuine race when the read and write hold different locks. Correct
+synchronization requires at least one common lock held by both accesses.
+
 A method annotated with the clang thread safety attribute `requires_capability`
 (eg `REQUIRES(mu)`), meaning that its callers must hold `mu`, is reported on as
 if `mu` were held on entry, so its writes count as writes under a lock. Calls
