@@ -808,10 +808,54 @@ let make_results_table ~analyze summaries =
       else acc )
 
 
+(* A caller-supplied capability can protect an externally synchronized component without making
+   its public methods concurrent entry points. Only a simple, unshadowed receiver field provides
+   new class-level evidence here. Other requirements still apply when reporting activated classes. *)
+let num_required_receiver_capabilities procname =
+  match Attributes.load procname with
+  | Some {ProcAttributes.is_defined= true; formals; ret_annots} -> (
+    match
+      List.find ret_annots ~f:(fun {Annot.class_name} ->
+          String.equal class_name Annotations.requires_capability )
+    with
+    | Some {Annot.parameters} ->
+        Procname.get_class_type_name procname
+        |> Option.bind ~f:(Tenv.lookup (Exe_env.get_proc_tenv procname))
+        |> Option.value_map ~default:0 ~f:(fun {Struct.fields} ->
+            List.count parameters ~f:(fun {Annot.value} ->
+                match value with
+                | Annot.Str name ->
+                    (not
+                       (List.exists formals ~f:(fun (formal, _, _) ->
+                            String.equal (Mangled.to_string formal) name ) ) )
+                    && List.exists fields ~f:(fun ({name= field} : Struct.field) ->
+                        String.equal (Fieldname.get_field_name field) name )
+                | _ ->
+                    false ) )
+    | None ->
+        0 )
+  | _ ->
+      0
+
+
 let class_has_concurrent_method class_summaries =
   let open RacerDDomain in
-  let method_has_concurrent_context (_, summary) =
-    match (summary.threads : ThreadsDomain.t) with NoThread -> false | _ -> true
+  let method_has_concurrent_context (procname, summary) =
+    match (summary.threads : ThreadsDomain.t) with
+    | NoThread ->
+        let locks_held_on_entry = num_required_receiver_capabilities procname in
+        locks_held_on_entry > 0
+        && AccessDomain.exists
+             (fun snapshot ->
+               AccessSnapshot.is_write snapshot
+               &&
+               let snapshot =
+                 AccessSnapshot.with_locks_held_on_entry locks_held_on_entry snapshot
+               in
+               LockDomain.is_locked snapshot.elem.lock )
+             summary.accesses
+    | _ ->
+        true
   in
   List.exists class_summaries ~f:method_has_concurrent_context
 
