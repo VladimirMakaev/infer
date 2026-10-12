@@ -859,7 +859,7 @@ let get_message_and_suggestion diagnostic =
       in
       let pp_access_path fmt =
         match typ with
-        | Value -> (
+        | Value | Array _ -> (
           match get_access_path_from_trace () with
           | Some access_path ->
               F.fprintf fmt "`%s`" access_path
@@ -882,7 +882,7 @@ let get_message_and_suggestion diagnostic =
             F.fprintf fmt " during the call to %a" CallEvent.describe f
       in
       ( match typ with
-        | Value ->
+        | Value | Array _ ->
             F.asprintf "%t is read without initialization%t" pp_access_path pp_location
         | Const _ | DictMissingKey _ ->
             F.asprintf "%t doesn't seem to be initialized. This will cause a runtime error%t"
@@ -1352,7 +1352,7 @@ let get_issue_type ~latent issue_type =
       else IssueType.mutual_recursion_cycle
   | ReadonlySharedPtrParameter _, false ->
       IssueType.readonly_shared_ptr_param
-  | ReadUninitialized {typ= Value}, _ ->
+  | ReadUninitialized {typ= Value | Array _}, _ ->
       IssueType.uninitialized_value_pulse
   | ReadUninitialized {typ= Const _}, _ ->
       IssueType.pulse_uninitialized_const
