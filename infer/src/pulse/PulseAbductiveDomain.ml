@@ -16,6 +16,12 @@ module Decompiler = PulseDecompiler
 module PathContext = PulsePathContext
 module UninitBlocklist = PulseUninitBlocklist
 
+let array_default_contents =
+  Fieldname.make
+    (Typ.CStruct (QualifiedCppName.of_list ["__infer_pulse_model"]))
+    "__infer_array_default_contents"
+
+
 (** {2 Unsafe part of the module implementation wrt normalization} *)
 
 (** signature common to [PostDomain], representing the post at the current program point, and the
@@ -891,7 +897,38 @@ module Internal = struct
                   (* Offsets name cells within the same object. Computing their addresses does not
                      read the contents, but a later dereference must retain initialization checks.
                      Only inherit on creation: an existing cell may already have been written. *)
-                  BaseAddressAttributes.find_opt addr_src (astate.post :> base_domain).attrs
+                  let source =
+                    match (access : Access.t) with
+                    | ArrayAccess (_, index)
+                      when Option.is_some
+                             (Formula.as_constant_q astate.path_condition (downcast index)) ->
+                        if
+                          Option.exists
+                            (Formula.as_constant_q astate.path_condition (downcast index))
+                            ~f:(Q.equal Q.zero)
+                        then Some addr_src
+                        else
+                          find_edge_opt `Post addr_src (FieldAccess array_default_contents) astate
+                          |> Option.value_map ~default:(Some addr_src) ~f:(fun (default, _) ->
+                              match
+                                SafeAttributes.find_opt `Post default astate
+                                |> Option.bind ~f:Attributes.get_uninitialized
+                              with
+                              | Some (Array length)
+                                when Option.exists
+                                       (Formula.as_constant_q astate.path_condition (downcast index))
+                                       ~f:(fun q ->
+                                         Q.compare q Q.zero < 0
+                                         || Q.compare q (Q.of_string (IntLit.to_string length)) >= 0 )
+                                ->
+                                  None
+                              | _ ->
+                                  Some default )
+                    | _ ->
+                        Some addr_src
+                  in
+                  Option.bind source ~f:(fun source ->
+                      BaseAddressAttributes.find_opt source (astate.post :> base_domain).attrs )
                   |> Option.bind ~f:Attribute.Attributes.get_uninitialized
                   |> Option.value_map ~default:astate ~f:(fun typ ->
                       SafeAttributes.uninitialize addr_dst typ astate )
@@ -1650,6 +1687,47 @@ let canon_pointer_source' astate = function
       src
 
 
+let is_closed_scalar_array pvar elt =
+  if Pvar.is_global pvar || Pvar.is_frontend_tmp pvar || Pvar.is_cpp_temporary pvar then false
+  else
+    match PulseContext.proc_desc () with
+    | None ->
+        false
+    | Some proc_desc ->
+        let mentions exp = Exp.program_vars exp |> Sequence.exists ~f:(Pvar.equal pvar) in
+        let direct_access (exp : Exp.t) typ =
+          if not (mentions exp) then true
+          else if not (Typ.equal_ignore_quals typ elt) then false
+          else
+            match exp with
+            | Exp.Lvar var ->
+                Pvar.equal var pvar
+            | Lindex (Lvar var, index) ->
+                Pvar.equal var pvar && not (mentions index)
+            | _ ->
+                false
+        in
+        (* Track logical scalar slots only while their storage is closed. Escaping
+           addresses, pointer arithmetic, captures, and reinterpreted views retain the
+           existing conservative approximation rather than introducing alias assumptions. *)
+        Procdesc.find_map_instrs proc_desc ~f:(fun instr ->
+            let allowed =
+              match (instr : Sil.instr) with
+              | Load {e; typ} ->
+                  direct_access e typ
+              | Store {e1; e2; typ} ->
+                  (not (mentions e2)) && direct_access e1 typ
+              | Call (_, callee, args, _, _) ->
+                  (not (mentions callee)) && not (List.exists args ~f:(fun (exp, _) -> mentions exp))
+              | Prune (exp, _, _, _) ->
+                  not (mentions exp)
+              | Metadata _ ->
+                  true
+            in
+            if allowed then None else Some () )
+        |> Option.is_none
+
+
 let rec fold_pointer_targets tenv timestamp src typ location ?(fields_prefix = RevList.empty) ~f
     ?(filter_name = fun _ -> true) ?(filter_struct = fun _ -> true) astate =
   match typ.Typ.desc with
@@ -1672,16 +1750,23 @@ let rec fold_pointer_targets tenv timestamp src typ location ?(fields_prefix = R
             else
               let field_access = Access.FieldAccess field in
               let fields = RevList.cons field fields_prefix in
-              let field_addr = CanonValue.mk_fresh () in
-              let history =
-                ValueHistory.singleton (StructFieldAddressCreated (fields, location, timestamp))
+              let astate, (field_addr, history) =
+                match SafeMemory.find_edge_opt `Post (fst addr_hist) field_access astate with
+                | Some field ->
+                    (astate, field)
+                | None ->
+                    let field_addr = CanonValue.mk_fresh () in
+                    let history =
+                      ValueHistory.singleton
+                        (StructFieldAddressCreated (fields, location, timestamp))
+                    in
+                    let heap =
+                      BaseMemory.add_edge (fst addr_hist) field_access
+                        (downcast field_addr, history)
+                        (astate.post :> base_domain).heap
+                    in
+                    ({astate with post= PostDomain.update ~heap astate.post}, (field_addr, history))
               in
-              let heap =
-                BaseMemory.add_edge (fst addr_hist) field_access
-                  (downcast field_addr, history)
-                  (astate.post :> base_domain).heap
-              in
-              let astate = {astate with post= PostDomain.update ~heap astate.post} in
               fold_pointer_targets tenv timestamp
                 (`Malloc (field_addr, history))
                 field_typ location ~fields_prefix:fields astate ~f ~filter_name ~filter_struct ) )
@@ -1701,14 +1786,86 @@ let set_uninitialized tenv timestamp src typ location astate =
   in
   let filter_struct (struct_ : Struct.t) =
     match struct_ with
+    | {fields= [{typ= {desc= Tstruct _}}]} ->
+        true
     | {fields= [_]} ->
-        (* Ignore single field structs: see D26146578 *)
+        (* Retain the single-scalar-field policy; an aggregate wrapper must not stop
+           traversal of its inner fields. *)
         false
     | {fields= [] | _ :: _ :: _} ->
         true
   in
-  fold_pointer_targets tenv timestamp src typ location astate ~filter_name ~filter_struct
-    ~f:(fun (addr, _) astate -> SafeAttributes.add_one addr (Uninitialized Value) astate )
+  match (typ.Typ.desc, src) with
+  | ( Tarray {elt= {desc= Tint _ | Tfloat _ | Tptr _} as elt; length= Some length}
+    , `LocalDecl (pvar, _) )
+    when IntLit.gt length IntLit.zero && is_closed_scalar_array pvar elt ->
+      let astate, addr_hist = get_pointer_target timestamp src location astate in
+      let astate, default =
+        SafeMemory.eval_edge addr_hist (FieldAccess array_default_contents) astate
+      in
+      SafeAttributes.add_one (fst addr_hist) (Uninitialized Value) astate
+      |> SafeAttributes.add_one (fst default) (Uninitialized (Array length))
+  | _ ->
+      fold_pointer_targets tenv timestamp src typ location astate ~filter_name ~filter_struct
+        ~f:(fun (addr, _) astate -> SafeAttributes.add_one addr (Uninitialized Value) astate )
+
+
+let initialize_array_after_store addr index astate =
+  let addr = CanonValue.canon' astate addr in
+  let index = CanonValue.canon' astate index in
+  match SafeMemory.find_edge_opt `Post addr (FieldAccess array_default_contents) astate with
+  | None ->
+      SafeAttributes.initialize addr astate
+  | Some (default, _) -> (
+    match Formula.as_constant_q astate.path_condition (downcast index) with
+    | Some q -> (
+        let astate = if Q.equal q Q.zero then SafeAttributes.initialize addr astate else astate in
+        match
+          SafeAttributes.find_opt `Post default astate
+          |> Option.bind ~f:Attributes.get_uninitialized
+        with
+        | Some (Array length) ->
+            let length = Q.of_string (IntLit.to_string length) in
+            let initialized_by_store cell =
+              SafeAttributes.find_opt `Post cell astate
+              |> Option.exists ~f:(fun attrs ->
+                  Attributes.exists attrs ~f:(function Initialized -> true | _ -> false)
+                  && Option.is_some (Attributes.get_written_to attrs) )
+            in
+            let initialized =
+              SafeMemory.fold_edges `Post addr astate
+                ~init:(if initialized_by_store addr then [Q.zero] else [])
+                ~f:(fun indices (access, (cell, _)) ->
+                  match access with
+                  | ArrayAccess (_, index) when initialized_by_store cell -> (
+                    match Formula.as_constant_q astate.path_condition (downcast index) with
+                    | Some index
+                      when Z.equal (Q.den index) Z.one
+                           && Q.compare index Q.zero >= 0
+                           && Q.compare index length < 0 ->
+                        index :: indices
+                    | _ ->
+                        indices )
+                  | _ ->
+                      indices )
+              |> List.dedup_and_sort ~compare:Q.compare
+            in
+            if Q.equal (Q.of_int (List.length initialized)) length then
+              SafeAttributes.initialize default astate
+            else astate
+        | _ ->
+            astate )
+    | None ->
+        (* A symbolic write keeps the existing possibly-initialized approximation.
+             Only closed declaration-seeded arrays have this default; heap witnesses
+             and scalar indexed writers retain their previous behavior. *)
+        let astate = SafeAttributes.initialize addr astate |> SafeAttributes.initialize default in
+        SafeMemory.fold_edges `Post addr astate ~init:astate ~f:(fun astate (access, (cell, _)) ->
+            match access with
+            | ArrayAccess _ ->
+                SafeAttributes.initialize cell astate
+            | FieldAccess _ | Dereference ->
+                astate ) )
 
 
 let fold_pointer_targets tenv path src typ location ~f astate =

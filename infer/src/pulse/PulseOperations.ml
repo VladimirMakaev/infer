@@ -309,10 +309,10 @@ let write_deref path location ~ref:addr_trace_ref ~obj:addr_trace_obj astate =
 let write_deref_with_origin path location ~ref ~obj astate =
   let+ astate = write_deref path location ~ref:(ValueOrigin.addr_hist ref) ~obj astate in
   match (ref : ValueOrigin.t) with
-  | InMemory {src= addr, _; access= ArrayAccess _} ->
+  | InMemory {src= addr, _; access= ArrayAccess (_, index)} ->
       (* A subscript store can initialize a scalar passed by address, e.g. [p[0] = 42]. Keep the
          existing coarse backing-location effect at the actual store, not address computation. *)
-      AddressAttributes.initialize addr astate
+      AbductiveDomain.initialize_array_after_store addr index astate
   | InMemory _ | OnStack _ | Unknown _ ->
       astate
 

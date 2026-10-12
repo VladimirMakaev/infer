@@ -173,12 +173,13 @@ module Attribute = struct
   module UninitializedTyp = struct
     type t =
       | Value
+      | Array of IntLit.t
       | Const of Fieldname.t
       | DictMissingKey of {dict: DecompilerExpr.t; key: Fieldname.t}
     [@@deriving compare, equal, yojson_of]
 
     let pp f = function
-      | Value ->
+      | Value | Array _ ->
           F.pp_print_string f "value"
       | Const fld ->
           F.fprintf f "const(%a)" Fieldname.pp fld
