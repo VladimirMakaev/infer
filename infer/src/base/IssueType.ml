@@ -931,6 +931,11 @@ let self_in_block_passed_to_init =
     ~user_documentation:[%blob "./documentation/issues/SELF_IN_BLOCK_PASSED_TO_INIT.md"]
 
 
+let span_out_of_bounds =
+  register_with_latent ~category:MemoryError ~id:"SPAN_OUT_OF_BOUNDS" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/SPAN_OUT_OF_BOUNDS.md"]
+
+
 let stack_variable_address_escape =
   register ~category:MemoryError ~id:"STACK_VARIABLE_ADDRESS_ESCAPE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/STACK_VARIABLE_ADDRESS_ESCAPE.md"]

@@ -36,6 +36,8 @@ Issue types in this category:
 - [NSSTRING_INTERNAL_PTR_CAPTURED_IN_BLOCK](/docs/next/all-issue-types#nsstring_internal_ptr_captured_in_block)
 - [PULSE_REFERENCE_STABILITY](/docs/next/all-issue-types#pulse_reference_stability)
 - [PULSE_UNINITIALIZED_VALUE](/docs/next/all-issue-types#pulse_uninitialized_value)
+- [SPAN_OUT_OF_BOUNDS](/docs/next/all-issue-types#span_out_of_bounds)
+- [SPAN_OUT_OF_BOUNDS_LATENT](/docs/next/all-issue-types#span_out_of_bounds_latent)
 - [STACK_VARIABLE_ADDRESS_ESCAPE](/docs/next/all-issue-types#stack_variable_address_escape)
 - [STATIC_INITIALIZATION_ORDER_FIASCO](/docs/next/all-issue-types#static_initialization_order_fiasco)
 - [STRONG_SELF_NOT_CHECKED](/docs/next/all-issue-types#strong_self_not_checked)

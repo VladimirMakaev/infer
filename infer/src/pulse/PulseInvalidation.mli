@@ -106,6 +106,9 @@ type t =
   | HandedOverToStream of Procname.t
       (** the file descriptor is now owned by a stream, e.g. after [fdopen], which will close it *)
   | OptionalEmpty
+  | OutOfBounds
+      (** the address was derived from a view, such as a [std::span], by leaving the bounds of the
+          sequence that view covers *)
   | StdVector of std_vector_function
   | StdString of std_string_function
   | CppMap of map_type * map_function

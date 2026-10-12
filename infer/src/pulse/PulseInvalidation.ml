@@ -242,6 +242,7 @@ type t =
   | GoneOutOfScope of Pvar.t * Typ.t
   | HandedOverToStream of Procname.t
   | OptionalEmpty
+  | OutOfBounds
   | StdVector of std_vector_function
   | StdString of std_string_function
   | CppMap of map_type * map_function
@@ -260,6 +261,7 @@ let releases_resource = function
   | EndIterator
   | GoneOutOfScope _
   | OptionalEmpty
+  | OutOfBounds
   | StdVector _
   | StdString _
   | StdContainer _
@@ -304,6 +306,7 @@ let is_relevant_for_reason must_be_valid_reason invalidation =
     | EndIterator
     | GoneOutOfScope _
     | OptionalEmpty
+    | OutOfBounds
     | StdVector _
     | StdString _
     | StdContainer _
@@ -369,6 +372,8 @@ let issue_type_of_cause ~latent invalidation must_be_valid_reason =
       IssueType.use_after_lifetime ~latent
   | OptionalEmpty ->
       IssueType.optional_empty_access ~latent
+  | OutOfBounds ->
+      IssueType.span_out_of_bounds ~latent
   | StdVector _ | StdString _ | StdContainer _ ->
       IssueType.vector_invalidation ~latent
   | CppMap _ ->
@@ -404,6 +409,8 @@ let describe f cause =
       F.fprintf f "was handed over to the stream returned by `%a`" Procname.describe proc_name
   | OptionalEmpty ->
       F.pp_print_string f "is assigned an empty value"
+  | OutOfBounds ->
+      F.pp_print_string f "lies outside the bounds of the view it was taken from"
   | StdVector std_vector_f ->
       F.fprintf f "was potentially invalidated by `%a`" pp_std_vector_function std_vector_f
   | StdString std_string_f ->
@@ -437,7 +444,7 @@ let pp f invalidation =
       F.fprintf f "ConstantDereference(%a)" describe invalidation
   | CppDelete | CppDeleteArray ->
       F.fprintf f "CppDelete(%a)" describe invalidation
-  | EndIterator | GoneOutOfScope _ | OptionalEmpty ->
+  | EndIterator | GoneOutOfScope _ | OptionalEmpty | OutOfBounds ->
       describe f invalidation
   | FClose _ ->
       F.fprintf f "FClose(%a)" describe invalidation
