@@ -213,10 +213,19 @@ module Intervals = struct
 
 
   let binop v bop op_lhs op_rhs formula =
-    match
-      Option.both (interval_of_operand formula.phi op_lhs) (interval_of_operand formula.phi op_rhs)
-      |> Option.bind ~f:(fun (lhs, rhs) -> CItv.binop bop lhs rhs)
-    with
+    let lhs = interval_of_operand formula.phi op_lhs in
+    let rhs = interval_of_operand formula.phi op_rhs in
+    let itv =
+      match (bop : Binop.t) with
+      | Mod ->
+          (* a remainder is bounded by its divisor alone, so this is worth computing even when
+             nothing at all is known about the dividend *)
+          Option.bind rhs ~f:(fun rhs ->
+              CItv.binop Mod (Option.value lhs ~default:CItv.unknown) rhs )
+      | _ ->
+          Option.both lhs rhs |> Option.bind ~f:(fun (lhs, rhs) -> CItv.binop bop lhs rhs)
+    in
+    match itv with
     | None ->
         Sat formula
     | Some binop_itv ->
