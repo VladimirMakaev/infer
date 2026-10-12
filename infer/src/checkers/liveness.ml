@@ -905,6 +905,15 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
          || Mangled.is_underscore (Pvar.get_name pvar)
          || is_block_listed pvar || is_const_read_by_closure pvar )
   in
+  let is_volatile_store pvar typ =
+    let is_volatile typ = Typ.is_volatile typ.Typ.quals in
+    (* Initializer stores may carry the unqualified value type, so also consult the declaration.
+       Only the lvalue's top-level qualifier matters, not the volatility of a pointer's target. *)
+    is_volatile typ
+    || Option.exists (find_local pvar) ~f:(fun local -> is_volatile local.ProcAttributes.typ)
+    || List.exists (Procdesc.get_formals proc_desc) ~f:(fun (name, typ, _) ->
+        Mangled.equal name (Pvar.get_name pvar) && is_volatile typ )
+  in
   let log_report pvar typ loc =
     let message = F.asprintf "The value written to `%a` is never used" Pvar.pp_value pvar in
     let trace_message = F.asprintf "Write of unused value (type `%a`)" (Typ.pp_full Pp.text) typ in
@@ -913,8 +922,9 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   in
   let report_dead_store live_vars passed_by_ref_vars = function
     | Sil.Store {e1= Lvar pvar; typ; e2= rhs_exp; loc}
-      when should_report pvar typ live_vars passed_by_ref_vars && not (is_sentinel_exp ~typ rhs_exp)
-      ->
+      when should_report pvar typ live_vars passed_by_ref_vars
+           && (not (is_volatile_store pvar typ))
+           && not (is_sentinel_exp ~typ rhs_exp) ->
         log_report pvar typ loc
     | Sil.Call (_, e_fun, ((arg, typ) :: _ as actuals), loc, _) -> (
       match (Exp.ignore_cast e_fun, Exp.ignore_cast arg) with
