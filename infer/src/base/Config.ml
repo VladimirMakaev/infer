@@ -3762,6 +3762,15 @@ and timeout =
      seconds. Defaults to 120 seconds."
 
 
+and timeout_total =
+  CLOpt.mk_float_opt ~long:"timeout-total"
+    ~in_help:[(Analyze, manual_generic); (Run, manual_generic)]
+    "Time after which the analysis of a toplevel procedure gives up, in seconds, counting the \
+     on-demand analyses of its callees. $(b,--timeout) bounds one checker on one procedure and is \
+     restarted for each callee analysed on demand, so it does not bound how long a worker spends \
+     on one procedure; this does. Disabled by default."
+
+
 and top_longest_proc_duration_size =
   CLOpt.mk_int_opt ~long:"top-longest-proc-duration-size" ~default:10
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -5200,6 +5209,8 @@ and textual_hide_instr_types = !textual_hide_instr_types
 and threadsafe_aliases = !threadsafe_aliases
 
 and timeout = !timeout
+
+and timeout_total = !timeout_total
 
 and top_longest_proc_duration_size = !top_longest_proc_duration_size
 
