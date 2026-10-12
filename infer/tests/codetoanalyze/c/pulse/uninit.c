@@ -135,7 +135,7 @@ void local_array_good() {
   char c = o[0];
 }
 
-void local_array_bad_FN() {
+void local_array_bad() {
   char o[10];
   o[0] = 'a';
   char c = o[1];

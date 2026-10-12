@@ -71,8 +71,8 @@ int deliberate_unknown_ok() {
 #endif
 
 #if CONTRACT_CASE == 0 || CONTRACT_CASE == 6
-// Known FN: array elements without initializers are currently not diagnosed here.
-int FN_array_element_uninitialized_bad() {
+// A local array element read without initialization must be diagnosed.
+int array_element_uninitialized_bad() {
   int values[2];
   // @operation uninitialized_read
   return values[1];
