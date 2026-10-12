@@ -41,6 +41,9 @@ exclusion, and at least one of the accesses is a write. Mutual exclusion can be
 ensured by synchronization primitives such as locks, or by knowledge that both
 accesses occur on the same thread.
 
+Lock-based mutual exclusion requires both accesses to hold at least one common
+lock. Holding different locks does not serialize accesses to the same variable.
+
 ## Triggering the analysis
 
 RacerD doesn't try to check _all_ code for concurrency issues; it only looks at
@@ -462,8 +465,8 @@ There are a number of known limitations to the design of the race detector.
 - It looks for races involving syntactically identical access paths, and misses
   races due to aliasing
 - It misses races that arise from a locally declared object escaping its scope
-- It uses a boolean locks abstraction, and so misses races where two accesses
-  are mistakenly protected by different locks
+- It tracks held-lock counts but does not distinguish lock identities when
+  pairing accesses, so it misses races where the accesses hold different locks.
 - It assumes a deep ownership model, which misses races where local objects
   refer to or contain non-owned objects.
 - It avoids reasoning about weak memory and Java's volatile keyword
