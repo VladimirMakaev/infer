@@ -496,8 +496,11 @@ val fold_pointer_targets :
   -> t
 (** Call the provided [f] on each address in memory corresponding to a field in the struct (or
     primitive value) starting at the provided address. Also deals with nested struct values. Each
-    address is generated fresh and placed in the heap (or stack if the address comes from a
-    [`LocalDecl]) before calling [f]. *)
+    address is reused if already present, or created in the heap (or stack if the address comes from
+    a [`LocalDecl]) before calling [f]. *)
+
+val initialize_array_after_store : AbstractValue.t -> AbstractValue.t -> t -> t
+(** Preserve closed scalar-array defaults after known stores; retain coarse effects elsewhere. *)
 
 val incorporate_new_eqs :
      Formula.new_eqs

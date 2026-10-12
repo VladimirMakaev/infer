@@ -108,6 +108,7 @@ end
 module UninitializedTyp : sig
   type t =
     | Value
+    | Array of IntLit.t
     | Const of Fieldname.t
     | DictMissingKey of {dict: DecompilerExpr.t; key: Fieldname.t}
   [@@deriving compare, equal, yojson_of]
