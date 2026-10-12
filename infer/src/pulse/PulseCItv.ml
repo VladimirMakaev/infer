@@ -450,6 +450,77 @@ let minus = function
       Some (outside (IntLit.neg u) (IntLit.neg l))
 
 
+let unknown = between Bound.MinusInfinity Bound.PlusInfinity
+
+(* [x / k] for a nonzero literal [k]. C division truncates toward zero, so the quotient is
+   monotone in the dividend: non-decreasing for a positive divisor and non-increasing for a
+   negative one. [k = -1] is declined because [INT_MIN / -1] overflows and the bounds here are
+   mathematical integers. *)
+let div_by_literal x k =
+  if IntLit.iszero k || IntLit.eq k IntLit.minus_one then None
+  else
+    match x with
+    | Between (lower, upper) ->
+        let increasing = IntLit.gt k IntLit.zero in
+        let image : Bound.t -> Bound.t = function
+          | Int i ->
+              Int (IntLit.div i k)
+          | MinusInfinity ->
+              if increasing then MinusInfinity else PlusInfinity
+          | PlusInfinity ->
+              if increasing then PlusInfinity else MinusInfinity
+        in
+        let lower, upper =
+          if increasing then (image lower, image upper) else (image upper, image lower)
+        in
+        Some (between lower upper)
+    | Outside _ ->
+        None
+
+
+(* [x % k] for a nonzero literal [k]. In C the remainder keeps the sign of the dividend and is
+   smaller than the divisor in magnitude, so it lies within [[-(|k| - 1), |k| - 1]] narrowed by
+   the dividend's own sign and magnitude. *)
+let rem_by_literal x k =
+  if IntLit.iszero k then None
+  else
+    let largest = IntLit.sub (if IntLit.gt k IntLit.zero then k else IntLit.neg k) IntLit.one in
+    match x with
+    | Between (lower, upper) ->
+        let lower : Bound.t =
+          match lower with
+          | Int i when IntLit.geq i IntLit.zero ->
+              Int IntLit.zero
+          | Int i ->
+              Int (IntLit.max (IntLit.neg largest) i)
+          | MinusInfinity ->
+              Int (IntLit.neg largest)
+          | PlusInfinity ->
+              Int IntLit.zero
+        in
+        let upper : Bound.t =
+          match upper with
+          | Int i when IntLit.leq i IntLit.zero ->
+              Int IntLit.zero
+          | Int i ->
+              Int (IntLit.min largest i)
+          | PlusInfinity ->
+              Int largest
+          | MinusInfinity ->
+              Int IntLit.zero
+        in
+        Some (between lower upper)
+    | Outside _ ->
+        None
+
+
+let literal_of = function
+  | Between (Bound.Int l, Bound.Int u) when IntLit.eq l u ->
+      Some l
+  | _ ->
+      None
+
+
 let binop (bop : Binop.t) a_lhs a_rhs =
   let open Option.Monad_infix in
   match bop with
@@ -457,13 +528,15 @@ let binop (bop : Binop.t) a_lhs a_rhs =
       add a_lhs a_rhs
   | MinusA _ ->
       minus a_rhs >>= add a_lhs
+  | DivI ->
+      literal_of a_rhs |> Option.bind ~f:(div_by_literal a_lhs)
+  | Mod ->
+      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)
   | PlusPI
   | MinusPI
   | MinusPP
   | Mult _
-  | DivI
   | DivF
-  | Mod
   | Shiftlt
   | Shiftrt
   | Lt
