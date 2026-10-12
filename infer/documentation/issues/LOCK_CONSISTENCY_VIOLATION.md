@@ -1,6 +1,7 @@
 This is an error reported on C++ and Objective C classes whenever:
 
-- Some class method directly uses locking primitives (not transitively).
+- Some class method directly uses locking primitives (not transitively), or a
+  defined method writes while protected by a required receiver-field capability.
 - It has a public method which writes to some member `x` while holding a lock.
 - It has a public method which reads `x` without holding a lock.
 
@@ -11,6 +12,10 @@ A method annotated with the clang thread safety attribute `requires_capability`
 (eg `REQUIRES(mu)`), meaning that its callers must hold `mu`, is reported on as
 if `mu` were held on entry, so its writes count as writes under a lock. Calls
 to it are checked with the locks that the caller holds.
+
+Without direct lock use, new class-level evidence is limited to simple receiver
+fields in available method bodies. Caller-supplied, global and complex capability
+expressions retain the existing class-selection approximation.
 
 A function that is not defined in the analyzed code takes or releases the
 capabilities named by its `acquire_capability`, `release_capability` or
