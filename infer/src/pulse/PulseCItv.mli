@@ -11,6 +11,9 @@ module F = Format
 
 type t [@@deriving compare, equal, yojson_of]
 
+val unknown : t
+(** the interval that constrains nothing *)
+
 val equal_to : IntLit.t -> t
 
 val nonnegative : t
