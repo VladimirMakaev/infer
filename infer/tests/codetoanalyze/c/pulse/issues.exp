@@ -91,6 +91,8 @@ codetoanalyze/c/pulse/compound_literal.c, detect_zero_bad, 3, NULLPTR_DEREFERENC
 codetoanalyze/c/pulse/constant_casts.c, minus_one_to_unsigned_char_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/dangling_deref.c, dangling_deref_bad, 3, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [variable `y` declared here,read to uninitialized value occurs here]
 codetoanalyze/c/pulse/dangling_deref.c, intraproc_dangling_deref_bad, 3, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [variable `y` declared here,read to uninitialized value occurs here]
+codetoanalyze/c/pulse/div_mod_literal.c, remainder_can_be_one_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse/div_mod_literal.c, quotient_can_be_negative_bad, 8, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/enum.c, enum_values_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/enum.c, block_scope_enum_values_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/enum.c, block_scope_enum_and_var_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
