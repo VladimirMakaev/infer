@@ -948,6 +948,8 @@ val threadsafe_aliases : Yojson.Safe.t
 
 val timeout : float option
 
+val timeout_total : float option
+
 val top_longest_proc_duration_size : int option
 
 val topl_filter_unsure : bool
