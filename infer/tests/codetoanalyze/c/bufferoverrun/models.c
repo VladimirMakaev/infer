@@ -4,6 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/uio.h>
@@ -637,6 +638,117 @@ void strcat_strlen_Bad() {
   char str[20];
   strcpy(str, "abc");
   strcat(str, "defgh");
+  int a[8];
+  a[strlen(str)] = 0;
+}
+
+void snprintf_sizeof_Good() {
+  char dst[8];
+  snprintf(dst, sizeof(dst), "%s", "abc");
+}
+
+void snprintf_exact_size_Good() {
+  char dst[8];
+  snprintf(dst, 8, "%s", "abc");
+}
+
+void snprintf_zero_size_Good() {
+  char dst[8];
+  snprintf(dst, 0, "%s", "abc");
+}
+
+void snprintf_size_off_by_one_Bad() {
+  char dst[8];
+  snprintf(dst, 9, "%s", "abc");
+}
+
+void snprintf_size_of_other_buffer_Bad() {
+  char dst[8];
+  char src[64];
+  snprintf(dst, sizeof(src), "%s", src);
+}
+
+void vsnprintf_sizeof_Good(const char* fmt, va_list ap) {
+  char dst[8];
+  vsnprintf(dst, sizeof(dst), fmt, ap);
+}
+
+void vsnprintf_size_too_big_Bad(const char* fmt, va_list ap) {
+  char dst[8];
+  vsnprintf(dst, 64, fmt, ap);
+}
+
+void strncat_Good() {
+  char str[16];
+  strcpy(str, "abcd");
+  strncat(str, "efgh", 4);
+}
+
+void strncat_exact_fit_Good() {
+  char str[9];
+  strcpy(str, "abcd");
+  strncat(str, "efgh", 4);
+}
+
+void strncat_bounded_by_size_Good() {
+  char str[8];
+  strcpy(str, "abcd");
+  strncat(str, "efghijkl", 3);
+}
+
+void strncat_bounded_by_src_Good() {
+  char str[8];
+  strcpy(str, "abcd");
+  strncat(str, "ef", 99);
+}
+
+// strncat stops after size characters, so the source need not be
+// null-terminated and its last readable character sits at index size-1
+void strncat_source_not_terminated_Good() {
+  char src[4] = {'a', 'b', 'c', 'd'};
+  char str[16];
+  strcpy(str, "x");
+  strncat(str, src, 4);
+}
+
+void strncat_source_not_terminated_sizeof_Good() {
+  char src[8] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+  char str[32];
+  strcpy(str, "x");
+  strncat(str, src, sizeof(src));
+}
+
+void strncat_source_size_past_end_Bad() {
+  char src[4] = {'a', 'b', 'c', 'd'};
+  char str[64];
+  strcpy(str, "x");
+  strncat(str, src, 8);
+}
+
+void strncat_Bad() {
+  char str[8];
+  strcpy(str, "abcd");
+  strncat(str, "efgh", 4);
+}
+
+void strncat_size_too_big_Bad() {
+  char str[8];
+  strcpy(str, "abcd");
+  strncat(str, "efghijkl", 8);
+}
+
+void strncat_strlen_Good() {
+  char str[16];
+  strcpy(str, "abc");
+  strncat(str, "defg", 4);
+  int a[8];
+  a[strlen(str)] = 0;
+}
+
+void strncat_strlen_Bad() {
+  char str[20];
+  strcpy(str, "abc");
+  strncat(str, "defgh", 5);
   int a[8];
   a[strlen(str)] = 0;
 }
