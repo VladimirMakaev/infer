@@ -1,8 +1,8 @@
 This error is reported in Java, and in C, C++, and Objective-C code that uses
 pthread mutexes or the C++ standard library mutexes. A deadlock occurs when two
-distinct threads try to acquire two locks in reverse orders. The following code
-illustrates a textbook example. Of course, in real deadlocks, the lock
-acquisitions may be separated by deeply nested call chains.
+distinct threads try to acquire the same two distinct lock objects in reverse
+orders. The following code illustrates a textbook example. Of course, in real
+deadlocks, the lock acquisitions may be separated by deeply nested call chains.
 
 ```java
   public void lockAThenB() {
@@ -21,6 +21,9 @@ acquisitions may be separated by deeply nested call chains.
     }
   }
 ```
+
+Here, `lockA` and `lockB` refer to the same objects in both methods. Acquiring
+unrelated lock objects in the two threads does not form this cycle.
 
 The standard solution to a deadlock is to fix an order of lock acquisition and
 adhere to that order in all cases. Another solution may be to shrink the
