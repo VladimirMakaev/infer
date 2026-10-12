@@ -91,14 +91,14 @@ class RequiredReader {
   int other_ = 0;
 };
 
-// Requiring a lock does not itself satisfy the documented requirement that
-// some method of the class directly uses a locking primitive.
+// A defined writer requiring a lock establishes the same contract as an
+// explicit acquisition, even when no class method directly acquires it.
 class NoDirectLock {
  public:
   explicit NoDirectLock(Mutex* mutex) : mutex_(mutex) {}
 
   void write_locked_ok() REQUIRE_CAPABILITY(mutex_) { value_++; }
-  int read_no_direct_lock_ok() { return value_; }
+  int read_no_direct_lock_bad() { return value_; }
 
  private:
   Mutex* mutex_;

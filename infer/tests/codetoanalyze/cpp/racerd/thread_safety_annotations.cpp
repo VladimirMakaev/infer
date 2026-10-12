@@ -143,11 +143,11 @@ class OnlyRequires {
  public:
   void set_locked(int v) REQUIRES(mu_) { x_ = v; }
 
-  // a class is only checked if one of its methods takes a lock, here only the
-  // callers of set_locked do
-  int FN_get_unlocked_bad() { return x_; }
+  // The available set_locked body requires the receiver's mutex, so an
+  // unlocked reader must be checked without a direct acquisition in this class.
+  int get_unlocked_bad() { return x_; }
 
-  void FN_reset_unlocked_bad() { x_ = 0; }
+  void reset_unlocked_bad() { x_ = 0; }
 
  private:
   Mutex mu_;
