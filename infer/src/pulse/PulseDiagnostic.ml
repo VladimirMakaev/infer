@@ -1107,7 +1107,7 @@ let invalidation_titles (invalidation : Invalidation.t) =
   | ConstantDereference _ ->
       ( "source of the constant value part of the trace starts here"
       , "constant value dereference part of the trace starts here" )
-  | OutOfBounds ->
+  | OutOfBounds _ ->
       ( "out-of-bounds part of the trace starts here"
       , "out-of-bounds access part of the trace starts here" )
   | CFree
