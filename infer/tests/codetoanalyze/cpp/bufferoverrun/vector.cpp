@@ -330,3 +330,33 @@ void array_of_vectors_Good_FP(int level, int* p, int* q) {
   }
   fill_from_array_of_vectors(a, level);
 }
+
+// An index obtained by dividing the vector's own length is below that length as soon as the
+// vector is not empty. The division used to keep the length itself as its upper bound.
+int half_size_index_Good(std::vector<int> v) {
+  if (v.empty()) {
+    return 0;
+  }
+  return v[v.size() / 2];
+}
+
+int third_size_index_Good(std::vector<int> v) {
+  if (v.empty()) {
+    return 0;
+  }
+  return v[v.size() / 3];
+}
+
+// the empty case is the one the division does not rule out
+int half_size_of_empty_Bad() {
+  std::vector<int> v;
+  return v[v.size() / 2];
+}
+
+// adding the length back reaches it again
+int half_size_plus_size_Bad(std::vector<int> v) {
+  if (v.empty()) {
+    return 0;
+  }
+  return v[v.size() / 2 + v.size()];
+}
