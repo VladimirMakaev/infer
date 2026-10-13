@@ -49,11 +49,40 @@ let is_clang_variadic proc_name_opt =
   |> Option.exists ~f:(fun {ProcAttributes.is_clang_variadic} -> is_clang_variadic)
 
 
+(** Split a variadic call's [actuals] into the ones matched against [formals] and the ones passed in
+    [...].
+
+    A procedure returning a value that does not fit in a register is given a return parameter, and
+    that parameter is appended to [formals] while its address is appended to [actuals] -- so the
+    arguments of [...] sit in between. Taking a prefix would hand the first of them to the return
+    parameter, and an argument that happens to be the integer zero then reads as a null pointer;
+    dropping a prefix would likewise count the return parameter's address as one of the [...]
+    arguments and shift every one of them by a position.
+
+    Both [trim_actuals_if_var_arg] and [bind_variadic_actuals] derive their answer from here, so
+    they cannot disagree about where the [...] arguments are. *)
+let split_variadic_actuals proc_name_opt ~formals ~actuals =
+  let n_formals = List.length formals in
+  let has_added_return_param =
+    Option.exists (Option.bind ~f:IRAttributes.load proc_name_opt)
+      ~f:(fun {ProcAttributes.has_added_return_param} -> has_added_return_param )
+  in
+  match List.last actuals with
+  | Some return_param_actual when has_added_return_param && n_formals > 0 ->
+      let without_return_param = List.drop_last actuals |> Option.value ~default:[] in
+      ( List.take without_return_param (n_formals - 1) @ [return_param_actual]
+      , List.drop without_return_param (n_formals - 1) )
+  | _ ->
+      (List.take actuals n_formals, List.drop actuals n_formals)
+
+
 (** if the procedure has a variadic number of arguments, its known [formals] will be less than the
     [actuals] we get; the remaining arguments (the ones in [...]) are dropped here and passed
     separately by [bind_variadic_actuals] when a summary is applied *)
 let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
-  if is_clang_variadic proc_name_opt then List.take actuals (List.length formals) else actuals
+  if is_clang_variadic proc_name_opt then
+    fst (split_variadic_actuals proc_name_opt ~formals ~actuals)
+  else actuals
 
 
 (** Bind the [n]th variadic actual of a call to a C variadic function to the global
@@ -63,7 +92,7 @@ let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
     [unbind_variadic_actuals] after the call. Struct arguments are not supported. *)
 let bind_variadic_actuals path location proc_name_opt ~formals ~actuals astate =
   if is_clang_variadic proc_name_opt then
-    List.drop actuals (List.length formals)
+    snd (split_variadic_actuals proc_name_opt ~formals ~actuals)
     |> List.foldi ~init:(astate, []) ~f:(fun n (astate, previous) (actual, typ) ->
         if Typ.is_struct typ then (astate, previous)
         else
