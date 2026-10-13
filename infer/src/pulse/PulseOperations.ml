@@ -71,7 +71,7 @@ let check_addr_access path ?must_be_valid_reason access_mode location (address, 
           | GoneOutOfScope _
           | HandedOverToStream _
           | OptionalEmpty
-          | OutOfBounds
+          | OutOfBounds _
           | StdVector _
           | StdString _
           | CppMap _

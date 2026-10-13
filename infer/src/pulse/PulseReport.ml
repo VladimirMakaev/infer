@@ -384,7 +384,7 @@ let is_constant_deref_without_invalidation (invalidation : Invalidation.t) acces
     | GoneOutOfScope _
     | HandedOverToStream _
     | OptionalEmpty
-    | OutOfBounds
+    | OutOfBounds _
     | StdVector _
     | StdString _
     | CppMap _
