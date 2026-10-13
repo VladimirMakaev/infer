@@ -936,6 +936,11 @@ let span_out_of_bounds =
     ~user_documentation:[%blob "./documentation/issues/SPAN_OUT_OF_BOUNDS.md"]
 
 
+let string_view_out_of_bounds =
+  register_with_latent ~category:MemoryError ~id:"STRING_VIEW_OUT_OF_BOUNDS" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/STRING_VIEW_OUT_OF_BOUNDS.md"]
+
+
 let stack_variable_address_escape =
   register ~category:MemoryError ~id:"STACK_VARIABLE_ADDRESS_ESCAPE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/STACK_VARIABLE_ADDRESS_ESCAPE.md"]

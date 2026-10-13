@@ -217,6 +217,8 @@ The following issue types are reported by this checker:
 - [SPAN_OUT_OF_BOUNDS](/docs/next/all-issue-types#span_out_of_bounds)
 - [SPAN_OUT_OF_BOUNDS_LATENT](/docs/next/all-issue-types#span_out_of_bounds_latent)
 - [STACK_VARIABLE_ADDRESS_ESCAPE](/docs/next/all-issue-types#stack_variable_address_escape)
+- [STRING_VIEW_OUT_OF_BOUNDS](/docs/next/all-issue-types#string_view_out_of_bounds)
+- [STRING_VIEW_OUT_OF_BOUNDS_LATENT](/docs/next/all-issue-types#string_view_out_of_bounds_latent)
 - [SWIFT_NPE](/docs/next/all-issue-types#swift_npe)
 - [SWIFT_NPE_LATENT](/docs/next/all-issue-types#swift_npe_latent)
 - [TAINT_ERROR](/docs/next/all-issue-types#taint_error)
