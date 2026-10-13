@@ -1492,6 +1492,25 @@ module Vector = struct
         (prior @ more, non_disj) )
 
 
+  (* Disposing one element forks the state, so folding over the elements of a vector multiplies
+     the outcomes, and a few dozen elements are enough to produce more disjunctions than the
+     analysis can get through.  The interpreter bounds disjunctions between nodes, but this
+     fan-out happens inside a single model call, where that bound does not apply, so apply the
+     same one here.  Outcomes that cannot continue are kept whatever their number: they carry the
+     diagnostics, and [continue_with] passes them on instead of forking them again. *)
+  let limit_disjuncts outcomes =
+    let can_continue = function
+      | Ok (ContinueProgram _) | Recoverable (ContinueProgram _, _) ->
+          true
+      | _ ->
+          false
+    in
+    if List.count outcomes ~f:can_continue <= Config.pulse_max_disjuncts then outcomes
+    else
+      let continuing, finished = List.partition_tf outcomes ~f:can_continue in
+      finished @ List.take continuing Config.pulse_max_disjuncts
+
+
   let dispose_elements vector : model =
    fun ({path; location; callee_procname} as model_data) astate non_disj ->
     match element_type callee_procname with
@@ -1524,16 +1543,19 @@ module Vector = struct
           let pointer_typ = Typ.mk (Tptr (typ, Pk_pointer)) in
           List.fold elements
             ~init:(Basic.ok_continue astate, non_disj)
-            ~f:(fun outcomes element ->
-              continue_with
-                (fun astate non_disj ->
-                  let arg =
-                    { FuncArg.arg_payload= ValueOrigin.unknown element
-                    ; typ= pointer_typ
-                    ; exp= Exp.Var (Ident.create_fresh Ident.kprimed) }
-                  in
-                  Basic.free_or_delete `Delete CppDelete arg model_data astate non_disj )
-                outcomes )
+            ~f:(fun (outcomes, non_disj) element ->
+              let outcomes, non_disj =
+                continue_with
+                  (fun astate non_disj ->
+                    let arg =
+                      { FuncArg.arg_payload= ValueOrigin.unknown element
+                      ; typ= pointer_typ
+                      ; exp= Exp.Var (Ident.create_fresh Ident.kprimed) }
+                    in
+                    Basic.free_or_delete `Delete CppDelete arg model_data astate non_disj )
+                  (outcomes, non_disj)
+              in
+              (limit_disjuncts outcomes, non_disj) )
     | _ ->
         (Basic.ok_continue astate, non_disj)
 
