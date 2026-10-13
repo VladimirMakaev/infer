@@ -709,6 +709,56 @@ module BasicStringView = struct
                     @@> write_field ~ref:result ModeledField.string_length count
                   ; prune_gt count remaining
                     @@> write_field ~ref:result ModeledField.string_length remaining ] ) ]
+
+
+  (** Whether [request] is known to be past [limit]. As for [std::span], only constants are
+      compared: assuming a symbolic length is exceeded would report on the many correct programs
+      whose extent Pulse cannot see, and would do so in the procedure itself, making the issue
+      manifest rather than latent. *)
+  let known_past ~request ~limit : bool PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* request = as_constant_q request in
+    let* limit = as_constant_q limit in
+    match (request, limit) with
+    | Some request, Some limit ->
+        ret (Q.compare request limit > 0)
+    | _ ->
+        ret false
+
+
+  (** The view now starts or ends outside the sequence it was viewing, so reading through it is
+      reported. [size()] is unsigned, so it has wrapped around to a huge value as well. *)
+  let out_of_bounds this_hist : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* {path; location} = get_data in
+    let* data = fresh () in
+    exec_command
+      (PulseOperations.invalidate path UntraceableAccess location (OutOfBounds StringView) data)
+    @@> let* size = fresh_nonneg () in
+        store_data this_hist data @@> write_field ~ref:this_hist ModeledField.string_length size
+
+
+  (** [std::basic_string_view::remove_prefix(n)] and [remove_suffix(n)]. Both require [n] to be at
+      most [size()], and neither is checked nor throws. Removing exactly [size()] is allowed and
+      leaves an empty view, so only strictly more than it is reported. *)
+  let remove_affix ~desc ~moves_data this_hist n : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* length = access Read this_hist (FieldAccess ModeledField.string_length) in
+    let* past_the_end = known_past ~request:n ~limit:length in
+    if past_the_end then out_of_bounds this_hist
+    else
+      let* remaining = binop (MinusA None) length n in
+      write_field ~ref:this_hist ModeledField.string_length remaining
+      @@>
+      if moves_data then
+        (* the sequence being viewed is the same one, so keep the lifetime it was borrowed with *)
+        let* lifetime = load_access this_hist (FieldAccess lifetime_field) in
+        let* data = load_access this_hist (FieldAccess data_field) in
+        let* data = BasicString.offset data n in
+        store_data this_hist data @@> store_field ~ref:this_hist lifetime_field lifetime
+      else ret ()
 end
 
 module Function = struct
@@ -2787,7 +2837,8 @@ module Span = struct
     let open PulseModelsDSL.Syntax in
     let* {path; location} = get_data in
     let* array = fresh () in
-    exec_command (PulseOperations.invalidate path UntraceableAccess location OutOfBounds array)
+    exec_command
+      (PulseOperations.invalidate path UntraceableAccess location (OutOfBounds Span) array)
     @@> let* size = fresh_nonneg () in
         set_view result ~array ~size
 
@@ -3438,6 +3489,12 @@ let map_matchers =
       $--> BasicStringView.length ~desc:"std::basic_string_view::length()"
     ; view_method "empty" <>$ capt_arg_payload $--> BasicStringView.empty
     ; view_method "operator[]" <>$ capt_arg_payload $+ capt_arg_payload $--> BasicStringView.address
+    ; view_method "remove_prefix" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> BasicStringView.remove_affix ~desc:"std::basic_string_view::remove_prefix()"
+             ~moves_data:true
+    ; view_method "remove_suffix" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> BasicStringView.remove_affix ~desc:"std::basic_string_view::remove_suffix()"
+             ~moves_data:false
     ; view_method "substr" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
       $+ capt_arg_payload $--> BasicStringView.substr
     ; -"std" &:: "basic_string" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
