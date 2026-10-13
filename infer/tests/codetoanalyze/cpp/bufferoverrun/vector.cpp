@@ -360,3 +360,45 @@ int half_size_plus_size_Bad(std::vector<int> v) {
   }
   return v[v.size() / 2 + v.size()];
 }
+
+// An unknown callee reached through a non-const pointer can insert into the
+// vector, so its size is no longer known afterwards.
+struct FillStatus {
+  bool ok_;
+  bool isOk() const { return ok_; }
+};
+FillStatus fill_unknown(std::vector<int>* out);
+void read_unknown(const std::vector<int>* v);
+void touch_buffer(char* buf);
+
+// only BUFFER_OVERRUN_L4 remains, which is disabled by default, so this no
+// longer reaches a user; the L1 report it used to raise was the false positive
+int unknown_callee_fills_vector_Good_FP(void) {
+  std::vector<int> v;
+  if (!fill_unknown(&v).isOk()) {
+    return -1;
+  }
+  return v[0];
+}
+
+// a pointer to const cannot grow it, so the read of an empty vector stands
+int unknown_const_callee_vector_Bad(void) {
+  std::vector<int> v;
+  read_unknown(&v);
+  return v[0];
+}
+
+// the extent of a plain buffer is the extent of its allocation; no callee can
+// change it, so the bound survives the unknown call
+char unknown_callee_keeps_buffer_extent_Bad(void) {
+  char b[16];
+  touch_buffer(b);
+  return b[20];
+}
+
+// a size that is already known is kept, so this is still reported exactly
+int unknown_callee_known_size_vector_Bad(void) {
+  std::vector<int> v(4);
+  fill_unknown(&v);
+  return v[10];
+}
