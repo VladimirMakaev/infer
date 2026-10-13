@@ -752,3 +752,55 @@ void strncat_strlen_Bad() {
   int a[8];
   a[strlen(str)] = 0;
 }
+
+void snprintf_constant_offset_Bad() {
+  char dst[8];
+  snprintf(dst + 2, 64, "%s", "x");
+}
+
+void snprintf_constant_offset_Good() {
+  char dst[64];
+  snprintf(dst + 2, 8, "%s", "x");
+}
+
+
+int snprintf_unknown_offset(void);
+
+// The offset is not known, but the size does not fit the destination at any offset, so
+// there is nothing to correlate and the overflow is still reported.
+void snprintf_unknown_offset_oversize_Bad() {
+  char dst[8];
+  int i = snprintf_unknown_offset();
+  if (i < 0 || i > 3) {
+    return;
+  }
+  snprintf(dst + i, 100, "%s", "x");
+}
+
+// The size fits the destination, so only the offset can push the write past its end.
+void snprintf_constant_offset_fitting_size_Bad() {
+  char dst[8];
+  snprintf(dst + 6, 8, "%s", "x");
+}
+
+// The offset is not known and the size fits the destination, but a size the caller spelled
+// out did not come from the offset, so the two can be added up and the overflow reported.
+void snprintf_unknown_offset_fitting_size_Bad() {
+  char dst[8];
+  int i = snprintf_unknown_offset();
+  if (i < 0 || i > 3) {
+    return;
+  }
+  snprintf(dst + i, 8, "%s", "x");
+}
+
+// The append idiom: the size is what is left of the destination, so the write stops at its
+// end however far in the unknown offset is.
+void snprintf_derived_size_Good() {
+  char dst[8];
+  int i = snprintf_unknown_offset();
+  if (i < 0 || i > 3) {
+    return;
+  }
+  snprintf(dst + i, 8 - i, "%s", "x");
+}
