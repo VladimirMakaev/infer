@@ -376,13 +376,45 @@ let snprintf dest_exp size_exp =
     let last = Itv.max_sem Itv.zero (Itv.decr (Dom.Val.get_itv size)) in
     Dom.Val.of_itv ~traces:(Dom.Val.get_traces size) (Itv.join Itv.zero last)
   in
+  (* The check adds the destination's offset to the range written, and the two are summed as
+     independent intervals.  That is sound for a destination at a known offset, but the append
+     idiom moves the destination and takes the size from the same variable -
+     [snprintf(buf + len, N - len, ...)] reaches [buf + N] exactly - and once a loop has widened
+     [len] the sum is [0, 2 * N] rather than [N].  The correlation is already gone by the time a
+     model runs, so only claim something when the destination sits at a constant offset, or when
+     the size is not the kind of size that offset could have come from. *)
+  (* A size the caller spelled out cancels against no offset, so adding it to one is honest
+     however little is known about that offset. *)
+  let has_derived_size size = Option.is_none (Itv.get_const (Dom.Val.get_itv size)) in
+  let has_constant_offset arr =
+    ArrayBlk.fold
+      (fun _ arr_info acc ->
+        acc && Option.is_some (Itv.get_const (ArrayBlk.ArrInfo.get_offset arr_info)) )
+      (Dom.Val.get_array_blk arr) true
+  in
+  (* A size that does not fit the destination at all overflows it whatever the offset is, so
+     that case needs no correlation to judge and is still reported. *)
+  let size_exceeds_destination arr size =
+    ArrayBlk.fold
+      (fun _ arr_info acc ->
+        acc
+        || Boolean.is_true (Itv.gt_sem (Dom.Val.get_itv size) (ArrayBlk.ArrInfo.byte_size arr_info)) )
+      (Dom.Val.get_array_blk arr) false
+  in
   let exec _ ~ret:(id, _) mem = Dom.Mem.add_stack (Loc.of_id id) Dom.Val.Itv.nat mem
   and check {integer_type_widths; location} mem cond_set =
     let arr = Sem.eval_arr integer_type_widths dest_exp mem in
-    let latest_prune = Dom.Mem.get_latest_prune mem in
-    BoUtils.Check.array_access_byte ~arr
-      ~idx:(written_range integer_type_widths mem)
-      ~is_plus:true ~last_included:false ~latest_prune location cond_set
+    let size = Sem.eval_arg integer_type_widths size_exp mem in
+    if
+      has_derived_size size
+      && (not (has_constant_offset arr))
+      && not (size_exceeds_destination arr size)
+    then cond_set
+    else
+      let latest_prune = Dom.Mem.get_latest_prune mem in
+      BoUtils.Check.array_access_byte ~arr
+        ~idx:(written_range integer_type_widths mem)
+        ~is_plus:true ~last_included:false ~latest_prune location cond_set
   in
   {exec; check}
 
