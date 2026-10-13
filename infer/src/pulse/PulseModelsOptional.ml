@@ -788,6 +788,24 @@ let matchers : matcher list =
   ; -"boost" &:: "optional" &:: "is_initialized" <>$ capt_arg_payload
     $+...$--> has_value ~desc:"boost::optional::is_initialized()"
     |> with_non_disj
+    (* [boost::optional] declares neither of these: a call on an optional resolves to the base
+       class it inherits them from, which the matchers above do not name. Since the constructor
+       is modelled, the real fields of that base were never written, so running the real
+       accessor would read uninitialised memory. Model them like the ones declared on the
+       optional itself, so that the accessors agree with the constructor. [operator!] needs no
+       matcher of its own: its body is [!this->is_initialized()], so it follows from this one. *)
+  ; -"boost" &:: "optional_detail" &:: "tc_optional_base" &:: "is_initialized" <>$ capt_arg_payload
+    $+...$--> has_value ~desc:"boost::optional::is_initialized()"
+    |> with_non_disj
+  ; -"boost" &:: "optional_detail" &:: "optional_base" &:: "is_initialized" <>$ capt_arg_payload
+    $+...$--> has_value ~desc:"boost::optional::is_initialized()"
+    |> with_non_disj
+  ; -"boost" &:: "optional_detail" &:: "tc_optional_base" &:: "get_ptr" $ capt_arg_payload
+    $+...$--> get_pointer ~desc:"boost::optional::get_ptr()"
+    |> with_non_disj
+  ; -"boost" &:: "optional_detail" &:: "optional_base" &:: "get_ptr" $ capt_arg_payload
+    $+...$--> get_pointer ~desc:"boost::optional::get_ptr()"
+    |> with_non_disj
   ; -"boost" &:: "optional" &:: "operator_bool" <>$ capt_arg_payload
     $+...$--> has_value ~desc:"boost::optional::operator_bool()"
     |> with_non_disj
@@ -797,6 +815,9 @@ let matchers : matcher list =
   ; -"boost" &:: "optional" &:: "reset" &++> assign_value ~desc:"boost::optional::reset(Value arg)"
   ; -"boost" &:: "optional" &:: "get" <>$ capt_arg_payload
     $+...$--> value ~desc:"boost::optional::get()"
+    |> with_non_disj
+  ; -"boost" &:: "optional" &:: "value" <>$ capt_arg_payload
+    $+...$--> value ~desc:"boost::optional::value()"
     |> with_non_disj
   ; -"boost" &:: "optional" &:: "operator*" <>$ capt_arg_payload
     $+...$--> value ~desc:"boost::optional::operator*()"
