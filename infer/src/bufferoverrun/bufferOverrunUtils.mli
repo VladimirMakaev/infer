@@ -74,6 +74,8 @@ module Exec : sig
       arrays that [dst] represents are overwritten, so a single [dst] array is updated strongly. *)
 
   val forget_c_strlen : PowLoc.t -> Dom.Mem.t -> Dom.Mem.t
+
+  val forget_container_emptiness : location:Location.t -> PowLoc.t -> Dom.Mem.t -> Dom.Mem.t
   (** Forget the length of the C strings at the given locations, e.g. after a write of raw bytes *)
 end
 

@@ -332,6 +332,21 @@ module Exec = struct
     let locs = PowLoc.remove_unknown locs in
     if PowLoc.is_bot locs then mem
     else Dom.Mem.update_mem (PowLoc.of_c_strlen locs) Dom.Val.Itv.nat mem
+
+
+  (** Forget that the given container element fields hold no element, keeping any other size. Used
+      when a callee that could insert into them cannot be analysed. A size that is already known and
+      non-zero is left alone: it is usually what proves the later accesses in bounds, and widening
+      it turns those proofs into reports. *)
+  let forget_container_emptiness ~location locs mem =
+    let locs = PowLoc.remove_unknown locs in
+    if PowLoc.is_bot locs then mem
+    else
+      Dom.Mem.transform_mem
+        ~f:
+          (Dom.Val.transform_array_length location ~f:(fun length ->
+               if Itv.is_zero length then Itv.nat else length ) )
+        locs mem
 end
 
 module Check = struct
