@@ -853,6 +853,38 @@ module MemPure = struct
       mem Polynomials.NonNegativePolynomial.one
 
 
+  (* The block a location belongs to, when the procedure allocated it itself. Such a block does
+     not exist yet when the procedure is entered, so no symbol of the entry state denotes it. *)
+  let rec allocated_block : Loc.t -> Loc.t option = function
+    | BoField.Prim (Loc.Allocsite (Allocsite.Known _)) as l ->
+        Some l
+    | BoField.Prim _ ->
+        None
+    | BoField.Field {prefix} | BoField.StarField {prefix} ->
+        allocated_block prefix
+
+
+  (* Whether the block is reached only through a pointer. The storage of a variable is in scope on
+     every path, so a state without it has merely not written it yet and its contents are still
+     unknown there; a block held by a pointer is out of reach entirely on a path where the pointer
+     holds something else. *)
+  let reached_through_pointer = function
+    | BoField.Prim (Loc.Allocsite (Allocsite.Known {path= Some (BoField.Prim (SPath.Deref _))})) ->
+        true
+    | _ ->
+        false
+
+
+  (* Whether [l] belongs to a block that [m] cannot reach. Such a state holds no value of [l] to
+     contribute, so the other side can be kept as it is. *)
+  let belongs_to_untouched_block l m =
+    match allocated_block l with
+    | Some block ->
+        reached_through_pointer block && not (mem block m)
+    | None ->
+        false
+
+
   let join oenv astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
@@ -861,6 +893,10 @@ module MemPure = struct
           match (v1_opt, v2_opt) with
           | Some v1, Some v2 ->
               Some (MVal.join v1 v2)
+          | Some _, None when belongs_to_untouched_block l astate2 ->
+              v1_opt
+          | None, Some _ when belongs_to_untouched_block l astate1 ->
+              v2_opt
           | Some v1, None | None, Some v1 ->
               (* Since abstract state doesn't contain complete information, use Val.top
                       if a location is missing in one state being joined to be sound. *)
@@ -879,6 +915,9 @@ module MemPure = struct
           match (v1_opt, v2_opt) with
           | Some v1, Some v2 ->
               Some (MVal.widen ~prev:v1 ~next:v2 ~num_iters)
+          (* No counterpart here to the missing-cell case of [join]: the two states joined at a
+             branch have both finished, so a block absent from one was never reached on it, while
+             an iterate that does not yet hold a block may still reach it on a later round. *)
           | Some v1, None ->
               (* Since abstract state doesn't contain complete information, use Val.top
                       if a location is missing in one state being widened to be sound. *)
