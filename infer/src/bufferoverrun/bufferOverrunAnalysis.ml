@@ -361,7 +361,7 @@ module TransferFunctions = struct
      and the pointers reachable from them (e.g. an iovec or a [char**] out-parameter), but not
      directly through a const pointee. Objective-C objects are skipped: the cost models use the C
      string length of an [NSAttributedString] as its length. *)
-  let forget_c_strlen_of_args ?(formals = []) args mem =
+  let forget_c_strlen_of_args ?(formals = []) ~location args mem =
     let is_objc_object typ =
       match typ.Typ.desc with Tptr (elt, _) -> Typ.is_objc_class elt | _ -> false
     in
@@ -392,10 +392,39 @@ module TransferFunctions = struct
           | _ ->
               acc
         in
-        let locs =
-          LocSet.fold add_allocsite (Dom.Mem.get_reachable_locs_from [] roots mem) PowLoc.bot
+        (* Such a callee can insert into a modelled container, so its emptiness does not survive
+           the call. Only the element field of a container is touched, and only when it is empty:
+           the length of a plain array is the extent of its allocation, which no callee can change,
+           and a known non-zero size is what proves the later accesses of the container in bounds. *)
+        let is_std_vector_elem fn =
+          (* [std::basic_string] is modelled with the same element field as the sequence
+             containers, and is excluded: the length of a string is routinely the size of
+             something else, so forgetting it loses the bounds of what was allocated from it. *)
+          BufferOverrunField.is_cpp_vector_elem fn
+          && String.is_prefix ~prefix:"std::vector" (Typ.Name.name (Fieldname.get_class_name fn))
+        in
+        let add_container_elem loc acc =
+          match loc with
+          | BufferOverrunField.Field {fn} when is_std_vector_elem fn ->
+              PowLoc.add loc acc
+          | _ ->
+              acc
+        in
+        let reachable = Dom.Mem.get_reachable_locs_from [] roots mem in
+        let locs = LocSet.fold add_allocsite reachable PowLoc.bot in
+        let container_locs =
+          (* reached from the writable arguments only: a container passed through a pointer to
+             const keeps its size, as it does for the string lengths above. Taking the difference
+             with [not_written] instead would not do, since it holds the arguments themselves and
+             not the element fields reached from them. *)
+          if LocSet.is_empty writable then PowLoc.bot
+          else
+            LocSet.fold add_container_elem
+              (Dom.Mem.get_reachable_locs_from [] writable mem)
+              PowLoc.bot
         in
         BoUtils.Exec.forget_c_strlen locs mem
+        |> BoUtils.Exec.forget_container_emptiness ~location container_locs
     else mem
 
 
@@ -430,12 +459,12 @@ module TransferFunctions = struct
                      callee_pname ) ;
             let formals = Option.value_map callee_formals ~default:[] ~f:(List.map ~f:snd) in
             Dom.Mem.add_unknown_from ret ~callee_pname ~location mem
-            |> forget_c_strlen_of_args ~formals args )
+            |> forget_c_strlen_of_args ~formals ~location args )
 
 
   let unknown_call location ((id, _) as ret) args mem =
     let mem = Dom.Mem.add_stack_loc (Loc.of_id id) mem in
-    Dom.Mem.add_unknown ret ~location mem |> forget_c_strlen_of_args args
+    Dom.Mem.add_unknown ret ~location mem |> forget_c_strlen_of_args ~location args
 
 
   let exec_instr :
