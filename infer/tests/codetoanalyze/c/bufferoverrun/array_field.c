@@ -320,3 +320,87 @@ void FP_local_union_trailing_array_field_Good() {
   union TrailingBuffer u;
   u.trailing.data[10] = 0;
 }
+
+/* The length of a string literal is known where it is assigned.  Assigning one
+   on more than one path used to lose it: the cell holding the length is missing
+   from the state of every path that did not assign that literal, and the join
+   replaced the missing side with a symbol standing for an entry value the block
+   cannot have, since the procedure allocated it itself. */
+void literal_join_strlen_Ok(int cond) {
+  const char* s = cond ? "abc" : "xyz";
+  char buf[8];
+  memcpy(buf, s, strlen(s) + 1);
+}
+
+/* The same assignment written as a branch rather than a conditional. */
+void literal_branch_strlen_Ok(int cond) {
+  const char* s = "abc";
+  if (cond) {
+    s = "xyz";
+  }
+  char buf[8];
+  memcpy(buf, s, strlen(s) + 1);
+}
+
+/* Literals of different lengths still cross-check each length against the other
+   one's block, because the pointer keeps both blocks and the length is the union
+   of the two.  That is a separate imprecision; the length itself is exact now. */
+void FP_literal_join_unequal_lengths_Ok(int cond) {
+  const char* s = cond ? "abc" : "de";
+  char buf[8];
+  memcpy(buf, s, strlen(s) + 1);
+}
+
+/* The destination is too small for either literal. */
+void literal_join_strlen_Bad(int cond) {
+  const char* s = cond ? "abc" : "xyz";
+  char buf[2];
+  memcpy(buf, s, strlen(s) + 1);
+}
+
+/* A read past the end of both literals. */
+char literal_join_index_Bad(int cond) {
+  const char* s = cond ? "abc" : "xyz";
+  return s[6];
+}
+
+/* One block, live on both paths and written on only one: its length is genuinely
+   unknown on the path that did not write it, so nothing may be concluded here.
+   This is the case the missing-cell fallback exists for. */
+void one_branch_writes_strlen_Bad(int cond) {
+  char buf[8];
+  if (cond) {
+    strcpy(buf, "abcdef");
+  }
+  char small[2];
+  small[strlen(buf)] = 0;
+}
+
+/* The same, written in a loop: an iterate that does not hold the block yet may
+   still reach it on a later round, so nothing may be concluded from its absence
+   there either.  Both arms of the body write, and the length is still unknown
+   on the first iteration, before either has run. */
+void loop_both_arms_write_strlen_Bad(int n) {
+  char buf[8];
+  for (int i = 0; i < n; i++) {
+    if (i == 3) {
+      strcpy(buf, "abcdef");
+    } else {
+      buf[0] = 'x';
+    }
+  }
+  char small[2];
+  small[strlen(buf)] = 0;
+}
+
+/* A loop whose body writes the block on some iterations only. */
+void loop_one_arm_writes_strlen_Bad(int n) {
+  char buf[8];
+  for (int i = 0; i < n; i++) {
+    if (i == 3) {
+      strcpy(buf, "abcdef");
+    }
+  }
+  char small[2];
+  small[strlen(buf)] = 0;
+}
