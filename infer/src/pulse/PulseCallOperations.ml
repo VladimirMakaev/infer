@@ -46,12 +46,24 @@ let add_returned_from_unknown callee_pname_opt ret_val actuals astate =
 
 (** if the procedure has a variadic number of arguments, its known [formals] will be less than the
     [actuals] we get but currently there is no support for handling the remaining arguments (the
-    ones in [...]) so we just drop them *)
+    ones in [...]) so we just drop them.
+
+    A procedure returning a value that does not fit in a register is given a return parameter, and
+    that parameter is appended to [formals] while its address is appended to [actuals] — so the
+    arguments of [...] sit in between. Keeping a prefix would then hand the first of them to the
+    return parameter, and an argument that happens to be the integer zero reads as a null pointer.
+    Keep the last actual instead, which is the one the return parameter is really passed. *)
 let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
-  let proc_attrs = Option.bind ~f:IRAttributes.load proc_name_opt in
-  if Option.exists proc_attrs ~f:(fun {ProcAttributes.is_clang_variadic} -> is_clang_variadic) then
-    List.take actuals (List.length formals)
-  else actuals
+  match Option.bind ~f:IRAttributes.load proc_name_opt with
+  | Some {ProcAttributes.is_clang_variadic= true; has_added_return_param} -> (
+      let n_formals = List.length formals in
+      match List.last actuals with
+      | Some return_param_actual when has_added_return_param && n_formals > 0 ->
+          List.take actuals (n_formals - 1) @ [return_param_actual]
+      | _ ->
+          List.take actuals n_formals )
+  | _ ->
+      actuals
 
 
 (** In order to apply summary specialisation, we call blocks or function pointers with the closure
