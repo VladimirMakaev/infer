@@ -252,8 +252,10 @@ module ItvPure = struct
           let default_l, default_u =
             if Bound.(le zero l) then
               if NonZeroInt.is_positive n then
-                (* if 0<=l<=u and 0<c, 0 <= [l/c, u/c] <= u *)
-                (Bound.zero, u)
+                (* if 0<=l<=u and 1<c, 0 <= [l/c, u/c] <= max(0, u-1): a non-negative bound
+                   divided by two or more cannot reach the bound itself, and the max keeps the
+                   u=0 case sound. [c] is neither 0 nor 1 here, so it is at least 2. *)
+                (Bound.zero, Bound.overapprox_max Bound.zero Bound.(plus_u ~weak:false u mone))
               else (* if 0<=l<=u and c<0, -u <= [u/c, l/c] <= 0 *)
                 (Bound.neg u, Bound.zero)
             else if Bound.(le u zero) then
