@@ -97,3 +97,98 @@ int array_escaped_partial_bad_FN() {
   int values[4]; initialize_one(values); return values[2];
 }
 } // namespace uninit_tracking
+
+// boost::optional declares neither is_initialized nor get_ptr: a call on an optional resolves to
+// the base class it inherits them from. The constructor is modelled, so the real fields of that
+// base are never written, and running the real accessor read them uninitialised. Declared here
+// rather than included, so that the test needs no boost headers.
+namespace boost {
+namespace optional_detail {
+template <class T>
+class tc_optional_base {
+ protected:
+  bool m_initialized;
+  T m_storage;
+  tc_optional_base() : m_initialized(false) {}
+  tc_optional_base(const T& v) : m_initialized(true), m_storage(v) {}
+
+ public:
+  bool is_initialized() const { return m_initialized; }
+  const T* get_ptr() const { return m_initialized ? &m_storage : 0; }
+  bool operator!() const { return !is_initialized(); }
+};
+} // namespace optional_detail
+
+template <class T>
+class optional : public optional_detail::tc_optional_base<T> {
+ public:
+  optional() : optional_detail::tc_optional_base<T>() {}
+  optional(const T& v) : optional_detail::tc_optional_base<T>(v) {}
+  // declared on the optional itself, like get(), unlike the two above
+  const T& value() const { return *this->get_ptr(); }
+};
+} // namespace boost
+
+class boost_optional_wrapper {
+ public:
+  boost_optional_wrapper(float v) : value_(v), other_(0) {}
+  bool has_value() const { return value_.is_initialized(); }
+  bool empty() const { return !value_; }
+  const float* pointer() const { return value_.get_ptr(); }
+  int other() const { return other_; }
+
+ private:
+  boost::optional<float> value_;
+  int other_;
+};
+
+int boost_optional_is_initialized_ok(float x) {
+  const boost_optional_wrapper o(x);
+  return o.has_value() ? 1 : 0;
+}
+
+int boost_optional_operator_not_ok(float x) {
+  const boost_optional_wrapper o(x);
+  return o.empty() ? 1 : 0;
+}
+
+int boost_optional_get_ptr_ok(float x) {
+  const boost_optional_wrapper o(x);
+  return o.pointer() ? 1 : 0;
+}
+
+// the optional's own fields are the analyzer's, but the rest of the class is not: a field the
+// constructor really did leave uninitialised must still be reported
+class boost_optional_partial_wrapper {
+ public:
+  boost_optional_partial_wrapper(float v) : value_(v) {}
+  bool has_value() const { return value_.is_initialized(); }
+  int other() const { return other_; }
+
+ private:
+  boost::optional<float> value_;
+  int other_;
+};
+
+int boost_optional_partial_has_value_ok(float x) {
+  const boost_optional_partial_wrapper o(x);
+  return o.has_value() ? 1 : 0;
+}
+
+int boost_optional_partial_other_bad(float x) {
+  const boost_optional_partial_wrapper o(x);
+  return o.other();
+}
+
+// value() is declared on the optional rather than inherited, but it is guarded by
+// is_initialized(): once that is modelled, the guard is provably false on an empty optional and
+// the access below it becomes unreachable, so value() needs a model of its own to keep reporting
+int boost_optional_value_engaged_ok(float x) {
+  const boost::optional<float> o(x);
+  return (int)o.value();
+}
+
+int boost_optional_value_empty_bad() {
+  const boost::optional<float> o;
+  return (int)o.value();
+}
