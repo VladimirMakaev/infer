@@ -73,6 +73,38 @@ let is_not_implicit_or_copy_ctor_assignment pname =
          || attrs.ProcAttributes.is_cpp_copy_assignment ) )
 
 
+(** a move constructor, or a move assignment operator: the class's own [operator=] taking an rvalue
+    reference to it. An [operator=] converting from another type is not one: the contract that keeps
+    a moved-from object usable is one a class states about itself. *)
+let is_move_operation proc_desc pname =
+  let is_move_assignment () =
+    Procname.is_cpp_assignment_operator pname
+    &&
+    match (Procdesc.get_formals proc_desc, Procname.get_class_type_name pname) with
+    | [_this; (_, ({desc= Tptr (pointee, _)} as typ), _)], Some class_name ->
+        Typ.is_rvalue_reference typ
+        && Option.exists (Typ.name pointee) ~f:(Typ.Name.equal class_name)
+    | _ ->
+        false
+  in
+  Option.exists (IRAttributes.load pname) ~f:(fun attrs -> attrs.ProcAttributes.is_cpp_move_ctor)
+  || is_move_assignment ()
+
+
+(** A class can give its move operations a copy of a [shared_ptr] member on purpose, so that a
+    moved-from object keeps working. In source that is the same text as a move operation that copies
+    a [shared_ptr] for no reason, and the two cannot be told apart, so neither is reported. *)
+let is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into source_typ =
+  match (copied_into : Attribute.CopiedInto.t) with
+  | IntoField _ ->
+      is_move_operation proc_desc pname
+      && Option.exists source_typ ~f:(fun ({desc} as typ : Typ.t) ->
+          let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
+          Typ.is_shared_pointer typ )
+  | IntoVar _ | IntoIntermediate _ ->
+      false
+
+
 let is_non_deleted_copy (tenv_method : Struct.tenv_method) =
   let pname = tenv_method.name in
   (* TODO: Default is set to true for now because we can't get the attributes of library calls right now. *)
@@ -202,7 +234,10 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
              || Option.value_map ~default:true
                   ~f:(fun typ -> Typ.is_const_reference_on_source typ |> not)
                   source_typ )
-             && not (is_unnecessary_copy_in_loop node copied_into source_opt)
+             && (not (is_unnecessary_copy_in_loop node copied_into source_opt))
+             && not
+                  (is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into
+                     source_typ )
            then
              if not (List.exists !reported ~f:(Diagnostic.equal diagnostic)) then (
                reported := diagnostic :: !reported ;
