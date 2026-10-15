@@ -767,6 +767,7 @@ void ASTExporter<ATDWriter>::dumpName(const NamedDecl &Decl) {
 
   OF.emitTag("name");
 
+  bool IsTemplateParamObject = false;
   std::string name = Decl.getNameAsString();
   if (name.length() == 0) {
     if (const auto *Ivar = dyn_cast<ObjCIvarDecl>(&Decl)) {
@@ -787,12 +788,28 @@ void ASTExporter<ATDWriter>::dumpName(const NamedDecl &Decl) {
       name = "__anon_ivar_" + std::to_string(Index);
     } else if (const auto *FD = dyn_cast<FieldDecl>(&Decl)) {
       name = "__anon_field_" + std::to_string(FD->getFieldIndex());
+    } else if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(&Decl)) {
+      // A template parameter object has no name of its own, and two of them of the same type
+      // differ only by their value, so the value is what has to make the name unique: without
+      // it distinct constants are indistinguishable to anything reading the AST.
+      std::string Value;
+      llvm::raw_string_ostream OS(Value);
+      StructuralValuePrinter(Context, *Mangler, OS)
+          .print(TPO->getType(), TPO->getValue());
+      name = "__template_param_object_" + Value;
+      IsTemplateParamObject = true;
     }
   }
   OF.emitString(name);
 
   OF.emitTag("qual_name");
-  NamePrint.printDeclName(Decl);
+  if (IsTemplateParamObject) {
+    // the synthesised name is already unique and has no meaningful qualified form
+    ArrayScope Scope(OF, 1);
+    OF.emitString(name);
+  } else {
+    NamePrint.printDeclName(Decl);
+  }
 }
 
 //@atd type decl_ref = {
