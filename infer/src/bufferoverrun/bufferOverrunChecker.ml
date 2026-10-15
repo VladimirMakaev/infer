@@ -206,6 +206,157 @@ let check_binop_for_integer_overflow integer_type_widths pname bop ~lhs ~rhs loc
       cond_set
 
 
+(* An unsigned subtraction that wraps around is defined behaviour: it matters only if something
+   reads the wrapped value.  In the reverse-iteration idiom
+
+     for (size_t i = n; i-- > 0;) { use(i); }
+
+   the subtraction wraps exactly when the guard fails, that is on the branch that leaves the loop,
+   where [i] has gone out of scope and nothing can read it.  Asking whether [i] is live at the
+   store itself would not see this, because the loop body reads [i] on the other branch: the
+   question has to be asked per successor, on the branches where the stored value may still be
+   negative.  A variable that outlives the loop is read on the exiting branch, so an underflow
+   that escapes the loop is still reported. *)
+module DeadWrap = struct
+  (* Searching forward for the variable's name only finds a later read if the read names it.  An
+     alias made before the subtraction defeats that: `size_t *p = &i;` ahead of the loop, and the
+     wrapped value is read as `*p` without `i` appearing again.  So a variable whose address is
+     used as a value anywhere in the procedure is treated as readable and never judged dead,
+     wherever that use sits relative to the wrap.  Reading the variable is a [Load] from it and
+     assigning to it is a [Store] into it; any other mention of it is its address. *)
+  let takes_address_of pvar instr =
+    let in_exp e = Exp.program_vars e |> Sequence.exists ~f:(Pvar.equal pvar) in
+    match (instr : Sil.instr) with
+    | Load {e= Exp.Lvar p} when Pvar.equal p pvar ->
+        false
+    | Load {e} ->
+        in_exp e
+    | Store {e1= Exp.Lvar p; e2} when Pvar.equal p pvar ->
+        in_exp e2
+    | Store {e1; e2} ->
+        in_exp e1 || in_exp e2
+    | Prune (e, _, _, _) ->
+        in_exp e
+    | Call (_, e, args, _, _) ->
+        in_exp e || List.exists args ~f:(fun (arg, _) -> in_exp arg)
+    | Metadata _ ->
+        false
+
+
+  let is_aliased cfg pvar =
+    CFG.fold_nodes cfg ~init:false ~f:(fun acc node ->
+        acc || Instrs.exists (CFG.instrs node) ~f:(takes_address_of pvar) )
+
+
+  let reads_pvar pvar instr =
+    let in_exp e = Exp.program_vars e |> Sequence.exists ~f:(Pvar.equal pvar) in
+    match (instr : Sil.instr) with
+    | Load {e} ->
+        in_exp e
+    | Store {e1; e2} ->
+        (* assigning TO the variable is not a read of it, anything else is *)
+        (match e1 with Exp.Lvar p when Pvar.equal p pvar -> false | _ -> in_exp e1) || in_exp e2
+    | Prune (e, _, _, _) ->
+        in_exp e
+    | Call (_, e, args, _, _) ->
+        in_exp e || List.exists args ~f:(fun (arg, _) -> in_exp arg)
+    | Metadata _ ->
+        false
+
+
+  (* ExitScope describes normal-flow liveness and can precede a handler read. Collect everything
+     reachable from an exceptional edge without using that metadata or the normal invariant
+     map. The bounded traversal is shared by every candidate in the procedure. *)
+  let handler_read_nodes proc_desc =
+    (* Only successors are needed. Building an exceptional-predecessor map would be quadratic
+       for a handler with many incoming edges, before the traversal budget can apply. *)
+    let roots =
+      Procdesc.fold_nodes proc_desc ~init:[] ~f:(fun roots node ->
+          List.rev_append (Procdesc.Node.get_exn node) roots )
+    in
+    let rec visit fuel seen pending nodes =
+      match pending with
+      | [] ->
+          Some nodes
+      | node :: rest ->
+          let id = Procdesc.Node.get_id node in
+          if Procdesc.IdSet.mem id seen then visit fuel seen rest nodes
+          else if fuel <= 0 then None
+          else
+            let pending =
+              List.rev_append (Procdesc.Node.get_exn node)
+                (List.rev_append (Procdesc.Node.get_succs node) rest)
+            in
+            visit (fuel - 1) (Procdesc.IdSet.add id seen) pending (node :: nodes)
+    in
+    visit 1000 Procdesc.IdSet.empty roots []
+
+
+  let ends_scope_of pvar instr =
+    match (instr : Sil.instr) with
+    | Metadata (ExitScope (vars, _)) ->
+        List.exists vars ~f:(fun var -> Var.get_pvar var |> Option.exists ~f:(Pvar.equal pvar))
+    | _ ->
+        false
+
+
+  (* The original normal-flow proof, including overwritten values. Handler observations are
+     checked separately; giving up either search keeps the report. *)
+  let rec no_read_from cfg pvar ~fuel visited node =
+    if fuel <= 0 then false
+    else
+      let id = CFG.Node.id node in
+      if List.mem visited id ~equal:CFG.Node.equal_id then true
+      else
+        let visited = id :: visited in
+        let instrs = CFG.instrs node in
+        if Instrs.exists instrs ~f:(reads_pvar pvar) then false
+        else if Instrs.exists instrs ~f:(ends_scope_of pvar) then true
+        else
+          CFG.fold_succs cfg node ~init:true ~f:(fun acc succ ->
+              acc && no_read_from cfg pvar ~fuel:(fuel - 1) visited succ )
+
+
+  let is_dead cfg inv_map handler_nodes node pvar =
+    let may_be_negative_at succ =
+      (* the POST state: on a branch guarded by a prune, the pruned state is what the wrapped
+         value has to be judged against *)
+      match BufferOverrunAnalysis.extract_state (CFG.Node.id succ) inv_map with
+      | Some {AbstractInterpreter.State.post= Dom.Mem.Reachable _ as post} ->
+          let itv = Dom.Val.get_itv (Dom.Mem.find (AbsLoc.Loc.of_pvar pvar) post) in
+          not (Boolean.is_true (Itv.le_sem Itv.zero itv))
+      | _ ->
+          (* No normal-flow state to identify a wrapped branch. The read search does not prune
+             exceptional paths using this invariant map. *)
+          false
+    in
+    (* Only a local that is not the return variable can be dead here: anything else escapes the
+       procedure, and the caller is where the condition would be reported. *)
+    if (not (Pvar.is_local pvar)) || Pvar.is_return pvar || is_aliased cfg pvar then false
+    else
+      (* Require that some successor actually carries the wrapped value.  Without one there is
+         nothing identifying the branch the wrap takes - a concrete subtraction is already folded
+         to its wrapped result - and suppressing would be vacuous. *)
+      let saw_negative = ref false in
+      let dead =
+        CFG.fold_succs cfg node ~init:true ~f:(fun acc succ ->
+            if may_be_negative_at succ then (
+              saw_negative := true ;
+              acc && no_read_from cfg pvar ~fuel:1000 [] succ )
+            else acc )
+      in
+      !saw_negative && dead
+      &&
+      match Lazy.force handler_nodes with
+      | None ->
+          false
+      | Some nodes ->
+          not
+            (List.exists nodes ~f:(fun node ->
+                 Instrs.exists (Procdesc.Node.get_instrs node) ~f:(reads_pvar pvar) ) )
+end
+
+(* Skip only the outermost operation of a store's right-hand side, still checking its operands. *)
 let rec check_expr_for_integer_overflow integer_type_widths pname exp location mem cond_set =
   match exp with
   | Exp.UnOp (_, e, _)
@@ -290,24 +441,36 @@ let check_instr :
     -> Procname.t
     -> Tenv.t
     -> IntegerWidths.t
+    -> (CFG.Node.t -> Pvar.t -> bool)
     -> CFG.Node.t
     -> Sil.instr
     -> Dom.Mem.t
     -> PO.ConditionSet.checked_t
     -> PO.ConditionSet.checked_t =
- fun get_checks_summary get_summary get_formals pname tenv integer_type_widths node instr mem
-     cond_set ->
+ fun get_checks_summary get_summary get_formals pname tenv integer_type_widths is_dead_wrap node
+     instr mem cond_set ->
   match instr with
   | Sil.Load {e= exp; loc= location} ->
       cond_set
       |> check_expr_for_array_access integer_type_widths exp location mem
       |> check_expr_for_integer_overflow integer_type_widths pname exp location mem
   | Sil.Store {e1= lexp; e2= rexp; loc= location} ->
+      let check_rexp_for_integer_overflow cond_set =
+        match (lexp, rexp) with
+        | Exp.Lvar pvar, Exp.BinOp (Binop.MinusA (Some typ), e1, e2)
+          when Typ.ikind_is_unsigned typ && is_dead_wrap node pvar ->
+            (* the wrapped value is never read: check the operands only *)
+            cond_set
+            |> check_expr_for_integer_overflow integer_type_widths pname e1 location mem
+            |> check_expr_for_integer_overflow integer_type_widths pname e2 location mem
+        | _ ->
+            check_expr_for_integer_overflow integer_type_widths pname rexp location mem cond_set
+      in
       cond_set
       |> check_expr_for_array_access integer_type_widths lexp location mem
       |> check_expr_for_array_access ~sub_expr_only:true integer_type_widths rexp location mem
       |> check_expr_for_integer_overflow integer_type_widths pname lexp location mem
-      |> check_expr_for_integer_overflow integer_type_widths pname rexp location mem
+      |> check_rexp_for_integer_overflow
   | Sil.Call (_, Const (Cfun callee_pname), args, location, _) ->
       check_call get_checks_summary get_summary get_formals pname tenv integer_type_widths node
         callee_pname args [] location mem cond_set
@@ -337,14 +500,15 @@ let check_instrs :
     -> Procname.t
     -> Tenv.t
     -> IntegerWidths.t
+    -> (CFG.Node.t -> Pvar.t -> bool)
     -> CFG.t
     -> CFG.Node.t
     -> Instrs.not_reversed_t
     -> Dom.Mem.t AbstractInterpreter.State.t
     -> Checks.t
     -> Checks.t =
- fun get_checks_summary get_summary get_formals pname tenv integer_type_widths cfg node instrs state
-     checks ->
+ fun get_checks_summary get_summary get_formals pname tenv integer_type_widths is_dead_wrap cfg node
+     instrs state checks ->
   match state with
   | _ when Instrs.is_empty instrs ->
       checks
@@ -361,8 +525,8 @@ let check_instrs :
             checks
       in
       let cond_set =
-        check_instr get_checks_summary get_summary get_formals pname tenv integer_type_widths node
-          instr pre checks.cond_set
+        check_instr get_checks_summary get_summary get_formals pname tenv integer_type_widths
+          is_dead_wrap node instr pre checks.cond_set
       in
       print_debug_info instr pre cond_set ;
       {checks with cond_set}
@@ -375,18 +539,19 @@ let check_node :
     -> Procname.t
     -> Tenv.t
     -> IntegerWidths.t
+    -> (CFG.Node.t -> Pvar.t -> bool)
     -> CFG.t
     -> BufferOverrunAnalysis.invariant_map
     -> Checks.t
     -> CFG.Node.t
     -> Checks.t =
- fun get_checks_summary get_summary get_formals pname tenv integer_type_widths cfg inv_map checks
-     node ->
+ fun get_checks_summary get_summary get_formals pname tenv integer_type_widths is_dead_wrap cfg
+     inv_map checks node ->
   match BufferOverrunAnalysis.extract_state (CFG.Node.id node) inv_map with
   | Some state ->
       let instrs = CFG.instrs node in
-      check_instrs get_checks_summary get_summary get_formals pname tenv integer_type_widths cfg
-        node instrs state checks
+      check_instrs get_checks_summary get_summary get_formals pname tenv integer_type_widths
+        is_dead_wrap cfg node instrs state checks
   | _ ->
       checks
 
@@ -400,14 +565,16 @@ let compute_checks :
     -> Procname.t
     -> Tenv.t
     -> IntegerWidths.t
+    -> (CFG.Node.t -> Pvar.t -> bool)
     -> CFG.t
     -> BufferOverrunAnalysis.invariant_map
     -> checks =
- fun get_checks_summary get_summary get_formals pname tenv integer_type_widths cfg inv_map ->
+ fun get_checks_summary get_summary get_formals pname tenv integer_type_widths is_dead_wrap cfg
+     inv_map ->
   CFG.fold_nodes cfg
     ~f:
-      (check_node get_checks_summary get_summary get_formals pname tenv integer_type_widths cfg
-         inv_map )
+      (check_node get_checks_summary get_summary get_formals pname tenv integer_type_widths
+         is_dead_wrap cfg inv_map )
     ~init:Checks.empty
 
 
@@ -460,8 +627,10 @@ let checker ({InterproceduralAnalysis.proc_desc; tenv; analyze_dependency} as an
         let get_formals callee_pname =
           Attributes.load callee_pname >>| ProcAttributes.get_pvar_formals
         in
+        let handler_nodes = lazy (DeadWrap.handler_read_nodes proc_desc) in
+        let is_dead_wrap node pvar = DeadWrap.is_dead cfg inv_map handler_nodes node pvar in
         compute_checks get_checks_summary get_summary get_formals proc_name tenv integer_type_widths
-          cfg inv_map
+          is_dead_wrap cfg inv_map
       in
       report_errors analysis_data checks ;
       get_checks_summary checks )
