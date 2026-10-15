@@ -7,10 +7,18 @@
 #include <vector>
 
 namespace CppIsTricky {
-void vector_size_Bad() {
+/* `delta` wraps around, but nothing reads it. */
+void vector_size_dead_Ok() {
   const auto vec = std::vector<int>{1, 2, 3};
   const int numExpectedElements = 1;
   const auto delta = numExpectedElements - vec.size();
+}
+
+/* The same subtraction, with the wrapped value used. */
+size_t vector_size_used_Bad() {
+  const auto vec = std::vector<int>{1, 2, 3};
+  const int numExpectedElements = 1;
+  return numExpectedElements - vec.size();
 }
 
 void minus1_Bad_FN() {
