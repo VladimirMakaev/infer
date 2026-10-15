@@ -984,6 +984,19 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         {res_trans with control= {res_trans.control with initd_exps= [fst var_exp_typ]}}
 
 
+  (* A class-type non-type template parameter is a constant whose value the frontend does not
+     carry.  Read it as a global of its own type: the exported name is derived from the value, so
+     two parameters that differ only by their value stay distinct variables. *)
+  and template_param_object_trans trans_state (decl_ref : Clang_ast_t.decl_ref) =
+    let name_info, _, qual_type = CAst_utils.get_info_from_decl_ref decl_ref in
+    let typ = CType_decl.qual_type_to_sil_type trans_state.context.tenv qual_type in
+    let pvar =
+      CAst_utils.get_qualified_name name_info
+      |> QualifiedCppName.to_qual_string |> Mangled.from_string |> Pvar.mk_global
+    in
+    mk_trans_result (Exp.Lvar pvar, typ) empty_control
+
+
   and var_deref_trans ?(is_const_expr = false) trans_state stmt_info
       (decl_ref : Clang_ast_t.decl_ref) =
     let context = trans_state.context in
@@ -1088,6 +1101,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           ~is_constructor_init ~is_member_of_const
     | (`CXXMethod | `CXXConversion | `CXXConstructor | `CXXDestructor), _ ->
         method_deref_trans trans_state ~context decl_ref stmt_info decl_kind
+    | `TemplateParamObject, _ ->
+        template_param_object_trans trans_state decl_ref
     | (`Field | `IndirectField), DeclRefExpr ->
         (* the operand of [&C::field]: as for [&C::method], the value of the pointer to member is
            not modelled *)
