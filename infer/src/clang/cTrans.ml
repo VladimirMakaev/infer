@@ -2879,6 +2879,26 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         ifStmt_trans trans_state stmt_info if_stmt_info
 
 
+  (* An [if consteval] is false outside constant evaluation and an [if ! consteval] is true, so
+     only one branch can run and there is no condition to translate.  Translate that branch, and
+     treat the other one as discarded, as the [if constexpr] case does. *)
+  and constevalIfStmt_trans trans_state stmt_info (if_stmt_info : Clang_ast_t.if_stmt_info) =
+    let source_range = stmt_info.Clang_ast_t.si_source_range in
+    let context = trans_state.context in
+    let get_stmt stmt_ptr = CAst_utils.get_stmt_exn stmt_ptr source_range in
+    let else_branch = Option.map if_stmt_info.isi_else ~f:fst in
+    let taken_branch, discarded_branch =
+      if if_stmt_info.isi_is_negated_consteval then (Some if_stmt_info.isi_then, else_branch)
+      else (else_branch, Some if_stmt_info.isi_then)
+    in
+    Option.iter discarded_branch ~f:(fun stmt_ptr ->
+        let vars = context.CContext.vars_in_discarded_branches in
+        vars := add_referenced_local_vars context !vars (get_stmt stmt_ptr) ) ;
+    let stmts = List.filter_opt [Option.map taken_branch ~f:get_stmt] in
+    let control, _ = instructions Procdesc.Node.IfStmtBranch trans_state stmts in
+    mk_trans_result (mk_fresh_void_exp_typ ()) control
+
+
   and ifStmt_trans trans_state stmt_info (if_stmt_info : Clang_ast_t.if_stmt_info) =
     let context = trans_state.context in
     let source_range = stmt_info.Clang_ast_t.si_source_range in
@@ -5900,6 +5920,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `ConditionalOperator (stmt_info, stmt_list, expr_info) ->
         (* Ternary operator "cond ? exp1 : exp2" *)
         conditionalOperator_trans trans_state stmt_info stmt_list expr_info
+    | `IfStmt (stmt_info, _, ({Clang_ast_t.isi_is_consteval= true} as if_stmt_info)) ->
+        constevalIfStmt_trans trans_state stmt_info if_stmt_info
     | `IfStmt (stmt_info, _, ({Clang_ast_t.isi_is_constexpr= true} as if_stmt_info)) ->
         constexprIfStmt_trans trans_state stmt_info if_stmt_info
     | `IfStmt (stmt_info, _, if_stmt_info) ->
