@@ -198,11 +198,23 @@ void minus_one_Good() {
   }
 }
 
-void minus_one_Bad() {
+/* `x >= 0` is always true for an unsigned value, so this does subtract one from
+   zero -- but nothing reads the result, and a wraparound nobody observes is
+   defined behaviour rather than a defect. */
+void minus_one_dead_Ok() {
   uint64_t x = unknown_uint();
   if (x >= 0) {
     uint64_t y = x - 1;
   }
+}
+
+/* The same always-true guard, with the wrapped value actually used. */
+uint64_t minus_one_used_Bad() {
+  uint64_t x = unknown_uint();
+  if (x >= 0) {
+    return x - 1;
+  }
+  return 0;
 }
 
 int64_t unknown_int();
@@ -451,7 +463,7 @@ void band_negative_Bad() {
 
 void simple_overflow_Bad() { auto x = ALMOST_FOUR_GIGABYTES; }
 
-unsigned int unused_integer_underflow_Good_FP() {
+unsigned int unused_integer_underflow_Ok() {
   unsigned int n = 0;
   if (n-- == 0) {
     return 0;
@@ -469,7 +481,7 @@ unsigned int unused_integer_underflow_Bad() {
   }
 }
 
-unsigned int unused_integer_underflow2_Good_FP() {
+unsigned int unused_integer_underflow2_Ok() {
   unsigned int n = 0;
   return n--;
 }
@@ -587,4 +599,47 @@ void do_not_prune_float_Bad() {
   if (f > 0.0 && f < 1.0) {
     a[10] = 0;
   }
+}
+
+/* An alias made BEFORE the subtraction reads the wrapped value without naming
+   the variable again, so looking forward for the name does not find the read.
+   Each of these does read it, through the alias. */
+uint64_t sink_u64(uint64_t);
+void use_u64_ptr(uint64_t*);
+struct u64_holder {
+  uint64_t* p;
+};
+
+uint64_t wrap_read_through_pointer_Bad(uint64_t n) {
+  uint64_t i = n;
+  uint64_t* p = &i;
+  while (i-- > 0) {
+  }
+  return sink_u64(*p);
+}
+
+uint64_t wrap_read_through_field_Bad(uint64_t n) {
+  uint64_t i = n;
+  struct u64_holder h;
+  h.p = &i;
+  while (i-- > 0) {
+  }
+  return sink_u64(*h.p);
+}
+
+/* The address reaches a callee the analysis cannot see, before the loop. */
+void wrap_address_escapes_first_Bad(uint64_t n) {
+  uint64_t i = n;
+  use_u64_ptr(&i);
+  while (i-- > 0) {
+  }
+}
+
+uint64_t wrap_read_through_pointer_to_pointer_Bad(uint64_t n) {
+  uint64_t i = n;
+  uint64_t* p = &i;
+  uint64_t** pp = &p;
+  while (i-- > 0) {
+  }
+  return sink_u64(**pp);
 }
