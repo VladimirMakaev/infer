@@ -1,0 +1,195 @@
+/* @generated */
+digraph cfg {
+"builtin_three_way#166691408812417.78ede2e1b32b6aa1_1" [label="1: Start builtin_three_way\nFormals:  a:int b:int\nLocals:  c:std::strong_ordering \n  " color=yellow style=filled]
+	
+
+	 "builtin_three_way#166691408812417.78ede2e1b32b6aa1_1" -> "builtin_three_way#166691408812417.78ede2e1b32b6aa1_4" ;
+"builtin_three_way#166691408812417.78ede2e1b32b6aa1_2" [label="2: Exit builtin_three_way \n  " color=yellow style=filled]
+	
+
+"builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" [label="3:  Compound statement \n   _=_fun___infer_skip(&c:std::strong_ordering) [line 31, column 3]\n " shape="box"]
+	
+
+	 "builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" -> "builtin_three_way#166691408812417.78ede2e1b32b6aa1_2" ;
+"builtin_three_way#166691408812417.78ede2e1b32b6aa1_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(c:std::strong_ordering); [line 30, column 3]\n  n$1=*&a:int [line 30, column 12]\n  n$2=*&b:int [line 30, column 18]\n  *&c:int=n$3 [line 30, column 3]\n " shape="box"]
+	
+
+	 "builtin_three_way#166691408812417.78ede2e1b32b6aa1_4" -> "builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" ;
+"compare_points#566483219850148183.f267d23a5b7f9e97_1" [label="1: Start compare_points\nFormals:  p:Point const & q:Point const &\nLocals:  0$?%__sil_tmp__temp_return_n$4:std::strong_ordering \n  " color=yellow style=filled]
+	
+
+	 "compare_points#566483219850148183.f267d23a5b7f9e97_1" -> "compare_points#566483219850148183.f267d23a5b7f9e97_3" ;
+"compare_points#566483219850148183.f267d23a5b7f9e97_2" [label="2: Exit compare_points \n  " color=yellow style=filled]
+	
+
+"compare_points#566483219850148183.f267d23a5b7f9e97_3" [label="3:  Return Stmt \n   n$1=*&p:Point const & [line 46, column 63]\n  n$2=*&q:Point const & [line 46, column 69]\n  n$5=_fun_Point::operator<=>(n$1:Point const &,n$2:Point const &,&0$?%__sil_tmp__temp_return_n$4:std::strong_ordering*) assign_last [line 46, column 63]\n  n$6=_fun_std::operator<(&0$?%__sil_tmp__temp_return_n$4:std::strong_ordering,0:int) [line 46, column 62]\n " shape="box"]
+	
+
+	 "compare_points#566483219850148183.f267d23a5b7f9e97_3" -> "compare_points#566483219850148183.f267d23a5b7f9e97_4" ;
+"compare_points#566483219850148183.f267d23a5b7f9e97_4" [label="4:  Return Stmt \n   *&return:_Bool=n$6 [line 46, column 55]\n " shape="box"]
+	
+
+	 "compare_points#566483219850148183.f267d23a5b7f9e97_4" -> "compare_points#566483219850148183.f267d23a5b7f9e97_2" ;
+"defaulted_three_way#7091206960806.e6d4937054c6c6a7_1" [label="1: Start defaulted_three_way\nFormals:  p:Point const & q:Point const &\nLocals:  c:std::strong_ordering \n  " color=yellow style=filled]
+	
+
+	 "defaulted_three_way#7091206960806.e6d4937054c6c6a7_1" -> "defaulted_three_way#7091206960806.e6d4937054c6c6a7_4" ;
+"defaulted_three_way#7091206960806.e6d4937054c6c6a7_2" [label="2: Exit defaulted_three_way \n  " color=yellow style=filled]
+	
+
+"defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" [label="3:  Compound statement \n   _=_fun___infer_skip(&c:std::strong_ordering) [line 43, column 3]\n " shape="box"]
+	
+
+	 "defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" -> "defaulted_three_way#7091206960806.e6d4937054c6c6a7_2" ;
+"defaulted_three_way#7091206960806.e6d4937054c6c6a7_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(c:std::strong_ordering); [line 42, column 3]\n  n$2=*&p:Point const & [line 42, column 12]\n  n$3=*&q:Point const & [line 42, column 18]\n  n$5=_fun_Point::operator<=>(n$2:Point const &,n$3:Point const &,&c:std::strong_ordering*) assign_last [line 42, column 12]\n " shape="box"]
+	
+
+	 "defaulted_three_way#7091206960806.e6d4937054c6c6a7_4" -> "defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" ;
+"equal#strong_ordering#__infer_glo.f634d97a43653a8c_1" [label="1: Start __infer_globals_initializer_std::strong_ordering::equal\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "equal#strong_ordering#__infer_glo.f634d97a43653a8c_1" -> "equal#strong_ordering#__infer_glo.f634d97a43653a8c_3" ;
+"equal#strong_ordering#__infer_glo.f634d97a43653a8c_2" [label="2: Exit __infer_globals_initializer_std::strong_ordering::equal \n  " color=yellow style=filled]
+	
+
+"equal#strong_ordering#__infer_glo.f634d97a43653a8c_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::equal:std::strong_ordering const ); [line 20, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::equal.v:signed char=(signed char)0 [line 20, column 56]\n " shape="box"]
+	
+
+	 "equal#strong_ordering#__infer_glo.f634d97a43653a8c_3" -> "equal#strong_ordering#__infer_glo.f634d97a43653a8c_2" ;
+"equivalent#strong_ordering#__infe.8a911d87396e4136_1" [label="1: Start __infer_globals_initializer_std::strong_ordering::equivalent\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "equivalent#strong_ordering#__infe.8a911d87396e4136_1" -> "equivalent#strong_ordering#__infe.8a911d87396e4136_3" ;
+"equivalent#strong_ordering#__infe.8a911d87396e4136_2" [label="2: Exit __infer_globals_initializer_std::strong_ordering::equivalent \n  " color=yellow style=filled]
+	
+
+"equivalent#strong_ordering#__infe.8a911d87396e4136_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::equivalent:std::strong_ordering const ); [line 21, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::equivalent.v:signed char=(signed char)0 [line 21, column 61]\n " shape="box"]
+	
+
+	 "equivalent#strong_ordering#__infe.8a911d87396e4136_3" -> "equivalent#strong_ordering#__infe.8a911d87396e4136_2" ;
+"greater#strong_ordering#__infer_g.c837c5ffd66eaa77_1" [label="1: Start __infer_globals_initializer_std::strong_ordering::greater\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "greater#strong_ordering#__infer_g.c837c5ffd66eaa77_1" -> "greater#strong_ordering#__infer_g.c837c5ffd66eaa77_3" ;
+"greater#strong_ordering#__infer_g.c837c5ffd66eaa77_2" [label="2: Exit __infer_globals_initializer_std::strong_ordering::greater \n  " color=yellow style=filled]
+	
+
+"greater#strong_ordering#__infer_g.c837c5ffd66eaa77_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::greater:std::strong_ordering const ); [line 22, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::greater.v:signed char=(signed char)1 [line 22, column 58]\n " shape="box"]
+	
+
+	 "greater#strong_ordering#__infer_g.c837c5ffd66eaa77_3" -> "greater#strong_ordering#__infer_g.c837c5ffd66eaa77_2" ;
+"less#strong_ordering#__infer_glob.730ae88c3206830b_1" [label="1: Start __infer_globals_initializer_std::strong_ordering::less\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "less#strong_ordering#__infer_glob.730ae88c3206830b_1" -> "less#strong_ordering#__infer_glob.730ae88c3206830b_3" ;
+"less#strong_ordering#__infer_glob.730ae88c3206830b_2" [label="2: Exit __infer_globals_initializer_std::strong_ordering::less \n  " color=yellow style=filled]
+	
+
+"less#strong_ordering#__infer_glob.730ae88c3206830b_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::less:std::strong_ordering const ); [line 19, column 1]\n  *&#GB<codetoanalyze/cpp/frontend-20/spaceship.cpp|const>$std::strong_ordering::less.v:signed char=(signed char)-1 [line 19, column 55]\n " shape="box"]
+	
+
+	 "less#strong_ordering#__infer_glob.730ae88c3206830b_3" -> "less#strong_ordering#__infer_glob.730ae88c3206830b_2" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_1" [label="1: Start Point::operator<=>\nFormals:  this:Point const * __param_0:Point const & __return_param:std::strong_ordering*\nLocals:  0$?%__sil_tmpSIL_temp_conditional___n$2:_Bool 0$?%__sil_tmp__temp_construct_n$3:std::strong_ordering cmp:std::strong_ordering \n  " color=yellow style=filled]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_1" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_18" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_2" [label="2: Exit Point::operator<=> \n  " color=yellow style=filled]
+	
+
+"operator<=>#Point(class std::stro.5c512fd6792d2497_3" [label="3:  Return Stmt \n   n$0=*&__return_param:std::strong_ordering* [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_3" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_4" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_4" [label="4:  Return Stmt \n   n$1=_fun_std::strong_ordering::strong_ordering(n$0:std::strong_ordering*,&#GB<>$std::strong_ordering::equal:std::strong_ordering const &) [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_4" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_5" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_5" [label="5:  Return Stmt \n  " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_5" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_2" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_6" [label="6: + \n  " ]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_6" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_3" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_7" [label="7: + \n  " ]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_7" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_13" ;
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_7" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_14" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_8" [label="8:  Call _fun_std::operator== \n   n$4=_fun_std::strong_ordering::strong_ordering(&0$?%__sil_tmp__temp_construct_n$3:std::strong_ordering*,&cmp:std::strong_ordering&) [line 38, column 48]\n  n$5=_fun_std::operator==(&0$?%__sil_tmp__temp_construct_n$3:std::strong_ordering,0:int) [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_8" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_9" ;
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_8" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_10" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_9" [label="9: Prune (true branch, boolean exp) \n   PRUNE(n$5, true); [line 38, column 48]\n " shape="invhouse"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_9" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_11" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_10" [label="10: Prune (false branch, boolean exp) \n   PRUNE(!n$5, false); [line 38, column 48]\n " shape="invhouse"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_10" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_12" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_11" [label="11:  ConditionalStmt Branch \n   *&0$?%__sil_tmpSIL_temp_conditional___n$2:_Bool=0 [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_11" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_7" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_12" [label="12:  ConditionalStmt Branch \n   *&0$?%__sil_tmpSIL_temp_conditional___n$2:_Bool=1 [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_12" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_7" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_13" [label="13: Prune (true branch, if) \n   n$6=*&0$?%__sil_tmpSIL_temp_conditional___n$2:_Bool [line 38, column 48]\n  PRUNE(n$6, true); [line 38, column 48]\n " shape="invhouse"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_13" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_15" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_14" [label="14: Prune (false branch, if) \n   n$6=*&0$?%__sil_tmpSIL_temp_conditional___n$2:_Bool [line 38, column 48]\n  PRUNE(!n$6, false); [line 38, column 48]\n " shape="invhouse"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_14" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_6" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_15" [label="15:  Return Stmt \n   n$7=*&__return_param:std::strong_ordering* [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_15" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_16" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_16" [label="16:  Return Stmt \n   n$8=_fun_std::strong_ordering::strong_ordering(n$7:std::strong_ordering*,&cmp:std::strong_ordering&) [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_16" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_17" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_17" [label="17:  Return Stmt \n  " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_17" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_2" ;
+"operator<=>#Point(class std::stro.5c512fd6792d2497_18" [label="18:  DeclStmt \n   VARIABLE_DECLARED(cmp:std::strong_ordering); [line 38, column 48]\n  n$10=*&this:Point const * [line 38, column 48]\n  n$11=*n$10.x:int [line 38, column 48]\n  n$12=*&__param_0:Point const & [line 38, column 48]\n  n$13=*n$12.x:int [line 38, column 48]\n  *&cmp:int=n$14 [line 38, column 48]\n " shape="box"]
+	
+
+	 "operator<=>#Point(class std::stro.5c512fd6792d2497_18" -> "operator<=>#Point(class std::stro.5c512fd6792d2497_8" ;
+"strong_ordering#strong_ordering#s.25196b03d5bb60a4_1" [label="1: Start std::strong_ordering::strong_ordering\nFormals:  this:std::strong_ordering* __param_0:std::strong_ordering&&\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "strong_ordering#strong_ordering#s.25196b03d5bb60a4_1" -> "strong_ordering#strong_ordering#s.25196b03d5bb60a4_3" ;
+"strong_ordering#strong_ordering#s.25196b03d5bb60a4_2" [label="2: Exit std::strong_ordering::strong_ordering \n  " color=yellow style=filled]
+	
+
+"strong_ordering#strong_ordering#s.25196b03d5bb60a4_3" [label="3:  Constructor Init \n   n$1=*&this:std::strong_ordering* [line 12, column 8]\n " shape="box"]
+	
+
+	 "strong_ordering#strong_ordering#s.25196b03d5bb60a4_3" -> "strong_ordering#strong_ordering#s.25196b03d5bb60a4_4" ;
+"strong_ordering#strong_ordering#s.25196b03d5bb60a4_4" [label="4:  Constructor Init \n   n$2=*&__param_0:std::strong_ordering&& [line 12, column 8]\n  n$3=*(std::strong_ordering&&)n$2.v:signed char [line 12, column 8]\n  *n$1.v:signed char=n$3 [line 12, column 8]\n " shape="box"]
+	
+
+	 "strong_ordering#strong_ordering#s.25196b03d5bb60a4_4" -> "strong_ordering#strong_ordering#s.25196b03d5bb60a4_2" ;
+"strong_ordering#strong_ordering#s.272a8e9721c789c0_1" [label="1: Start std::strong_ordering::strong_ordering\nFormals:  this:std::strong_ordering* __param_0:std::strong_ordering const &\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "strong_ordering#strong_ordering#s.272a8e9721c789c0_1" -> "strong_ordering#strong_ordering#s.272a8e9721c789c0_3" ;
+"strong_ordering#strong_ordering#s.272a8e9721c789c0_2" [label="2: Exit std::strong_ordering::strong_ordering \n  " color=yellow style=filled]
+	
+
+"strong_ordering#strong_ordering#s.272a8e9721c789c0_3" [label="3:  Constructor Init \n   n$1=*&this:std::strong_ordering* [line 12, column 8]\n " shape="box"]
+	
+
+	 "strong_ordering#strong_ordering#s.272a8e9721c789c0_3" -> "strong_ordering#strong_ordering#s.272a8e9721c789c0_4" ;
+"strong_ordering#strong_ordering#s.272a8e9721c789c0_4" [label="4:  Constructor Init \n   n$2=*&__param_0:std::strong_ordering const & [line 12, column 8]\n  n$3=*n$2.v:signed char [line 12, column 8]\n  *n$1.v:signed char=n$3 [line 12, column 8]\n " shape="box"]
+	
+
+	 "strong_ordering#strong_ordering#s.272a8e9721c789c0_4" -> "strong_ordering#strong_ordering#s.272a8e9721c789c0_2" ;
+}
