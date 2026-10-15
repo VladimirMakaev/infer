@@ -3187,6 +3187,8 @@ int ASTExporter<ATDWriter>::IfStmtTupleSize() {
 //@atd   then : pointer;
 //@atd   ?else : (pointer * source_location) option;
 //@atd   ~is_constexpr : bool;
+//@atd   ~is_consteval : bool;
+//@atd   ~is_negated_consteval : bool;
 //@atd } <ocaml field_prefix="isi_">
 template <class ATDWriter>
 void ASTExporter<ATDWriter>::VisitIfStmt(const IfStmt *Node) {
@@ -3195,8 +3197,13 @@ void ASTExporter<ATDWriter>::VisitIfStmt(const IfStmt *Node) {
   const DeclStmt *CondVar = Node->getConditionVariableDeclStmt();
   bool hasElseStorage = Node->hasElseStorage();
   bool IsConstexpr = Node->isConstexpr();
-  ObjectScope Scope(
-      OF, 2 + (bool)Init + (bool)CondVar + hasElseStorage + IsConstexpr);
+  // An `if consteval` has no condition, and only one of its branches can run outside constant
+  // evaluation, so the frontend needs to know which form this is.
+  bool IsConsteval = Node->isConsteval();
+  bool IsNegatedConsteval = Node->isNegatedConsteval();
+  ObjectScope Scope(OF,
+                    2 + (bool)Init + (bool)CondVar + hasElseStorage + IsConstexpr + IsConsteval +
+                        IsNegatedConsteval);
   if (Init) {
     OF.emitTag("init");
     dumpPointer(Init);
@@ -3216,6 +3223,8 @@ void ASTExporter<ATDWriter>::VisitIfStmt(const IfStmt *Node) {
     dumpSourceLocation(Node->getElseLoc());
   }
   OF.emitFlag("is_constexpr", IsConstexpr);
+  OF.emitFlag("is_consteval", IsConsteval);
+  OF.emitFlag("is_negated_consteval", IsNegatedConsteval);
 }
 
 template <class ATDWriter>
