@@ -1360,3 +1360,89 @@ bool copy_from_part_of_lifetime_extended_temporary_bad(const Document& d) {
   const Text t = s.text();
   return !t.empty();
 }
+
+// A class whose move operations copy a shared_ptr member on purpose, so that a
+// moved-from object keeps working. The copy is not reported: the same text in a
+// class without that contract is a copy worth reporting, and the two cannot be
+// told apart.
+class SharedStateChannel {
+ public:
+  SharedStateChannel() : state_(std::make_shared<Arr>()) {}
+
+  SharedStateChannel(SharedStateChannel&& other) noexcept
+      : state_(other.state_) {} // move_ctor_copies_shared_ptr_bad_FN
+
+  SharedStateChannel& operator=(SharedStateChannel&& other) noexcept {
+    state_ = other.state_; // move_assignment_copies_shared_ptr_bad_FN
+    return *this;
+  }
+
+ private:
+  std::shared_ptr<Arr> state_;
+};
+
+// A move operation copying something other than a shared_ptr is still reported.
+class MoveCopiesString {
+ public:
+  MoveCopiesString(MoveCopiesString&& other) noexcept
+      : name_(other.name_) {} // move_ctor_copies_string_bad
+
+  MoveCopiesString& operator=(MoveCopiesString&& other) noexcept {
+    name_ = other.name_; // move_assignment_copies_string_bad
+    return *this;
+  }
+
+ private:
+  std::string name_;
+};
+
+class MoveCopiesVector {
+ public:
+  MoveCopiesVector(MoveCopiesVector&& other) noexcept
+      : items_(other.items_) {} // move_ctor_copies_vector_bad
+
+ private:
+  std::vector<int> items_;
+};
+
+// Copying a shared_ptr into a field outside a move operation is still reported.
+class SetterCopiesSharedPtr {
+ public:
+  void set_shared_ptr_bad(std::shared_ptr<Arr> p) { state_ = p; }
+
+ private:
+  std::shared_ptr<Arr> state_;
+};
+
+// A move operation that really moves stays silent.
+class MoveMovesSharedPtr {
+ public:
+  MoveMovesSharedPtr(MoveMovesSharedPtr&& other) noexcept
+      : state_(std::move(other.state_)) {}
+
+  MoveMovesSharedPtr& operator=(MoveMovesSharedPtr&& other) noexcept {
+    state_ = std::move(other.state_);
+    return *this;
+  }
+
+ private:
+  std::shared_ptr<Arr> state_;
+};
+
+// An operator= converting from another type is not the class's own move
+// assignment, so the contract above does not apply to it and the copy is
+// still reported.
+struct SharedStateHolder {
+  std::shared_ptr<Arr> state_;
+};
+
+class ConvertingAssignCopiesSharedPtr {
+ public:
+  ConvertingAssignCopiesSharedPtr& operator=(SharedStateHolder&& other) {
+    state_ = other.state_; // converting_assignment_copies_shared_ptr_bad
+    return *this;
+  }
+
+ private:
+  std::shared_ptr<Arr> state_;
+};
