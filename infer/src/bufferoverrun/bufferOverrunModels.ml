@@ -1455,6 +1455,15 @@ module Container = struct
   end
 end
 
+module StdArrayIterator = struct
+  (* With [_LIBCPP_ABI_USE_WRAP_ITER_IN_STD_ARRAY], libc++ gives [std::array] the class iterator it
+     has always given [std::vector], so [begin]/[end] return the iterator through an extra
+     out-parameter instead of as a pointer, and are modelled the same way as the vector ones. *)
+  let begin_ _size temp_exp = Iterator.begin_ temp_exp
+
+  let end_ size temp_exp = Iterator.end_ ~size_exec:(Container.integer_size size).exec temp_exp
+end
+
 module StdInitializerList = struct
   let create_lst {pname; caller_pname; node_hash; location} ~ret:(id, _) mem arrblk ~arr =
     let represents_multiple_values = true in
@@ -2309,6 +2318,14 @@ module Call = struct
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "max_size" &--> Container.integer_size
       ; -"std" &:: "array" < capt_typ &+ capt_int >:: "at" $ capt_arg $+ capt_arg
         $!--> StdArray.at ~unchecked:false
+      ; -"std" &:: "array" < any_typ &+ capt_int >:: "begin" $ any_arg $+ capt_exp
+        $--> StdArrayIterator.begin_
+      ; -"std" &:: "array" < any_typ &+ capt_int >:: "cbegin" $ any_arg $+ capt_exp
+        $--> StdArrayIterator.begin_
+      ; -"std" &:: "array" < any_typ &+ capt_int >:: "cend" $ any_arg $+ capt_exp
+        $--> StdArrayIterator.end_
+      ; -"std" &:: "array" < any_typ &+ capt_int >:: "end" $ any_arg $+ capt_exp
+        $--> StdArrayIterator.end_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "back" $ capt_arg $!--> StdArray.back
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "begin" $ capt_arg $!--> StdArray.begin_
       ; -"std" &:: "array" < any_typ &+ capt_int >:: "cbegin" $ capt_arg $!--> StdArray.begin_
