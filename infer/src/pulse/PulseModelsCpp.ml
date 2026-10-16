@@ -3776,6 +3776,23 @@ let simple_matchers =
     ; -"std" &:: "basic_string" &:: "substr"
       &--> Basic.nondet ~desc:"std::basic_string::substr"
       |> with_non_disj
+      (* The standard comparison functors are pure predicates whose result says nothing about
+         the state, so there is nothing to gain from walking into them.  Walking in is expensive:
+         a comparator is called once per step of every associative-container lookup, and under
+         C++20 its body reaches the three-way comparison, whose result is not modelled, so each
+         call multiplies the caller's disjuncts instead of contributing the two it is worth. *)
+    ; -"std" &:: "less" &:: "operator()"
+      &--> Basic.nondet ~desc:"std::less::operator()"
+      |> with_non_disj
+    ; -"std" &:: "greater" &:: "operator()"
+      &--> Basic.nondet ~desc:"std::greater::operator()"
+      |> with_non_disj
+    ; -"std" &:: "less_equal" &:: "operator()"
+      &--> Basic.nondet ~desc:"std::less_equal::operator()"
+      |> with_non_disj
+    ; -"std" &:: "greater_equal" &:: "operator()"
+      &--> Basic.nondet ~desc:"std::greater_equal::operator()"
+      |> with_non_disj
     ; -"std" &:: "basic_string" &:: "size" $ capt_arg_payload $--> BasicString.size
     ; -"std" &:: "basic_string" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.address ~desc:"std::basic_string::operator[]"
