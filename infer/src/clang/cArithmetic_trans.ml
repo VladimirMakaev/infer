@@ -101,8 +101,11 @@ let binary_operation_instruction source_range boi ((e1, t1) as e1_with_typ) typ
   | `Assign ->
       (e1, [Sil.Store {e1; typ; e2; loc}])
   | `Cmp ->
-      CFrontend_errors.unimplemented __POS__ source_range "C++20 spaceship operator <=>"
-      (* C++20 spaceship operator <=>, TODO *)
+      (* The C++20 three-way comparison yields a comparison-category object, which is not
+         modelled.  Give it a nondeterministic value of that type: the operands have already been
+         translated, so their side effects are kept, and the enclosing method is translated
+         instead of being dropped. *)
+      (Exp.Var (Ident.create_fresh Ident.knormal), [])
   | `Comma ->
       (e2, []) (* C99 6.5.17-2 *)
   | ( `MulAssign
