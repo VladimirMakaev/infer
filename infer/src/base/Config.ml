@@ -2430,6 +2430,14 @@ and pulse_final_types_are_exact =
      runtime type)."
 
 
+and pulse_non_disj_bottom_after_exit =
+  CLOpt.mk_bool ~long:"pulse-non-disj-bottom-after-exit" ~default:true
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "After a program point where every disjunct exits the program, use an empty non-disjunctive \
+     state instead of top. Top made the next join forget what the other branches tracked (copies, \
+     shared pointer parameters), hiding their issues in functions that have a fatal branch."
+
+
 and pulse_force_continue =
   CLOpt.mk_bool ~long:"pulse-force-continue" ~default:true
     "The code coming after a function call is not analyzed if the callee has no summary of type \
@@ -4754,6 +4762,8 @@ and pulse_cut_to_one_path_procedures_pattern =
 and pulse_final_types_are_exact = !pulse_final_types_are_exact
 
 and pulse_force_continue = !pulse_force_continue
+
+and pulse_non_disj_bottom_after_exit = !pulse_non_disj_bottom_after_exit
 
 and pulse_eternal = !pulse_eternal
 

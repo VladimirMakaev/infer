@@ -612,6 +612,8 @@ val pulse_final_types_are_exact : bool
 
 val pulse_force_continue : bool
 
+val pulse_non_disj_bottom_after_exit : bool
+
 val pulse_eternal : bool
 
 val pulse_experimental_infinite_loop_checker : bool
