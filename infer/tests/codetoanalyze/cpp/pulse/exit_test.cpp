@@ -94,3 +94,54 @@ void FN_new_then_noreturn_throw_caught_bad() {
   } catch (...) {
   }
 }
+
+// --pulse-model-abort-if-field-equals in .inferconfig: these exit when the stream's level is 1
+namespace conditional_abort {
+struct LogStream {
+  int level;
+};
+
+struct OtherStream {
+  int level;
+};
+
+void log(const LogStream& stream, const char* msg);
+void log(const OtherStream& stream, const char* msg);
+
+struct Logger {
+  void log(const LogStream& stream, const char* msg);
+};
+
+void fatal_log_then_null_deref_ok() {
+  int* p = nullptr;
+  log(LogStream{1}, "fatal");
+  *p = 42;
+}
+
+void error_log_then_null_deref_bad() {
+  int* p = nullptr;
+  log(LogStream{2}, "error");
+  *p = 42;
+}
+
+void other_stream_type_not_modelled_bad() {
+  int* p = nullptr;
+  log(OtherStream{1}, "fatal");
+  *p = 42;
+}
+
+void fatal_method_log_then_null_deref_ok(Logger& logger) {
+  int* p = nullptr;
+  logger.log(LogStream{1}, "fatal");
+  *p = 42;
+}
+
+int* checked(int* p) {
+  if (p == nullptr) {
+    log(LogStream{1}, "null");
+  }
+  return p;
+}
+
+int checked_null_ok() { return *checked(nullptr); }
+} // namespace conditional_abort
