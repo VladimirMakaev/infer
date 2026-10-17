@@ -8,6 +8,8 @@
 struct lua_State;
 // No noreturn annotation: Lua's int-returning declaration needs a Pulse model.
 extern "C" int luaL_typeerror(lua_State*, int, const char*);
+extern "C" int luaL_error(lua_State*, const char*, ...);
+extern "C" int lua_error(lua_State*);
 
 // Similar names are ordinary returning functions, not Lua error APIs.
 extern "C" int luaL_typeerror_returns(lua_State*, int, const char*) {
@@ -41,6 +43,28 @@ int returning_bad(lua_State* state) {
 }
 
 int null_bad() {
+  int* value = nullptr;
+  return *value;
+}
+
+int* checked_with_error(lua_State* state, int* value) {
+  if (value == nullptr)
+    luaL_error(state, "%s is null", "value");
+  return value;
+}
+
+int checked_with_error_null_ok(lua_State* state) {
+  return *checked_with_error(state, nullptr);
+}
+
+int luaL_error_ok(lua_State* state) {
+  luaL_error(state, "error");
+  int* value = nullptr;
+  return *value;
+}
+
+int lua_error_ok(lua_State* state) {
+  lua_error(state);
   int* value = nullptr;
   return *value;
 }
