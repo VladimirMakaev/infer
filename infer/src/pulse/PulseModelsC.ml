@@ -1383,6 +1383,8 @@ let matchers : matcher list =
   ; ( -"lseek" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg $+ capt_arg
     $--> fun fd offset whence -> use_fd fd [offset; whence] )
   ; -"luaL_typeerror" <>$ any_arg $+ any_arg $+ any_arg $--> Basic.early_exit
+  ; -"luaL_error" <>$ any_arg $+...$--> Basic.early_exit
+  ; -"lua_error" <>$ any_arg $--> Basic.early_exit
   ; -"memchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> memchr
   ; -"memcmp" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
     $--> compose2 valid_args2 (ignore_args2 non_det_ret)
