@@ -2438,6 +2438,18 @@ and pulse_non_disj_bottom_after_exit =
      shared pointer parameters), hiding their issues in functions that have a fatal branch."
 
 
+and pulse_model_abort_if_field_equals =
+  CLOpt.mk_json ~long:"pulse-model-abort-if-field-equals"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    {|Functions that exit the program when a field of one of their arguments equals a constant, for
+      example a logging function that aborts on its fatal level. A list of objects
+      {"procedure": "ns::Logger::log", "arg": 0, "struct": "ns::LogStream", "field": "level",
+       "value": 1}: a call to ns::Logger::log whose argument number "arg" (0 to 3, counting the
+      receiver of a method) has type ns::LogStream, or a pointer or reference to it, exits when
+      that argument's field "level" equals 1 and otherwise returns a fresh value. Calls whose
+      argument has another type are not affected.|}
+
+
 and pulse_force_continue =
   CLOpt.mk_bool ~long:"pulse-force-continue" ~default:true
     "The code coming after a function call is not analyzed if the callee has no summary of type \
@@ -4762,6 +4774,8 @@ and pulse_cut_to_one_path_procedures_pattern =
 and pulse_final_types_are_exact = !pulse_final_types_are_exact
 
 and pulse_force_continue = !pulse_force_continue
+
+and pulse_model_abort_if_field_equals = !pulse_model_abort_if_field_equals
 
 and pulse_non_disj_bottom_after_exit = !pulse_non_disj_bottom_after_exit
 

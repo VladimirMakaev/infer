@@ -3349,6 +3349,107 @@ let get_cpp_matchers =
       config
 
 
+module AbortIfFieldEquals = struct
+  type entry =
+    {procedure: string list; arg: int; struct_name: string list; field: string; value: IntLit.t}
+
+  let split_qualified =
+    let cpp_separator_regex = Str.regexp_string "::" in
+    fun s -> Str.split cpp_separator_regex s
+
+
+  let entry_of_json (json : Yojson.Safe.t) =
+    let error () =
+      L.die UserError
+        "--pulse-model-abort-if-field-equals: expected objects with string fields \"procedure\", \
+         \"struct\" and \"field\" and integer fields \"arg\" (0 to 3) and \"value\", got %s"
+        (Yojson.Safe.to_string json)
+    in
+    match json with
+    | `Assoc fields -> (
+        let string name =
+          match List.Assoc.find fields ~equal:String.equal name with
+          | Some (`String s) when not (String.is_empty s) ->
+              split_qualified s
+          | _ ->
+              error ()
+        in
+        let int name =
+          match List.Assoc.find fields ~equal:String.equal name with
+          | Some (`Int i) ->
+              i
+          | _ ->
+              error ()
+        in
+        let field =
+          match List.Assoc.find fields ~equal:String.equal "field" with
+          | Some (`String s) when not (String.is_empty s) ->
+              s
+          | _ ->
+              error ()
+        in
+        match int "arg" with
+        | arg when arg >= 0 && arg <= 3 ->
+            { procedure= string "procedure"
+            ; arg
+            ; struct_name= string "struct"
+            ; field
+            ; value= IntLit.of_int (int "value") }
+        | _ ->
+            error () )
+    | _ ->
+        error ()
+
+
+  let entries () =
+    match Config.pulse_model_abort_if_field_equals with
+    | `Null ->
+        []
+    | `List entries ->
+        List.map entries ~f:entry_of_json
+    | json ->
+        entry_of_json json |> List.return
+
+
+  let model ~field_name ~value arg : model =
+    let open PulseModelsDSL.Syntax in
+    start_model
+    @@ fun () ->
+    let* field_value = load_access arg (FieldAccess field_name) in
+    disj
+      [ prune_eq_int field_value value @@> lift_to_monad Basic.early_exit
+      ; (let* () = prune_ne_int field_value value in
+         let* ret = fresh () in
+         assign_ret ret ) ]
+
+
+  let matchers =
+    let open ProcnameDispatcher.Call in
+    let qualified = function
+      | first :: rest ->
+          List.fold rest ~f:( &:: ) ~init:(-first)
+      | [] ->
+          (* [entry_of_json] rejects empty names *)
+          assert false
+    in
+    List.map (entries ()) ~f:(fun {procedure; arg; struct_name; field; value} ->
+        let field_name =
+          Fieldname.make (Typ.CStruct (QualifiedCppName.of_list struct_name)) field
+        in
+        let model = model ~field_name ~value in
+        let typ = qualified struct_name in
+        let proc = qualified procedure in
+        match arg with
+        | 0 ->
+            proc $ capt_arg_payload_of_typ typ $+...$--> model
+        | 1 ->
+            proc $ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model
+        | 2 ->
+            proc $ any_arg $+ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model
+        | _ ->
+            proc $ any_arg $+ any_arg $+ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model )
+end
+
 let abort_matchers : matcher list =
   get_cpp_matchers ~model:(fun _ -> Basic.early_exit) Config.pulse_model_abort
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
@@ -3748,7 +3849,7 @@ let simple_matchers =
         let s = Procname.to_string proc_name in
         Str.string_match r s 0 )
   in
-  map_matchers @ thrift_matchers @ condition_variable_matchers
+  map_matchers @ thrift_matchers @ condition_variable_matchers @ AbortIfFieldEquals.matchers
   @ [ -"android" &:: "base" &:: "LogMessage" &:: "LogMessage" $ any_arg $+ any_arg $+ any_arg
       $+ capt_arg_payload $+...$--> log_message_fatal
     ; +BuiltinDecl.(match_builtin __builtin_add_overflow)
