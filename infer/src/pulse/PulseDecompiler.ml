@@ -170,6 +170,21 @@ let replace_getter_call_with_property_access procname v call actuals decompiler 
 let add_call_source v (call : CallEvent.t) actuals decompiler =
   let+ decompiler in
   match call with
+  | (Call procname | ModelName procname | SkippedKnownCall procname)
+    when Procname.is_std_forward procname -> (
+    (* Forwarding only changes the value category of its argument, so the result is still the
+       same object. Naming it after the call loses that, and whoever asks the decompiler where a
+       value came from, the unnecessary-copy checks among them, then no longer sees the variable
+       it was forwarded from. *)
+    match List.hd actuals with
+    | Some ((arg, _), _) -> (
+      match Map.find arg decompiler with
+      | SourceExpr (source_expr, _) ->
+          Map.add v source_expr decompiler
+      | Unknown _ ->
+          Map.add v (ReturnValue call, []) decompiler )
+    | None ->
+        Map.add v (ReturnValue call, []) decompiler )
   | Call procname | SkippedKnownCall procname -> (
     match (Attributes.load procname, actuals) with
     | Some {objc_accessor= Some (Objc_getter _)}, _ ->
