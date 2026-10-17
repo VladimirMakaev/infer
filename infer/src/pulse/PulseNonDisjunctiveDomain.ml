@@ -1167,6 +1167,11 @@ let is_top ({intra; inter; has_dropped_disjuncts; astate} [@warning "missing-rec
   && OverApproxDomain.is_top astate
 
 
+let bottom_keeping_dropped_disjuncts
+    ({has_dropped_disjuncts} [@warning "missing-record-field-pattern"]) =
+  {bottom with has_dropped_disjuncts}
+
+
 let top_keeping_dropped_disjuncts ({has_dropped_disjuncts} [@warning "missing-record-field-pattern"])
     =
   {top with has_dropped_disjuncts}
