@@ -441,6 +441,8 @@ module C = struct
   let is_make_shared c = is_std_function ~prefix:"make_shared" c
 
   let is_std_move c = is_std_function ~prefix:"move" c
+
+  let is_std_forward c = is_std_function ~prefix:"forward" c
 end
 
 module Erlang = struct
@@ -694,6 +696,8 @@ let compare_name x y =
 
 
 let is_std_move t = match t with C c_pname -> C.is_std_move c_pname | _ -> false
+
+let is_std_forward t = match t with C c_pname -> C.is_std_forward c_pname | _ -> false
 
 let is_cpp_assignment_operator t =
   match t with ObjC_Cpp name when String.equal name.method_name "operator=" -> true | _ -> false

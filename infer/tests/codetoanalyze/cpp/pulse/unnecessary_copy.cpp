@@ -1446,3 +1446,30 @@ class ConvertingAssignCopiesSharedPtr {
  private:
   std::shared_ptr<Arr> state_;
 };
+
+struct ForwardedEvent {
+  std::string text;
+};
+
+// std::forward only changes the value category of its argument, so a value
+// forwarded from a reference parameter is still the caller's object and must
+// not be moved out of. Forwarding used to hide where the value came from, so
+// these were reported as copies to turn into moves.
+ForwardedEvent forward_lvalue_ref_param_ok(std::string& s) {
+  return ForwardedEvent{std::forward<std::string&>(s)};
+}
+
+template <typename T>
+ForwardedEvent forward_generic(T&& t) {
+  return ForwardedEvent{std::forward<T>(t)};
+}
+
+ForwardedEvent call_forward_generic_with_lvalue_ok(std::string& s) {
+  return forward_generic(s);
+}
+
+// The same copy written without forwarding is already left alone.
+ForwardedEvent lvalue_ref_param_ok(std::string& s) { return ForwardedEvent{s}; }
+
+// A parameter this function owns is still reported: moving out of it is safe.
+ForwardedEvent by_value_param_bad(std::string s) { return ForwardedEvent{s}; }
