@@ -1473,3 +1473,37 @@ ForwardedEvent lvalue_ref_param_ok(std::string& s) { return ForwardedEvent{s}; }
 
 // A parameter this function owns is still reported: moving out of it is safe.
 ForwardedEvent by_value_param_bad(std::string s) { return ForwardedEvent{s}; }
+
+#include <stdlib.h>
+
+namespace exiting_branch {
+void abort_unless(bool b) {
+  if (!b) {
+    exit(1);
+  }
+}
+
+// the exiting branch used to make the join forget the copy
+int copy_then_exit_branch_bad(bool b) {
+  auto a = get_a_ref();
+  if (b) {
+    exit(1);
+  }
+  return a.arr[0];
+}
+
+int copy_then_exiting_call_bad(bool b) {
+  auto a = get_a_ref();
+  abort_unless(b);
+  return a.arr[0];
+}
+
+int copy_modified_after_exit_branch_ok(bool b) {
+  auto a = get_a_ref();
+  if (b) {
+    exit(1);
+  }
+  a.arr[0] = 1;
+  return a.arr[0];
+}
+} // namespace exiting_branch

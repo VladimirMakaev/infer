@@ -2278,7 +2278,11 @@ module PulseTransferFunctions = struct
             true
         | _ ->
             false )
-    then NonDisjDomain.top_keeping_dropped_disjuncts non_disj
+    then
+      (* exiting disjuncts do not reach the next join, so they must not contribute to it *)
+      if Config.pulse_non_disj_bottom_after_exit then
+        NonDisjDomain.bottom_keeping_dropped_disjuncts non_disj
+      else NonDisjDomain.top_keeping_dropped_disjuncts non_disj
     else NonDisjDomain.top
 
 
