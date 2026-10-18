@@ -3998,10 +3998,18 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       CVar_decl.add_var_to_locals procdesc var_decl typ pvar ;
       let trans_state = {trans_state with succ_nodes= next_node} in
       let var_exp_typ = (Exp.Lvar pvar, typ) in
-      (* do not translate the initialization of static locals; to accurately represent the semantics
-         we need to only run the inilialization once at "program start" (or run it once at some
-         point) *)
-      if vdi.vdi_is_static_local then
+      (* Do not translate the initialization of static locals: to accurately represent the
+         semantics we need to only run the initialization once at "program start" (or run it once
+         at some point).  A constant initializer is the exception.  It runs before any code does,
+         it cannot observe or be observed by anything, and it computes the same value every time,
+         so translating it where the declaration appears gives the variable its value without
+         claiming anything false about when it was assigned.  Without it the fields of a local
+         [static constexpr] table read as unknown, while the same table at namespace scope is
+         known through its initializer procedure. *)
+      let is_constant_initialized =
+        vdi.vdi_is_constexpr || (Typ.is_const typ.Typ.quals && vdi.vdi_is_init_expr_cxx11_constant)
+      in
+      if vdi.vdi_is_static_local && not is_constant_initialized then
         mk_trans_result var_exp_typ {empty_control with root_nodes= trans_state.succ_nodes}
       else
         init_expr_trans ~is_structured_binding trans_state var_exp_typ ~qual_type stmt_info
