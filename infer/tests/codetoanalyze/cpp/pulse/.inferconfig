@@ -4,7 +4,8 @@
     { "procedure": "conditional_abort::log", "arg": 0,
       "struct": "conditional_abort::LogStream", "field": "level", "value": 1 },
     { "procedure": "conditional_abort::Logger::log", "arg": 1,
-      "struct": "conditional_abort::LogStream", "field": "level", "value": 1 }
+      "struct": "conditional_abort::LogStream", "field": "level", "value": 1 },
+    { "procedure": "conditional_abort_arg::LogMessage::LogMessage", "arg": 1, "value": 3 }
   ],
   "pulse-model-cheap-copy-type":  "my_proj::CheapToCopy",
   "pulse-model-returns-copy-pattern": "ns::creates_copy",
