@@ -276,3 +276,54 @@ void FP_pass_large_const_table_ok() {
     *p = 42;
   }
 }
+
+// A table declared `static constexpr` inside a function is constant-initialized, so its fields
+// are known, exactly as they are for the same table at namespace scope.
+namespace static_local_constant {
+
+struct VTable {
+  void (*destroy)(int*);
+};
+
+const VTable* local_table() {
+  static constexpr VTable kTable = {nullptr};
+  return &kTable;
+}
+
+void deref_if_member_non_null_ok() {
+  const VTable* t = local_table();
+  int* p = nullptr;
+  if (t->destroy != nullptr) {
+    *p = 42;
+  }
+}
+
+// control: the member really is set, so the guarded dereference of the null pointer stands
+void live_destroy(int*);
+
+const VTable* local_live_table() {
+  static constexpr VTable kLiveTable = {live_destroy};
+  return &kLiveTable;
+}
+
+void deref_if_member_non_null_bad() {
+  const VTable* t = local_live_table();
+  int* p = nullptr;
+  if (t->destroy != nullptr) {
+    *p = 42;
+  }
+}
+
+// a static local that is NOT constant-initialized keeps the old behaviour: its value stays
+// unknown, so the guarded branch is still reachable and the dereference is still reported
+int unknown_value();
+
+void non_constant_static_local_bad() {
+  static int kDynamic = unknown_value();
+  int* p = nullptr;
+  if (kDynamic == 7) {
+    *p = 42;
+  }
+}
+
+} // namespace static_local_constant
