@@ -2447,7 +2447,9 @@ and pulse_model_abort_if_field_equals =
        "value": 1}: a call to ns::Logger::log whose argument number "arg" (0 to 3, counting the
       receiver of a method) has type ns::LogStream, or a pointer or reference to it, exits when
       that argument's field "level" equals 1 and otherwise returns a fresh value. Calls whose
-      argument has another type are not affected.|}
+      argument has another type are not affected. Without "struct" and "field", the argument itself
+      is compared: {"procedure": "google::protobuf::internal::LogMessage::LogMessage", "arg": 1,
+      "value": 3} makes a log message constructed at the fatal level exit.|}
 
 
 and pulse_force_continue =

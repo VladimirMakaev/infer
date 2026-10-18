@@ -181,6 +181,7 @@ codetoanalyze/cpp/pulse/exit_test.cpp, new_leak_on_return_path_bad, 1, MEMORY_LE
 codetoanalyze/cpp/pulse/exit_test.cpp, FP_unique_ptr_then_pthread_exit_ok, 2, MEMORY_LEAK_CPP, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `new` here,memory becomes unreachable here]
 codetoanalyze/cpp/pulse/exit_test.cpp, conditional_abort::error_log_then_null_deref_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/exit_test.cpp, conditional_abort::other_stream_type_not_modelled_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/cpp/pulse/exit_test.cpp, conditional_abort_arg::error_message_then_null_deref_bad, 3, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/cpp/pulse/fclose.cpp, fclose_test::std_fclose_nullptr_bad, 0, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,invalid access occurs here]
 codetoanalyze/cpp/pulse/fd_ownership.cpp, fd_contracts::non_fd_resource_bad, 2, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
 codetoanalyze/cpp/pulse/fd_ownership.cpp, fd_contracts::mixed_arguments_bad, 0, PULSE_RESOURCE_LEAK, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `dup()` here,file descriptor becomes unreachable here]

@@ -145,3 +145,26 @@ int* checked(int* p) {
 
 int checked_null_ok() { return *checked(nullptr); }
 } // namespace conditional_abort
+
+namespace conditional_abort_arg {
+// a log message whose level is a constructor argument, as protobuf's GOOGLE_LOG(FATAL) builds
+// LogMessage(LOGLEVEL_FATAL, ...) and aborts later in an unseen LogMessage::Finish
+enum Level { INFO, WARNING, ERROR, FATAL };
+
+struct LogMessage {
+  LogMessage(Level level, const char* file, int line);
+  ~LogMessage();
+};
+
+void fatal_message_then_null_deref_ok() {
+  int* p = nullptr;
+  LogMessage(FATAL, __FILE__, __LINE__);
+  *p = 42;
+}
+
+void error_message_then_null_deref_bad() {
+  int* p = nullptr;
+  LogMessage(ERROR, __FILE__, __LINE__);
+  *p = 42;
+}
+} // namespace conditional_abort_arg
