@@ -3350,8 +3350,14 @@ let get_cpp_matchers =
 
 
 module AbortIfFieldEquals = struct
+  (** [field = None]: the argument itself is compared, e.g. the level a fatal log message is
+      constructed with *)
   type entry =
-    {procedure: string list; arg: int; struct_name: string list; field: string; value: IntLit.t}
+    { procedure: string list
+    ; arg: int
+    ; struct_name: string list option
+    ; field: string option
+    ; value: IntLit.t }
 
   let split_qualified =
     let cpp_separator_regex = Str.regexp_string "::" in
@@ -3384,15 +3390,26 @@ module AbortIfFieldEquals = struct
         let field =
           match List.Assoc.find fields ~equal:String.equal "field" with
           | Some (`String s) when not (String.is_empty s) ->
-              s
+              Some s
+          | None ->
+              None
           | _ ->
+              error ()
+        in
+        let struct_name =
+          match (field, List.Assoc.find fields ~equal:String.equal "struct") with
+          | None, None ->
+              None
+          | Some _, _ ->
+              Some (string "struct")
+          | None, Some _ ->
               error ()
         in
         match int "arg" with
         | arg when arg >= 0 && arg <= 3 ->
             { procedure= string "procedure"
             ; arg
-            ; struct_name= string "struct"
+            ; struct_name
             ; field
             ; value= IntLit.of_int (int "value") }
         | _ ->
@@ -3415,7 +3432,13 @@ module AbortIfFieldEquals = struct
     let open PulseModelsDSL.Syntax in
     start_model
     @@ fun () ->
-    let* field_value = load_access arg (FieldAccess field_name) in
+    let* field_value =
+      match field_name with
+      | Some field_name ->
+          load_access arg (FieldAccess field_name)
+      | None ->
+          ret arg
+    in
     disj
       [ prune_eq_int field_value value @@> lift_to_monad Basic.early_exit
       ; (let* () = prune_ne_int field_value value in
@@ -3433,21 +3456,25 @@ module AbortIfFieldEquals = struct
           assert false
     in
     List.map (entries ()) ~f:(fun {procedure; arg; struct_name; field; value} ->
-        let field_name =
-          Fieldname.make (Typ.CStruct (QualifiedCppName.of_list struct_name)) field
+        let proc = qualified procedure in
+        let capt, field_name =
+          match (struct_name, field) with
+          | Some struct_name, Some field ->
+              ( capt_arg_payload_of_typ (qualified struct_name)
+              , Some (Fieldname.make (Typ.CStruct (QualifiedCppName.of_list struct_name)) field) )
+          | _ ->
+              (capt_arg_payload, None)
         in
         let model = model ~field_name ~value in
-        let typ = qualified struct_name in
-        let proc = qualified procedure in
         match arg with
         | 0 ->
-            proc $ capt_arg_payload_of_typ typ $+...$--> model
+            proc $ capt $+...$--> model
         | 1 ->
-            proc $ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model
+            proc $ any_arg $+ capt $+...$--> model
         | 2 ->
-            proc $ any_arg $+ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model
+            proc $ any_arg $+ any_arg $+ capt $+...$--> model
         | _ ->
-            proc $ any_arg $+ any_arg $+ any_arg $+ capt_arg_payload_of_typ typ $+...$--> model )
+            proc $ any_arg $+ any_arg $+ any_arg $+ capt $+...$--> model )
 end
 
 let abort_matchers : matcher list =
