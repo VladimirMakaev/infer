@@ -29,6 +29,10 @@ val is_cpp_virtual : Clang_ast_t.decl -> bool
 
 val is_cpp_copy_assignment : Clang_ast_t.decl -> bool
 
+val is_cpp_implicit_union_assignment : Clang_ast_t.decl -> bool
+(** the implicitly defined copy or move assignment operator of a union, whose body in the AST is
+    [return *this;] and so assigns nothing *)
+
 val is_cpp_copy_ctor : Clang_ast_t.decl -> bool
 
 val is_cpp_move_ctor : Clang_ast_t.decl -> bool
