@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <initializer_list>
+#include <iterator>
 #include <utility>
 #include <cstddef>
 
@@ -195,6 +196,28 @@ int pointer_alias_ok() {
   List values = {1, 2};
   List* pointer = &values;
   return pointer->size() == 2 ? 0 : *static_cast<int*>(nullptr);
+}
+
+// The free std::begin/std::end overloads take the list by value. An array reference type built
+// from a braced list, as some libraries do, picks its data pointer with
+// `std::begin(v) == std::end(v) ? nullptr : std::begin(v)`.
+struct ArrayRef {
+  const int* data;
+  size_t length;
+  ArrayRef(const List& v)
+      : data(std::begin(v) == std::end(v) ? static_cast<const int*>(nullptr) : std::begin(v)),
+        length(v.size()) {}
+};
+
+int free_begin_end_nonempty_ok() {
+  ArrayRef r({1, 2, 3});
+  return r.data[0];
+}
+
+int free_begin_end_empty_bad() {
+  List empty;
+  ArrayRef r(empty);
+  return r.data[0];
 }
 
 } // namespace initializer_list_metadata
