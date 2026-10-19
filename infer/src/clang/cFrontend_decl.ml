@@ -102,6 +102,13 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
         let procname = CType_decl.CProcname.from_decl ~tenv meth_decl in
         CType_decl.method_signature_body_of_decl tenv meth_decl procname
       in
+      let body_opt =
+        (* The body of a union's implicit assignment operator assigns nothing, so translating it
+           claims the destination is unchanged by the assignment. Leave it undefined instead, as is
+           already done for a trivial destructor, so that the call does not assert a copy that did
+           not happen. *)
+        if CMethodProperties.is_cpp_implicit_union_assignment meth_decl then None else body_opt
+      in
       match body_opt with
       | Some body ->
           let procname = ms.CMethodSignature.name in
