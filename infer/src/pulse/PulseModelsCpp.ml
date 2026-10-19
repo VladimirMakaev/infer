@@ -4168,6 +4168,15 @@ let simple_matchers =
       $--> InitializerList.begin_ ~desc:"std::initializer_list::begin()"
     ; -"std" &:: "initializer_list" &:: "end" <>$ capt_arg_payload
       $--> InitializerList.end_ ~desc:"std::initializer_list::end()"
+      (* the free overloads in <initializer_list> take the list by value, and the copy does not
+         keep the relation between its begin and its end, so a non-empty literal compares equal
+         to its own end without these *)
+    ; -"std" &:: "begin"
+      $ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> InitializerList.begin_ ~desc:"std::begin(std::initializer_list)"
+    ; -"std" &:: "end"
+      $ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> InitializerList.end_ ~desc:"std::end(std::initializer_list)"
     ; -"std" &:: "distance" $ capt_arg $+ capt_arg
       $--> ForwardIterator.distance ~desc:"std::distance"
       |> with_non_disj
