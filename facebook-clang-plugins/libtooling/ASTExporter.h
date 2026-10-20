@@ -152,6 +152,12 @@ struct ASTExporterOptions : ASTPluginLib::PluginASTOptionsBase {
   bool withPointers = true;
   bool dumpComments = false;
   bool useMacroExpansionLocation = true;
+  /* Do not export the body of a function defined in a file whose normalized path matches this
+   * regular expression. The declaration itself, and everything else about it, is still
+   * exported; only the body is left out. Reading a body the frontend will not translate costs
+   * most of the memory of a capture, and a header full of generated template definitions can
+   * be the bulk of a translation unit on its own. */
+  std::string skipBodiesPathRegex;
   ATDWriter::ATDWriterOptions atdWriterOptions = {
       .useYojson = false,
       .prettifyJson = true,
@@ -161,6 +167,7 @@ struct ASTExporterOptions : ASTPluginLib::PluginASTOptionsBase {
       const ASTPluginLib::PluginASTOptionsBase::argmap_t &map) {
     ASTPluginLib::PluginASTOptionsBase::loadValuesFromEnvAndMap(map);
     loadBool(map, "AST_WITH_POINTERS", withPointers);
+    loadString(map, "SKIP_BODIES_PATH_REGEX", skipBodiesPathRegex);
     loadBool(map, "USE_YOJSON", atdWriterOptions.useYojson);
     loadBool(map, "PRETTIFY_JSON", atdWriterOptions.prettifyJson);
   }
@@ -304,6 +311,10 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   const Decl *const NullPtrDecl;
   const Comment *const NullPtrComment;
 
+  // Compiled form of Options.skipBodiesPathRegex, built on first use.
+  std::unique_ptr<llvm::Regex> SkipBodiesRegex;
+  bool SkipBodiesRegexReady = false;
+
   // Keep track of the last location we print out so that we can
   // print out deltas from then on out.
   const char *LastLocFilename;
@@ -362,6 +373,7 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   void dumpQualType(const QualType &qt);
   void dumpTypeOld(const Type *T);
   void dumpDeclRef(const Decl &Node);
+  bool shouldSkipBodyOf(const FunctionDecl *D);
   bool hasNodes(const DeclContext *DC);
   void dumpLookups(const DeclContext &DC);
   void dumpSelector(const Selector sel);
@@ -1677,6 +1689,9 @@ void ASTExporter<ATDWriter>::VisitFunctionDecl(const FunctionDecl *D) {
     DeclWithBody = nullptr;
   }
   bool HasDeclarationBody = D->doesThisDeclarationHaveABody();
+  if (HasDeclarationBody && shouldSkipBodyOf(D)) {
+    HasDeclarationBody = false;
+  }
   FunctionTemplateDecl *TemplateDecl = D->getPrimaryTemplate();
   SourceLocation PointOfInstantiation = D->getPointOfInstantiation();
   bool IsValidPointOfInstantiation = PointOfInstantiation.isValid();
@@ -1769,6 +1784,38 @@ void ASTExporter<ATDWriter>::VisitFunctionDecl(const FunctionDecl *D) {
     OF.emitTag("point_of_instantiation");
     dumpSourceLocation(PointOfInstantiation);
   }
+}
+
+template <class ATDWriter>
+bool ASTExporter<ATDWriter>::shouldSkipBodyOf(const FunctionDecl *D) {
+  if (Options.skipBodiesPathRegex.empty()) {
+    return false;
+  }
+  if (!SkipBodiesRegexReady) {
+    SkipBodiesRegexReady = true;
+    auto Candidate = std::make_unique<llvm::Regex>(Options.skipBodiesPathRegex);
+    std::string Error;
+    if (Candidate->isValid(Error)) {
+      SkipBodiesRegex = std::move(Candidate);
+    }
+    // an unusable regular expression leaves every body exported, which is the safe direction
+  }
+  if (!SkipBodiesRegex) {
+    return false;
+  }
+  const SourceManager &SM = Context.getSourceManager();
+  // The definition is what costs; ask where the body was written, after macro expansion, and
+  // compare the same normalized path the AST records.
+  PresumedLoc PLoc = SM.getPresumedLoc(SM.getExpansionLoc(D->getLocation()));
+  if (PLoc.isInvalid()) {
+    return false;
+  }
+  const std::string Path = Options.normalizeSourcePath(PLoc.getFilename());
+  // Never drop the body of something written in the file being compiled.
+  if (Path == Options.normalizeSourcePath(Options.inputFile.getFile().str().c_str())) {
+    return false;
+  }
+  return SkipBodiesRegex->match(Path);
 }
 
 template <class ATDWriter>
