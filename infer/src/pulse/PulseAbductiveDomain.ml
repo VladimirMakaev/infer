@@ -1136,13 +1136,45 @@ module Internal = struct
     else {astate with pre; post}
 
 
+  (** A sub-object of an allocated object is allocated too: its address is that of the object plus
+      an offset, so it cannot be zero either. [Dereference] is not such an edge: it reaches the
+      contents, which can perfectly well be null. Neither is a field Pulse itself made up to hold
+      the contents of a modelled object, which is a value rather than a sub-object; those are the
+      ones [Fieldname.is_internal] recognises. *)
+  let add_sub_objects heap v allocated =
+    let rec visit v allocated =
+      match RawMemory.find_opt v heap with
+      | None ->
+          allocated
+      | Some edges ->
+          RawMemory.Edges.fold edges ~init:allocated ~f:(fun allocated (access, (dest, _)) ->
+              let is_sub_object =
+                match (access : RawMemory.Access.t) with
+                | FieldAccess field ->
+                    not (Fieldname.is_internal field)
+                | ArrayAccess _ ->
+                    true
+                | Dereference ->
+                    false
+              in
+              if is_sub_object && not (AbstractValue.Set.mem dest allocated) then
+                visit dest (AbstractValue.Set.add dest allocated)
+              else allocated )
+    in
+    visit v allocated
+
+
   let get_stack_allocated astate =
     (* OPTIM: the post stack contains at least the pre stack so no need to check both *)
-    SafeStack.fold `Post
-      (fun var vo allocated ->
-        if Var.is_pvar var then AbstractValue.Set.add (downcast (ValueOrigin.value vo)) allocated
-        else allocated )
-      astate AbstractValue.Set.empty
+    let roots =
+      SafeStack.fold `Post
+        (fun var vo allocated ->
+          if Var.is_pvar var then AbstractValue.Set.add (downcast (ValueOrigin.value vo)) allocated
+          else allocated )
+        astate AbstractValue.Set.empty
+    in
+    let heap = (astate.post :> base_domain).heap in
+    AbstractValue.Set.fold (add_sub_objects heap) roots roots
 
 
   let check_new_eqs (eqs : Formula.new_eq list) =
