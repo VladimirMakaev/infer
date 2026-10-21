@@ -87,4 +87,15 @@ void nested_unused_bad(const std::vector<std::variant<int, float>>& values,
   }
 }
 
+// Binding the visitor to a named local is the shape that a visitor passed inline as a
+// temporary does not cover: an Overloaded inherits from its lambdas, so every base
+// subobject is constructed at the address of the variable itself. Writing those
+// constructions as stores would leave all but the last one looking like a dead store,
+// even though std::visit reads the variable on the next line.
+void named_visitor_ok(const std::variant<int, float>& value, int& out) {
+  auto visitor =
+      Overloaded{[&](int x) { out += x; }, [&](float x) { out += int(x); }};
+  std::visit(visitor, value);
+}
+
 } // namespace visitor_capture
