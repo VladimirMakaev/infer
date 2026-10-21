@@ -606,10 +606,7 @@ let remove_optional_copies_to_return proc_desc path location pname args (astate_
 let add_copies integer_type_widths tenv proc_desc node path location pname actuals ~astates_before
     default =
   let is_captured_by_ref =
-    let captured_by_ref =
-      List.filter_map (Procdesc.get_captured proc_desc) ~f:(fun {CapturedVar.pvar; capture_mode} ->
-          match capture_mode with ByValue -> None | ByReference -> Some pvar )
-    in
+    let captured_by_ref = Procdesc.get_captured_by_ref proc_desc in
     fun pvar -> List.mem captured_by_ref pvar ~equal:Pvar.equal
   in
   (* The decompiled source dereferences the value of [pvar] first when [pvar] holds a pointer, a

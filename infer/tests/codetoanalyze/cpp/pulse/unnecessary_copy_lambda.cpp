@@ -39,8 +39,10 @@ void mutable_init_capture_bad() {
 }
 #endif
 
-void reference_capture_bad(std::string& text) {
-  // A const call operator does not make a by-reference capture const.
+void reference_capture_ok(std::string& text) {
+  // A const call operator does not make a by-reference capture const, so a move here
+  // would move. It would also empty a string the enclosing function does not own and
+  // may still use, on every call after the first, so it is not suggested.
   auto query = [&text] { return Result{text}; };
 }
 
