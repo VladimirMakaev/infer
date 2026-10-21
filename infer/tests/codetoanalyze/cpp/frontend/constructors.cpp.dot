@@ -18,7 +18,7 @@ digraph cfg {
 	
 
 	 "D#D#{15354926930948875645}.d9099b8b7573ccbc_3" -> "D#D#{15354926930948875645}.d9099b8b7573ccbc_4" ;
-"D#D#{15354926930948875645}.d9099b8b7573ccbc_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(0$?%__sil_tmpSIL_materialize_temp__n$2:C); [line 14, column 11]\n  *&0$?%__sil_tmpSIL_materialize_temp__n$2:C=0 [line 14, column 11]\n " shape="box"]
+"D#D#{15354926930948875645}.d9099b8b7573ccbc_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(0$?%__sil_tmpSIL_materialize_temp__n$2:C); [line 14, column 11]\n " shape="box"]
 	
 
 	 "D#D#{15354926930948875645}.d9099b8b7573ccbc_4" -> "D#D#{15354926930948875645}.d9099b8b7573ccbc_5" ;
