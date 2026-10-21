@@ -19,7 +19,7 @@ digraph cfg {
 	
 
 	 "lvalue_reference#reference_captur.bd9c98aa493844f3_5" -> "lvalue_reference#reference_captur.bd9c98aa493844f3_4" ;
-"lvalue_reference#reference_captur.bd9c98aa493844f3_6" [label="6:  DeclStmt \n   n$4=_fun_lambda_reference_capture.cpp:28_9a1cfe91::lambda_(lambda_at_reference_capture.cpp:28_90062761(&update:lambda_reference_capture.cpp:28_9a1cfe91*,&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:28_9a1cfe91&) [line 28, column 17]\n " shape="box"]
+"lvalue_reference#reference_captur.bd9c98aa493844f3_6" [label="6:  DeclStmt \n   n$5=*&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:28_9a1cfe91& [line 28, column 17]\n  *&update:lambda_reference_capture.cpp:28_9a1cfe91*=n$5 [line 28, column 17]\n " shape="box"]
 	
 
 	 "lvalue_reference#reference_captur.bd9c98aa493844f3_6" -> "lvalue_reference#reference_captur.bd9c98aa493844f3_3" ;
@@ -42,7 +42,7 @@ digraph cfg {
 	
 
 	 "nested_rvalue_reference#reference.f19b84bdb85fba2e_5" -> "nested_rvalue_reference#reference.f19b84bdb85fba2e_4" ;
-"nested_rvalue_reference#reference.f19b84bdb85fba2e_6" [label="6:  DeclStmt \n   n$4=_fun_lambda_reference_capture.cpp:20_5d7224f2::lambda_(lambda_at_reference_capture.cpp:20_21778706(&outer:lambda_reference_capture.cpp:20_5d7224f2*,&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:20_5d7224f2&) [line 20, column 16]\n " shape="box"]
+"nested_rvalue_reference#reference.f19b84bdb85fba2e_6" [label="6:  DeclStmt \n   n$7=*&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:20_5d7224f2& [line 20, column 16]\n  *&outer:lambda_reference_capture.cpp:20_5d7224f2*=n$7 [line 20, column 16]\n " shape="box"]
 	
 
 	 "nested_rvalue_reference#reference.f19b84bdb85fba2e_6" -> "nested_rvalue_reference#reference.f19b84bdb85fba2e_3" ;
@@ -65,7 +65,7 @@ digraph cfg {
 	
 
 	 "rvalue_reference#reference_captur.b188c45bc99cded1_5" -> "rvalue_reference#reference_captur.b188c45bc99cded1_4" ;
-"rvalue_reference#reference_captur.b188c45bc99cded1_6" [label="6:  DeclStmt \n   n$4=_fun_lambda_reference_capture.cpp:15_e141e6ad::lambda_(lambda_at_reference_capture.cpp:15_325605e3(&update:lambda_reference_capture.cpp:15_e141e6ad*,&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:15_e141e6ad&) [line 15, column 17]\n " shape="box"]
+"rvalue_reference#reference_captur.b188c45bc99cded1_6" [label="6:  DeclStmt \n   n$9=*&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:15_e141e6ad& [line 15, column 17]\n  *&update:lambda_reference_capture.cpp:15_e141e6ad*=n$9 [line 15, column 17]\n " shape="box"]
 	
 
 	 "rvalue_reference#reference_captur.b188c45bc99cded1_6" -> "rvalue_reference#reference_captur.b188c45bc99cded1_3" ;
@@ -88,7 +88,7 @@ digraph cfg {
 	
 
 	 "value_capture#reference_capture#1.7ad29f13ffedb2b3_5" -> "value_capture#reference_capture#1.7ad29f13ffedb2b3_4" ;
-"value_capture#reference_capture#1.7ad29f13ffedb2b3_6" [label="6:  DeclStmt \n   n$4=_fun_lambda_reference_capture.cpp:33_5680962f::lambda_(lambda_at_reference_capture.cpp:33_1d63bde3(&read:lambda_reference_capture.cpp:33_5680962f*,&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:33_5680962f&) [line 33, column 15]\n " shape="box"]
+"value_capture#reference_capture#1.7ad29f13ffedb2b3_6" [label="6:  DeclStmt \n   n$8=*&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:33_5680962f& [line 33, column 15]\n  *&read:lambda_reference_capture.cpp:33_5680962f*=n$8 [line 33, column 15]\n " shape="box"]
 	
 
 	 "value_capture#reference_capture#1.7ad29f13ffedb2b3_6" -> "value_capture#reference_capture#1.7ad29f13ffedb2b3_3" ;
@@ -152,7 +152,7 @@ digraph cfg {
 	
 
 	 "operator()#lambda_reference_captu.ec62512d6b70d395_5" -> "operator()#lambda_reference_captu.ec62512d6b70d395_4" ;
-"operator()#lambda_reference_captu.ec62512d6b70d395_6" [label="6:  DeclStmt \n   n$4=_fun_lambda_reference_capture.cpp:21_ec44c781::lambda_(lambda_at_reference_capture.cpp:21_f20e6268(&inner:lambda_reference_capture.cpp:21_ec44c781*,&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:21_ec44c781&) [line 21, column 18]\n " shape="box"]
+"operator()#lambda_reference_captu.ec62512d6b70d395_6" [label="6:  DeclStmt \n   n$6=*&0$?%__sil_tmpSIL_materialize_temp__n$2:lambda_reference_capture.cpp:21_ec44c781& [line 21, column 18]\n  *&inner:lambda_reference_capture.cpp:21_ec44c781*=n$6 [line 21, column 18]\n " shape="box"]
 	
 
 	 "operator()#lambda_reference_captu.ec62512d6b70d395_6" -> "operator()#lambda_reference_captu.ec62512d6b70d395_3" ;
