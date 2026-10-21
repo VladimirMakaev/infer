@@ -218,6 +218,7 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
     PulseNonDisjunctiveDomain.get_copied
       ~ref_formals:(Procdesc.get_passed_by_ref_formals proc_desc)
       ~ptr_formals:(Procdesc.get_pointer_formals proc_desc)
+      ~ref_captures:(Procdesc.get_captured_by_ref proc_desc)
       non_disj_astate
     |> List.iter
          ~f:(fun (copied_into, source_typ, source_opt, node, location, copied_location, from) ->
