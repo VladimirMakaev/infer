@@ -3972,6 +3972,9 @@ let simple_matchers =
     ; -"std" &:: "as_const" $ capt_arg_payload
       $--> Basic.id_first_arg ~desc:"std::as_const()"
       |> with_non_disj
+    ; -"std" &:: "move_if_noexcept" $ capt_arg_payload
+      $--> Basic.id_first_arg ~desc:"std::move_if_noexcept()"
+      |> with_non_disj
     ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+...$--> Std.make_move_iterator
       |> with_non_disj
     ; -"std" &:: "make_pair" < capt_typ &+ capt_typ >$ capt_arg_payload $+ capt_arg_payload
