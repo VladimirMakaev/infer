@@ -995,6 +995,23 @@ void captured_by_ref_ok() {
   x.arr[0] = 42;
 }
 
+// the same capture, copied into the field by the constructor instead of by
+// assignment: the lambda still cannot know how often it is called
+void captured_by_ref_constructed_into_field_ok() {
+  Arr x;
+  auto make = [&]() { return ArrWrap{x}; };
+  make();
+  make();
+}
+
+// the by-value capture of a mutable lambda belongs to the lambda, so moving out of
+// it is what the run-once continuation idiom wants
+void captured_by_value_constructed_into_field_bad() {
+  Arr x;
+  auto make = [x]() mutable { return ArrWrap{x}; };
+  make();
+}
+
 class UnownedArrayTest {
   Arr field;
 

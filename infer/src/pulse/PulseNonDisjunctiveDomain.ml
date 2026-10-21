@@ -538,7 +538,12 @@ module IntraDomElt = struct
         not (Typ.is_rvalue_reference typ) )
 
 
-  let get_copied ~ref_formals ~ptr_formals
+  (* A variable the procedure captured by reference belongs to the enclosing scope, exactly like a
+     variable it got through an lvalue reference: the procedure cannot see how the enclosing one
+     still uses it, nor how many times it is itself called, so moving out of it is not safe. *)
+  let is_captured_by_ref_var ~ref_captures pvar = List.mem ref_captures pvar ~equal:Pvar.equal
+
+  let get_copied ~ref_formals ~ptr_formals ~ref_captures
       ({copy_map; captured; reached_end; shared_intermediates} as astate_n) =
     let modified =
       CopyMap.fold
@@ -589,6 +594,7 @@ module IntraDomElt = struct
               (not (Pvar.is_global pvar))
               && (not (is_lvalue_ref_param ~ref_formals pvar))
               && (not (List.Assoc.mem ptr_formals ~equal:Pvar.equal pvar))
+              && (not (is_captured_by_ref_var ~ref_captures pvar))
               &&
               (* Note: We should NOT use [copied_location] here, because which is highly liked a
                     location of another procedure, so is unhelpful to reason about intra-procedrual
@@ -970,8 +976,8 @@ module IntraDom = struct
 
   let checked_via_destructor var = map (IntraDomElt.checked_via_destructor var)
 
-  let get_copied ~ref_formals ~ptr_formals =
-    get ~default:[] (IntraDomElt.get_copied ~ref_formals ~ptr_formals)
+  let get_copied ~ref_formals ~ptr_formals ~ref_captures =
+    get ~default:[] (IntraDomElt.get_copied ~ref_formals ~ptr_formals ~ref_captures)
 
 
   let get_const_refable_parameters = get ~default:[] IntraDomElt.get_const_refable_parameters
@@ -1201,8 +1207,8 @@ let mark_parameter_as_modified ~is_modified ~var =
 
 let checked_via_destructor var = map_intra (IntraDom.checked_via_destructor var)
 
-let get_copied ~ref_formals ~ptr_formals {intra} =
-  IntraDom.get_copied ~ref_formals ~ptr_formals intra
+let get_copied ~ref_formals ~ptr_formals ~ref_captures {intra} =
+  IntraDom.get_copied ~ref_formals ~ptr_formals ~ref_captures intra
 
 
 let get_const_refable_parameters {intra} = IntraDom.get_const_refable_parameters intra

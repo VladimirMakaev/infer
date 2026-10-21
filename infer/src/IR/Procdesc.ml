@@ -562,6 +562,11 @@ let is_non_structured_binding_local_or_formal pdesc pvar =
 (** Return name and type of captured variables *)
 let get_captured pdesc = pdesc.attributes.captured
 
+let get_captured_by_ref pdesc =
+  List.filter_map pdesc.attributes.captured ~f:(fun {CapturedVar.pvar; capture_mode} ->
+      match capture_mode with ByValue -> None | ByReference -> Some pvar )
+
+
 (** Return the visibility attribute *)
 let get_access pdesc = pdesc.attributes.access
 
