@@ -249,6 +249,9 @@ val set_attributes : t -> ProcAttributes.t -> unit
 val get_captured : t -> CapturedVar.t list
 (** Return name and type of block's captured variables *)
 
+val get_captured_by_ref : t -> Pvar.t list
+(** Return the captured variables that are captured by reference *)
+
 val get_exit_node : t -> Node.t
 
 val get_exn_sink : t -> Node.t option
