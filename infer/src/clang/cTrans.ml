@@ -3707,11 +3707,18 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             ~clang_pointer:stmt_info.Clang_ast_t.si_pointer
     in
     if List.is_empty stmts && Option.is_none array_filler then
-      (* perform zero initialization of a primitive type, record types will have
-         ImplicitValueInitExpr nodes and array types an array filler *)
-      let return_exp = Exp.zero_of_type var_typ |> Option.value ~default:Exp.zero in
-      let return = (return_exp, var_typ) in
-      mk_trans_result return empty_control
+      (* perform zero initialization of a primitive type; a record with fields has
+         ImplicitValueInitExpr nodes and an array type an array filler, so the only record left
+         here is one without a single field, whose storage is already in its final state. The
+         value of such a record is its address: a zero would be read as a null one. *)
+      let return_exp, initd_exps =
+        match Exp.zero_of_type var_typ with
+        | None when Typ.is_struct var_typ ->
+            (var_exp, [var_exp])
+        | zero_opt ->
+            (Option.value zero_opt ~default:Exp.zero, [])
+      in
+      mk_trans_result (return_exp, var_typ) {empty_control with initd_exps}
     else
       let sil_loc =
         CLocation.location_of_stmt_info trans_state.context.translation_unit_context.source_file
