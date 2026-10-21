@@ -196,6 +196,20 @@ let is_unnecessary_copy_in_loop node copied_into source_opt =
       false
 
 
+(** A [constexpr] variable is computed while compiling, so copying into one costs nothing at run
+    time and there is no copy for anyone to remove. *)
+let is_copy_into_constexpr proc_desc (copied_into : Attribute.CopiedInto.t) =
+  match copied_into with
+  | IntoVar {copied_var} | IntoIntermediate {copied_var} ->
+      Option.exists (Var.get_pvar copied_var) ~f:(fun pvar ->
+          let name = Pvar.get_name pvar in
+          List.exists (Procdesc.get_locals proc_desc)
+            ~f:(fun {ProcAttributes.name= local_name; is_constexpr} ->
+              is_constexpr && Mangled.equal local_name name ) )
+  | IntoField _ ->
+      false
+
+
 let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
     non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
@@ -235,6 +249,7 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
                   ~f:(fun typ -> Typ.is_const_reference_on_source typ |> not)
                   source_typ )
              && (not (is_unnecessary_copy_in_loop node copied_into source_opt))
+             && (not (is_copy_into_constexpr proc_desc copied_into))
              && not
                   (is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into
                      source_typ )
