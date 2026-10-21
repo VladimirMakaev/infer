@@ -206,7 +206,7 @@ digraph cfg {
 	
 
 	 "goto_in_lambda_capture#goto_scope.ee8fb51631da1896_16" -> "goto_in_lambda_capture#goto_scope.ee8fb51631da1896_14" ;
-"goto_in_lambda_capture#goto_scope.ee8fb51631da1896_17" [label="17:  DeclStmt \n   n$15=_fun_lambda_goto_scope.cpp:110_b8221473::lambda_goto_scope.cpp:110_56927572(&f:lambda_goto_scope.cpp:110_b8221473*,&0$?%__sil_tmpSIL_materialize_temp__n$0:lambda_goto_scope.cpp:110_b8221473&) [line 110, column 12]\n " shape="box"]
+"goto_in_lambda_capture#goto_scope.ee8fb51631da1896_17" [label="17:  DeclStmt \n   n$23=*&0$?%__sil_tmpSIL_materialize_temp__n$0:lambda_goto_scope.cpp:110_b8221473& [line 110, column 12]\n  *&f:lambda_goto_scope.cpp:110_b8221473*=n$23 [line 110, column 12]\n " shape="box"]
 	
 
 	 "goto_in_lambda_capture#goto_scope.ee8fb51631da1896_17" -> "goto_in_lambda_capture#goto_scope.ee8fb51631da1896_2" ;
@@ -398,7 +398,7 @@ digraph cfg {
 	
 
 	 "goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_9" -> "goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_10" ;
-"goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_10" [label="10:  Compound statement \n   n$14=_fun_lambda_goto_scope.cpp:98_6f68066f::lambda_goto_scope.cpp:98_93d0ad54(&0$?%__sil_tmp__temp_construct_n$13:lambda_goto_scope.cpp:98_6f68066f*,&0$?%__sil_tmpSIL_materialize_temp__n$12:lambda_goto_scope.cpp:98_6f68066f&) [line 98, column 8]\n  n$15=_fun_goto_scope::call<5a8a64fe9b43687f>(&0$?%__sil_tmp__temp_construct_n$13:lambda_goto_scope.cpp:98_6f68066f) [line 98, column 3]\n " shape="box"]
+"goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_10" [label="10:  Compound statement \n   n$18=*&0$?%__sil_tmpSIL_materialize_temp__n$12:lambda_goto_scope.cpp:98_6f68066f& [line 98, column 8]\n  *&0$?%__sil_tmp__temp_construct_n$13:lambda_goto_scope.cpp:98_6f68066f*=n$18 [line 98, column 8]\n  n$15=_fun_goto_scope::call<5a8a64fe9b43687f>(&0$?%__sil_tmp__temp_construct_n$13:lambda_goto_scope.cpp:98_6f68066f) [line 98, column 3]\n " shape="box"]
 	
 
 	 "goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_10" -> "goto_same_label_in_lambda#goto_sc.4274d07543bfb2fe_5" ;
