@@ -6,7 +6,11 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <unordered_map>
 #include <vector>
 #if __cplusplus >= 202002L
 #include <ranges>
@@ -145,4 +149,67 @@ int raw_identical_bad(const Row* entry) {
   auto targets = entry[reinterpret_cast<std::uintptr_t>(entry)].targets;
   return targets.size();
 }
+
+int map_iterator_bad(const std::map<int, Row>& rows) {
+  auto entry = rows.begin();
+  auto targets = entry->second.targets;
+  return targets.size();
+}
+
+int map_iterator_star_bad(const std::map<int, Row>& rows) {
+  auto entry = rows.begin();
+  auto targets = (*entry).second.targets;
+  return targets.size();
+}
+
+int unordered_map_iterator_bad(const std::unordered_map<int, Row>& rows,
+                               int key) {
+  auto entry = rows.find(key);
+  auto targets = entry->second.targets;
+  return targets.size();
+}
+
+int pointer_map_iterator_bad(std::map<int, Row>::iterator* entry) {
+  auto targets = (*entry)->second.targets;
+  return targets.size();
+}
+
+int range_for_bad(const std::vector<Row>& rows) {
+  int size = 0;
+  for (auto row : rows) {
+    size += row.targets.size();
+  }
+  return size;
+}
+
+int range_for_ok(const std::vector<Row>& rows) {
+  int size = 0;
+  for (const auto& row : rows) {
+    size += row.targets.size();
+  }
+  return size;
+}
+
+int size_index_bad(const Row* rows, const std::vector<int>& keys) {
+  auto targets = rows[keys.size()].targets;
+  return targets.size();
+}
+
+int use_count_index_bad(const Row* rows, const std::shared_ptr<Row>& owner) {
+  auto targets = rows[owner.use_count()].targets;
+  return targets.size();
+}
+
+int atomic_index_bad(const Row* rows, std::atomic<int>* key) {
+  auto targets = rows[key->load()].targets;
+  return targets.size();
+}
+
+struct Ops {
+  void (*release)(int*);
+};
+
+const Ops kNullOps{nullptr};
+
+void global_initializer_bad(int* value) { kNullOps.release(value); }
 }
