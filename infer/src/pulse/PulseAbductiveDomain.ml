@@ -468,8 +468,15 @@ module Internal = struct
         | _ ->
             false
       in
+      let is_must_be_valid_on_unknown_effect =
+        match (attribute : Attribute.t) with
+        | MustBeValid _ ->
+            BaseAddressAttributes.has_unknown_effect address (astate.post :> base_domain).attrs
+        | _ ->
+            false
+      in
       let new_pre =
-        if is_must_be_initialized_on_written then (
+        if is_must_be_initialized_on_written || is_must_be_valid_on_unknown_effect then (
           L.d_printfln "No abducing %a:%a, the address has been written" CanonValue.pp address
             Attribute.pp attribute ;
           astate.pre )
@@ -883,6 +890,10 @@ module Internal = struct
               let conditionally_add condition attr astate =
                 if condition then SafeAttributes.add_one addr_dst attr astate else astate
               in
+              let unknown_effect =
+                BaseAddressAttributes.find_opt addr_src (astate.post :> base_domain).attrs
+                |> Option.bind ~f:Attributes.get_unknown_effect
+              in
               let open Attribute in
               conditionally_add
                 (not (TaintedSet.is_empty taint_sources))
@@ -890,6 +901,16 @@ module Internal = struct
               |> conditionally_add
                    (not (TaintSanitizedSet.is_empty taint_sanitizers))
                    (TaintSanitized taint_sanitizers)
+              |> fun astate ->
+              (* An unknown call may have replaced the contents of [addr_src], so what we read
+                 here need not be the value the caller put there. Keep the edge, so that what the
+                 caller does reach still flows, but mark the value to keep its validity out of the
+                 precondition. *)
+              match unknown_effect with
+              | Some (call, hist) ->
+                  SafeAttributes.add_one addr_dst (UnknownEffect (call, hist)) astate
+              | None ->
+                  astate
             in
             let astate =
               match (access : Access.t) with
