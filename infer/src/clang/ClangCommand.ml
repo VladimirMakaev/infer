@@ -122,6 +122,13 @@ let fcp_clang_resource_include_dir =
 let filter_and_replace_unsupported_args ?(replace_options_arg = fun _ s -> s) ?(post_args = [])
     ?(pre_args = []) args =
   let drop_xclang = function "-Xclang" :: tl -> tl | args -> args in
+  (* A block listed entry ending in [=] matches every argument starting with it, for flags whose
+     values cannot be enumerated. *)
+  let is_block_listed flag =
+    List.exists Config.clang_block_listed_flags ~f:(fun blocked ->
+        String.equal blocked flag
+        || (String.is_suffix blocked ~suffix:"=" && String.is_prefix flag ~prefix:blocked) )
+  in
   (* [pending_arg] records whether a removed flag still needs its direct or forwarded argument
      removed; [res_rev] is the reversed result, [changed] records any change. *)
   let rec aux in_argfiles (pending_arg, res_rev, changed) args =
@@ -171,7 +178,7 @@ let filter_and_replace_unsupported_args ?(replace_options_arg = fun _ s -> s) ?(
         in
         aux in_argfiles (pending_arg, res_rev, true) tl
     | flag :: tl
-      when List.mem ~equal:String.equal Config.clang_block_listed_flags flag
+      when is_block_listed flag
            || String.lsplit2 ~on:'=' flag
               |> function
               | Some (flag, _arg) ->
