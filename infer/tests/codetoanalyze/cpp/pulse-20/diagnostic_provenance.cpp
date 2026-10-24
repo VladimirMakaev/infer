@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -212,4 +213,56 @@ struct Ops {
 const Ops kNullOps{nullptr};
 
 void global_initializer_bad(int* value) { kNullOps.release(value); }
+
+// A null pointer and every zero of the same path are one abstract value, so
+// each expression that evaluates to zero competes for its name. Name the
+// pointer, not whichever zero was read last.
+struct Buffer {
+  char* data;
+  Buffer() : data(nullptr) {}
+};
+
+Buffer make_buffer() { return Buffer(); }
+
+void null_from_callee_with_size_argument_bad(const std::vector<int>& keys) {
+  Buffer buffer = make_buffer();
+  if (keys.size() == 0) {
+    std::memcpy(buffer.data, keys.data(), keys.size());
+  }
+}
+
+void null_from_callee_with_zero_local_bad(const std::vector<int>& keys) {
+  Buffer buffer = make_buffer();
+  if (keys.size() == 0) {
+    std::size_t size = keys.size();
+    std::memcpy(buffer.data, keys.data(), size);
+  }
+}
+
+void local_null_with_size_argument_bad(const std::vector<int>& keys) {
+  char* data = nullptr;
+  if (keys.size() == 0) {
+    std::memcpy(data, keys.data(), keys.size());
+  }
+}
+
+// Nothing competes for the name here: a control for the three above rather than
+// a case of its own.
+void null_from_callee_alone_bad() {
+  Buffer buffer = make_buffer();
+  std::memcpy(buffer.data, "", 1);
+}
+
+// Known limitation: where the dereference happens while applying a callee's
+// summary rather than in a model, the name still comes from the shared value,
+// so the later argument wins and this reports `keys->size()`. The pointer is
+// named only where the check knows where the value was loaded from.
+void copy_into(char* data, std::size_t size) { *data = (char)size; }
+
+void name_of_null_crossing_a_call_bad(const std::vector<int>& keys) {
+  Buffer buffer = make_buffer();
+  if (keys.size() == 0) {
+    copy_into(buffer.data, keys.size());
+  }
+}
 }
