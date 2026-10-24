@@ -114,6 +114,7 @@ let is_cpp_library_storage {class_name; field_name} =
   | "__infer_backing_value"
   | "__infer_has_value"
   | "__infer_model_backing_string"
+  | "__infer_node"
   | "__infer_weak_backing_pointer" ->
       is_in "__infer_pulse_model"
   | "__ptr_" ->
@@ -129,6 +130,22 @@ let is_cpp_library_storage {class_name; field_name} =
   | _ ->
       (* recent libc++ keeps the pointer of [std::unique_ptr] in an anonymous struct *)
       String.is_prefix field_name ~prefix:"__anon_field_" && is_in "std::unique_ptr"
+
+
+let cpp_model_accessor {class_name; field_name} =
+  let class_name = Typ.Name.name class_name in
+  let is_in template =
+    String.equal class_name template || String.is_prefix class_name ~prefix:(template ^ "<")
+  in
+  match field_name with
+  | "__infer_size" when is_in "__infer_pulse_model" ->
+      Some "size()"
+  | "__infer_backing_count" when is_in "__infer_pulse_model" ->
+      Some "use_count()"
+  | "__infer_model_backing_int" when is_in "std::atomic" ->
+      Some "load()"
+  | _ ->
+      None
 
 
 module T = struct

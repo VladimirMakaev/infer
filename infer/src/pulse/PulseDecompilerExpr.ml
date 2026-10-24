@@ -80,9 +80,13 @@ let strip_generated_field_name name =
 let pp_field fmt field =
   if Fieldname.is_capture_field_in_closure field then Fieldname.pp fmt field
   else
-    let name = Fieldname.get_field_name field in
-    let stripped = strip_generated_field_name name in
-    if String.equal stripped name then Fieldname.pp fmt field else F.fprintf fmt "%s" stripped
+    match Fieldname.cpp_model_accessor field with
+    | Some accessor ->
+        F.pp_print_string fmt accessor
+    | None ->
+        let name = Fieldname.get_field_name field in
+        let stripped = strip_generated_field_name name in
+        if String.equal stripped name then Fieldname.pp fmt field else F.fprintf fmt "%s" stripped
 
 
 (* Swift tuple positional element. Llair/Textual emits them as fields named
@@ -177,6 +181,11 @@ let rec pp_access_expr fmt access_expr =
             pp_access_expr fmt index_expr
       in
       F.fprintf fmt "%a[%a]" pp_access_expr access_expr pp_index index
+  | Deref ((ArrowField (_, field) | DotField (_, field)) as access_expr)
+    when Option.is_some (Fieldname.cpp_model_accessor field) ->
+      (* the field holds the location of the value the accessor returns, so the call already
+         denotes the value and the dereference has nothing left to print *)
+      pp_access_expr fmt access_expr
   | Deref access_expr ->
       F.fprintf fmt "*%a" pp_access_expr access_expr
   | Parens access_expr ->
