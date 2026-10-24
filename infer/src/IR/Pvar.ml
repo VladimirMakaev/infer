@@ -160,6 +160,11 @@ let is_frontend_tmp pvar =
       false
 
 
+(* the variable a range-based [for] binds its range to, named as the C++ standard names it *)
+let range_for_range_regex = Str.regexp "^__range[0-9]*$"
+
+let is_range_for_range pvar = Str.string_match range_for_range_regex (to_string pvar) 0
+
 (* in Sawja, variables like $T0_18 are temporaries, but not SSA vars. *)
 let is_ssa_frontend_tmp pvar =
   is_frontend_tmp pvar

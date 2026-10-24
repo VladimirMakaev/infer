@@ -253,6 +253,25 @@ void null_from_callee_alone_bad() {
   std::memcpy(buffer.data, "", 1);
 }
 
+// The variables a range-based `for` expands to are not in the source, so name
+// the range the loop runs over. Its element is still named after the hidden
+// iterator: see range_for_bad above.
+struct Span {
+  const Row* first;
+  const Row* last;
+  const Row* begin() const { return first; }
+  const Row* end() const { return last; }
+};
+
+int range_for_over_null_range_bad() {
+  Span* span = nullptr;
+  int size = 0;
+  for (const auto& row : *span) {
+    size += row.targets.size();
+  }
+  return size;
+}
+
 // Known limitation: where the dereference happens while applying a callee's
 // summary rather than in a model, the name still comes from the shared value,
 // so the later argument wins and this reports `keys->size()`. The pointer is

@@ -70,7 +70,10 @@ let add_var_source v var decompiler =
   let+ decompiler in
   if Var.appears_in_source_code var then
     let[@warning "-partial-match"] (Var.ProgramVar pvar) = var in
-    Map.add v (DecompilerExpr.PVar pvar, []) decompiler
+    (* a range-based [for] binds its range to a variable the reader never wrote, so naming it
+       loses the range expression and says nothing in its place *)
+    if Pvar.is_range_for_range pvar then decompiler
+    else Map.add v (DecompilerExpr.PVar pvar, []) decompiler
   else decompiler
 
 
