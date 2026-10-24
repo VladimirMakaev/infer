@@ -369,7 +369,7 @@ module Syntax = struct
 
   let check_valid ?must_be_valid_reason vo : unit model_monad =
     let* {path; location} = get_data in
-    PulseOperations.check_addr_access path ?must_be_valid_reason NoAccess location
+    PulseOperations.check_addr_access path ?must_be_valid_reason ~origin:vo NoAccess location
       (ValueOrigin.addr_hist vo)
     >> sat |> exec_partial_command
 

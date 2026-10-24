@@ -44,8 +44,16 @@ let null_invalidation_of_history history (invalidation : Invalidation.t) =
       invalidation
 
 
-let check_addr_access path ?must_be_valid_reason access_mode location (address, history) astate =
+let check_addr_access path ?must_be_valid_reason ?origin access_mode location (address, history)
+    astate =
   let access_trace = Trace.Immediate {location; history} in
+  let decompile astate =
+    match origin with
+    | Some value_origin ->
+        Decompiler.find_from_origin value_origin astate
+    | None ->
+        Decompiler.find address astate
+  in
   let* astate =
     AddressAttributes.check_valid path ?must_be_valid_reason access_trace address astate
     |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
@@ -82,7 +90,7 @@ let check_addr_access path ?must_be_valid_reason access_mode location (address, 
           { diagnostic=
               Diagnostic.AccessToInvalidAddress
                 { calling_context= []
-                ; invalid_address= Decompiler.find address astate
+                ; invalid_address= decompile astate
                 ; invalidation
                 ; invalidation_trace
                 ; access_trace

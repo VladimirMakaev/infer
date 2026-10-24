@@ -111,6 +111,17 @@ let add_access_source v (access : Access.t) ~src decompiler =
       Map.add v (base, access_of_memory_access decompiler access :: accesses) decompiler
 
 
+let find_access v (access : Access.t) ~src decompiler =
+  let decompiler = assert_valid decompiler in
+  match Map.find src decompiler with
+  | Unknown _ ->
+      None
+  | SourceExpr ((base, accesses), _) ->
+      Some
+        (DecompilerExpr.SourceExpr
+           ((base, access_of_memory_access decompiler access :: accesses), Some v) )
+
+
 let add_iterator_source v call ~src ~is_reference_receiver decompiler =
   let+ decompiler in
   match Map.find src decompiler with
