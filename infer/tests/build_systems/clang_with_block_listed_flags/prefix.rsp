@@ -1,0 +1,4 @@
+-Xclang
+-bogus-prefix=delta=message
+-Xclang
+-bogus-prefix=epsilon

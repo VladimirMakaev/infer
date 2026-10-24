@@ -353,7 +353,9 @@ OPTIONS
            See also infer-capture(1).
 
        --clang-block-listed-flags +string
-           Clang flags to filter out
+           Clang flags to filter out. An entry ending in = filters out every
+           flag starting with it, so -fsome-option= filters out
+           -fsome-option=any-value.
            See also infer-capture(1).
 
        --clang-block-listed-flags-with-arg +string
