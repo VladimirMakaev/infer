@@ -20,15 +20,28 @@ let pp_config ~verbose fmt =
     if verbose then if Procname.is_swift proc_name then Procname.pp_fullname_only else Procname.pp
     else Procname.describe
   in
+  (* the clang frontend wraps the initialiser of a global in a procedure of its own, whose
+     mangled name means nothing to a reader: name the global instead *)
+  let global_of_initializer proc_name =
+    if verbose then None else Procname.get_global_name_of_initializer proc_name
+  in
   function
-  | Call proc_name ->
-      F.fprintf fmt "`%a`" (pp_proc_name proc_name) proc_name
+  | Call proc_name -> (
+    match global_of_initializer proc_name with
+    | Some global ->
+        F.fprintf fmt "the initializer of `%s`" global
+    | None ->
+        F.fprintf fmt "`%a`" (pp_proc_name proc_name) proc_name )
   | Model model ->
       F.fprintf fmt "`%s` (modelled)" model
   | ModelName proc_name ->
       F.fprintf fmt "`%a` (modelled)" (pp_proc_name proc_name) proc_name
-  | SkippedKnownCall proc_name ->
-      F.fprintf fmt "function `%a` with no summary" (pp_proc_name proc_name) proc_name
+  | SkippedKnownCall proc_name -> (
+    match global_of_initializer proc_name with
+    | Some global ->
+        F.fprintf fmt "the initializer of `%s` with no summary" global
+    | None ->
+        F.fprintf fmt "function `%a` with no summary" (pp_proc_name proc_name) proc_name )
   | SkippedUnknownCall call_exp ->
       F.fprintf fmt "unresolved call expression `%a`" Exp.pp call_exp
 
