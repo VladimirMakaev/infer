@@ -18,7 +18,8 @@ trap cleanup EXIT
 source_file="$source_dir/capture_regression.c"
 blocked=(--clang-block-listed-flags-with-arg=-bogus-one
          --clang-block-listed-flags-with-arg=-bogus-two
-         --clang-block-listed-flags-with-arg=-bogus-three)
+         --clang-block-listed-flags-with-arg=-bogus-three
+         --clang-block-listed-flags=-bogus-prefix=)
 
 assert_absent() {
   if grep -Eq "$1" "$2"; then
@@ -44,6 +45,8 @@ capture_filtered() {
 capture_filtered direct -Xclang -bogus-one=alpha=message \
   -Xclang -bogus-two=beta=message -Xclang -bogus-three=gamma=message
 capture_filtered response "@$source_dir/flags.rsp"
+capture_filtered prefix_value -Xclang -bogus-prefix=delta=message
+capture_filtered prefix_response "@$source_dir/prefix.rsp"
 capture_filtered separate_argument -Xclang -mllvm -Xclang -unsupported-llvm-option
 capture_filtered response_separate_argument "@$source_dir/pending_arg.rsp" \
   -Xclang -unsupported-llvm-option
