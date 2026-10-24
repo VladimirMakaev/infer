@@ -1088,7 +1088,8 @@ and clang_block_listed_flags =
       ; "-fno-absolute-module-directory"
       ; "-fno-canonical-system-headers" ]
     ~in_help:InferCommand.[(Capture, manual_clang)]
-    "Clang flags to filter out"
+    "Clang flags to filter out. An entry ending in $(i,=) filters out every flag starting with it, \
+     so $(b,-fsome-option=) filters out $(b,-fsome-option=any-value)."
 
 
 and clang_block_listed_flags_with_arg =
