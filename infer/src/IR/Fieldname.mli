@@ -48,6 +48,11 @@ val is_cpp_library_storage : t -> bool
     [__ptr_] in [std::unique_ptr], and the fields that Pulse's C++ models add to library objects to
     stand for their contents. Messages print the object instead of such fields. *)
 
+val cpp_model_accessor : t -> string option
+(** The accessor a C++ program calls to read the property that a Pulse model keeps in this field,
+    such as [size()] for the field holding the size of a container. Messages print the accessor
+    instead of the field, which has no counterpart in the source. *)
+
 (** Set for fieldnames *)
 module Set : PrettyPrintable.PPSet with type elt = t
 

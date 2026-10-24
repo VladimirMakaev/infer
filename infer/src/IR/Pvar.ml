@@ -160,10 +160,6 @@ let is_frontend_tmp pvar =
       false
 
 
-let tmp_clang_regex = Str.regexp "^__\\(range\\|begin\\|end\\)[0-9]*$"
-
-let is_clang_tmp pvar = Str.string_match tmp_clang_regex (to_string pvar) 0
-
 (* in Sawja, variables like $T0_18 are temporaries, but not SSA vars. *)
 let is_ssa_frontend_tmp pvar =
   is_frontend_tmp pvar
@@ -192,8 +188,6 @@ let pp_ ~verbose f pv =
   match pv.pv_kind with
   | _ when (not verbose) && is_cpp_temporary pv ->
       F.pp_print_string f "C++ temporary"
-  | _ when (not verbose) && is_clang_tmp pv ->
-      F.pp_print_string f "compiler-generated variable"
   | _ when (not verbose) && is_frontend_tmp pv ->
       F.pp_print_string f "infer intermediate variable"
   | Local_var _ ->
