@@ -311,9 +311,27 @@ include struct
 
   let valid_arg arg : model = start_model @@ fun () -> check_valid arg
 
+  (* [fflush(NULL)] and its like accept a null argument, so both cases are explored. Not once the
+     same argument has already been required to be valid on this path though: [check_valid] only
+     abduces that as a precondition and leaves the formula free, so the null case would survive an
+     [fprintf] on the same stream. The summary would then both require the stream non-null and
+     describe it as null, which every caller holding a null pointer of its own reports, all the
+     nulls of a path being one value. *)
   let null_or_valid_arg arg =
     start_model
-    @@ fun () -> disj [prune_eq_zero (to_aval arg); prune_ne_zero (to_aval arg) @@> check_valid arg]
+    @@ fun () ->
+    let* must_already_be_valid =
+      exec_pure_operation (fun astate ->
+          AddressAttributes.find_opt `Pre (ValueOrigin.value arg) astate
+          |> Option.bind ~f:Attributes.get_must_be_valid
+          |> Option.is_some )
+    in
+    if must_already_be_valid then
+      (* only require it again: pruning it non-null here would put that in the path condition, and
+         a caller passing null would then contradict the summary and be dropped instead of
+         reported *)
+      check_valid arg
+    else disj [prune_eq_zero (to_aval arg); prune_ne_zero (to_aval arg) @@> check_valid arg]
 
 
   let valid_args2 arg1 arg2 : model = start_model @@ fun () -> check_valid arg1 @@> check_valid arg2
