@@ -15,12 +15,14 @@ type t = AbductiveDomain.t
 val check_addr_access :
      PathContext.t
   -> ?must_be_valid_reason:Invalidation.must_be_valid_reason
+  -> ?origin:ValueOrigin.t
   -> access_mode
   -> Location.t
   -> AbstractValue.t * ValueHistory.t
   -> t
   -> t AccessResult.t
-(** Check that the [address] is not known to be invalid *)
+(** Check that the [address] is not known to be invalid. [origin], when the caller has one, only
+    names the address in the report: see {!PulseAbductiveDecompiler.find_from_origin}. *)
 
 val check_non_null :
      PathContext.t
