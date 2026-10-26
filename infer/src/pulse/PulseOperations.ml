@@ -195,6 +195,11 @@ end
 
 let pulse_model_type = Typ.CStruct (QualifiedCppName.of_list ["__infer_pulse_model"])
 
+(* the [n]th argument a variadic call passes in [...], a field of the synthetic object Pulse binds
+   those arguments to. A field name rather than an array index, so that the caller's write and the
+   callee's read match syntactically instead of asking the formula to equate two index values. *)
+let va_arg_field n = Fieldname.make pulse_model_type ("__infer_va_arg_" ^ string_of_int n)
+
 module ModeledField = struct
   let string_length = Fieldname.make pulse_model_type "__infer_model_string_length"
 

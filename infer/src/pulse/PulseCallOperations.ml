@@ -66,6 +66,51 @@ let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
       actuals
 
 
+(** The actuals a variadic call passes in [...]: exactly the ones [trim_actuals_if_var_arg] drops,
+    in order. Mirrors its two shapes rather than assuming a suffix -- with an added return parameter
+    the kept set is the first [n_formals - 1] plus the last, so the dropped ones are the middle. *)
+let dropped_variadic_actuals callee_pname ~formals ~actuals =
+  match IRAttributes.load callee_pname with
+  | Some {ProcAttributes.is_clang_variadic= true; is_defined= true; has_added_return_param} ->
+      let n_formals = List.length formals and n_actuals = List.length actuals in
+      if n_actuals <= n_formals then []
+      else if has_added_return_param && n_formals > 0 then
+        List.sub actuals ~pos:(n_formals - 1) ~len:(n_actuals - n_formals)
+      else List.drop actuals n_formals
+  | _ ->
+      []
+
+
+(** [va_arg] has no formal to resolve against, so the callee reads its [...] arguments out of a
+    synthetic array ([Pvar.mk_va_args], created in the callee's pre by [AbductiveDomain.mk_initial])
+    indexed by a cursor on the [va_list]. Build that array here, out of the actuals the call
+    actually passes, and hand it over like any other argument. A callee that reads past the end, or
+    at an index we cannot pin down, lands on an unconstrained element, which is what it got before
+    any of this. *)
+let va_args_binding path call_loc callee_pname ~formals ~actuals astate =
+  match dropped_variadic_actuals callee_pname ~formals ~actuals with
+  | [] ->
+      Sat (Ok (astate, [], []))
+  | dropped ->
+      let array = (AbstractValue.mk_fresh (), ValueHistory.epoch) in
+      let rec write index astate = function
+        | [] ->
+            Sat (Ok astate)
+        | (obj, _) :: rest ->
+            let** astate =
+              Sat
+                (PulseOperations.write_field path call_loc ~ref:array
+                   (PulseOperations.va_arg_field index)
+                   ~obj astate )
+            in
+            write (index + 1) astate rest
+      in
+      let** astate = write 0 astate dropped in
+      Sat
+        (Ok (astate, [(Pvar.mk_va_args callee_pname, StdTyp.void_star)], [(array, StdTyp.void_star)])
+        )
+
+
 (** In order to apply summary specialisation, we call blocks or function pointers with the closure
     as the first argument, but when we want to call the actual code of the block or function, we
     need to remove the closure argument again. The extra actuals of variadic functions are dropped
@@ -472,8 +517,8 @@ let copy_uninitialized_fields tenv ~is_assignment class_name ~src ~dst astate =
 
 let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     ({PathContext.timestamp} as path) callee_proc_name call_loc call_flags callee_exec_state ~ret
-    ~captured_formals ~captured_actuals ~formals ~actuals ~(tb_arg_exps : Exp.t list) ~implicit_copy
-    astate =
+    ~captured_formals ~captured_actuals ~formals ~actuals ~va_args_formals ~va_args_actuals
+    ~(tb_arg_exps : Exp.t list) ~implicit_copy astate =
   let open ExecutionDomain in
   let caller_astate = astate in
   let copy_to_caller_return_variable astate return_val_opt =
@@ -533,8 +578,9 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     in
     let sat_unsat, contradiction =
       PulseInterproc.apply_summary analysis_data path ~callee_proc_name call_loc ~callee_summary
-        ~captured_formals ~captured_actuals ~formals
-        ~actuals:(actuals_for_formals call_flags callee_proc_name ~formals ~actuals)
+        ~captured_formals ~captured_actuals ~formals:(formals @ va_args_formals)
+        ~actuals:
+          (actuals_for_formals call_flags callee_proc_name ~formals ~actuals @ va_args_actuals)
         astate
     in
     let sat_unsat =
@@ -767,13 +813,17 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
         (Pvar.mk mangled callee_pname, typ) )
   in
   let captured_formals = callee_proc_attrs.captured in
-  let ( let<**> ) = bind_sat_result (non_disj_caller, None) in
+  (* eta-expanded so the binder generalises: it is used at two different result types below *)
+  let ( let<**> ) x f = bind_sat_result (non_disj_caller, None) x f in
   let<**> astate, captured_actuals =
     PulseOperations.get_captured_actuals callee_pname path call_loc call_kind ~captured_formals
       ~actuals astate_caller
   in
   let captured_formals =
     List.map captured_formals ~f:(fun {CapturedVar.pvar; typ} -> (pvar, typ))
+  in
+  let<**> astate, va_args_formals, va_args_actuals =
+    va_args_binding path call_loc callee_pname ~formals ~actuals astate
   in
   let should_keep_at_most_one_disjunct =
     Option.exists Config.pulse_cut_to_one_path_procedures_pattern ~f:(fun regex ->
@@ -817,8 +867,8 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
           Timer.check_timeout () ;
           match
             apply_callee analysis_data path callee_pname call_loc call_flags callee_exec_state
-              ~captured_formals ~captured_actuals ~formals ~actuals ~tb_arg_exps ~implicit_copy ~ret
-              astate
+              ~captured_formals ~captured_actuals ~formals ~actuals ~va_args_formals
+              ~va_args_actuals ~tb_arg_exps ~implicit_copy ~ret astate
           with
           | Unsat unsat_info, new_contradiction ->
               SatUnsat.log_unsat unsat_info ;
@@ -839,7 +889,8 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
           match
             apply_callee analysis_data path callee_pname call_loc call_flags
               (ContinueProgram callee_astate_over_approx) ~captured_formals ~captured_actuals
-              ~formals ~actuals ~tb_arg_exps ~implicit_copy ~ret astate
+              ~formals ~actuals ~va_args_formals ~va_args_actuals ~tb_arg_exps ~implicit_copy ~ret
+              astate
           with
           | Sat (Ok (ContinueProgram post)), _new_contradiction ->
               NonBottom (post, path)

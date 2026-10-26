@@ -248,6 +248,14 @@ let mk ?(is_syntactic = true) (name : Mangled.t) (proc_name : Procname.t) : t =
   mk_with_tmp_id ~is_syntactic ~tmp_id:None name proc_name
 
 
+let va_args_name = Mangled.from_string "__infer_va_args"
+
+(* The arguments a variadic call passes in [...] have no formal to be bound to, so Pulse binds them
+   to this one instead, as an array the callee's [va_arg] reads by index. *)
+let mk_va_args pname = mk va_args_name pname
+
+let is_va_args pvar = Mangled.equal (get_name pvar) va_args_name
+
 let get_ret_pvar pname = mk Ident.name_return pname
 
 let get_ret_param_pvar pname = mk Mangled.return_param pname

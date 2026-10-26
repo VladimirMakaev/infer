@@ -1971,18 +1971,18 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   let proc_name = proc_attrs.proc_name in
   (* HACK: save the formals in the stacks of the pre and the post to remember which local variables
      correspond to formals *)
-  let captured, formals =
-    let init_var formal_or_captured pvar typ annot_opt =
-      let event =
-        match formal_or_captured with
-        | `Formal ->
-            ValueHistory.FormalDeclared (pvar, proc_attrs.loc, Timestamp.t0)
-        | `Captured mode ->
-            ValueHistory.Capture
-              {captured_as= pvar; mode; location= proc_attrs.loc; timestamp= Timestamp.t0}
-      in
-      (Var.of_pvar pvar, typ, annot_opt, (AbstractValue.mk_fresh (), ValueHistory.singleton event))
+  let init_var formal_or_captured pvar typ annot_opt =
+    let event =
+      match formal_or_captured with
+      | `Formal ->
+          ValueHistory.FormalDeclared (pvar, proc_attrs.loc, Timestamp.t0)
+      | `Captured mode ->
+          ValueHistory.Capture
+            {captured_as= pvar; mode; location= proc_attrs.loc; timestamp= Timestamp.t0}
     in
+    (Var.of_pvar pvar, typ, annot_opt, (AbstractValue.mk_fresh (), ValueHistory.singleton event))
+  in
+  let captured, formals =
     let formals =
       List.map proc_attrs.formals ~f:(fun (mangled, typ, anno) ->
           init_var `Formal (Pvar.mk mangled proc_name) typ (Some anno) )
@@ -1993,7 +1993,16 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
     in
     (captured, formals)
   in
-  let formals_and_captured = captured @ formals in
+  let va_args =
+    (* A variadic callee reads its [...] arguments with [va_arg], which has no formal to resolve
+       against, so give it one: a single root the caller binds to an array of those arguments, read
+       by index. Only the callee's own [va_arg]s touch it, so a call that passes none leaves it
+       unconstrained, exactly as before. *)
+    if proc_attrs.is_clang_variadic && proc_attrs.is_defined then
+      [init_var `Formal (Pvar.mk_va_args proc_name) StdTyp.void_star None]
+    else []
+  in
+  let formals_and_captured = captured @ formals @ va_args in
   let initial_stack =
     List.fold formals_and_captured ~init:(PreDomain.empty :> BaseDomain.t).stack
       ~f:(fun stack (formal, _, _, addr_hist) ->

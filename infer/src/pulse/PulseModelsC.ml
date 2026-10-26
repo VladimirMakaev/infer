@@ -1003,6 +1003,60 @@ include struct
     else null_or_nonneg_non_det_ret ()
 
 
+  (* Where a [va_list] has got to in the arguments a variadic call passed in [...]. The arguments
+     themselves live in the synthetic [Pvar.mk_va_args] array that the caller fills in (see
+     [PulseCallOperations.va_args_binding]); the cursor says which element the next [va_arg] reads.
+     An unknown cursor reads an unconstrained element, which is what [va_arg] produced before any of
+     this was modelled, so every case we cannot follow degrades to the old behaviour on its own. *)
+  let va_cursor = Fieldname.make PulseOperations.pulse_model_type "__infer_va_cursor"
+
+  let va_args_array () =
+    let* {analysis_data= {proc_desc}} = get_data in
+    (* [Lvar] is the variable's address; the array the caller bound is what it holds *)
+    let* address = read (Exp.Lvar (Pvar.mk_va_args (Procdesc.get_proc_name proc_desc))) in
+    load address
+
+
+  let va_start ap _last : model =
+    start_model @@ fun () -> store_field ~ref:(to_aval ap) va_cursor @= int 0
+
+
+  (* after [va_end] the list may not be read again without another [va_start] *)
+  let va_end ap : model =
+    start_model @@ fun () -> store_field ~ref:(to_aval ap) va_cursor @= fresh ()
+
+
+  (* two lists walking the same arguments independently: we track one cursor, so the copy gets none *)
+  let va_copy dst _src : model =
+    start_model @@ fun () -> store_field ~ref:(to_aval dst) va_cursor @= fresh ()
+
+
+  let va_arg ap : model =
+    start_model
+    @@ fun () ->
+    let ap = to_aval ap in
+    let* cursor = load_access ap (FieldAccess va_cursor) in
+    let* position = as_constant_int cursor in
+    match position with
+    | None ->
+        (* the list is not at a position we can name -- read in a loop, after a [va_copy], or
+           advanced by a function we handed it to. Reading the array at an unknown index would
+           abduce an element the caller never wrote, so resolve nothing and leave the result
+           unconstrained, as it was before this was modelled. *)
+        assign_ret @= fresh ()
+    | Some position ->
+        (* one field per position rather than an array index: field names match syntactically, so
+           the caller's write and this read meet without asking the formula to equate two values *)
+        let* array = va_args_array () in
+        let* argument =
+          (* the field holds the argument itself; reading through it would read the caller's
+             object, which is exactly what [va_arg] does not do *)
+          load_access ~deref:false array (FieldAccess (PulseOperations.va_arg_field position))
+        in
+        let* next = binop_int (PlusA None) cursor IntLit.one in
+        store_field ~ref:ap va_cursor next @@> assign_ret argument
+
+
   let strcpy dst src : model =
     start_model
     @@ fun () ->
@@ -1264,7 +1318,13 @@ let matchers : matcher list =
   let ignore_args2 model _arg1 _arg2 = model in
   let taint_ret_from_arg arg = start_model @@ fun () -> data_dependency_to_ret [arg] in
   let map_context_tenv f (x, _) = f x in
-  [ +BuiltinDecl.(match_builtin free) <>$ capt_arg $--> free
+  [ +BuiltinDecl.(match_builtin __builtin_va_start)
+    <>$ capt_arg_payload $+ capt_arg_payload $--> va_start
+  ; +BuiltinDecl.(match_builtin __builtin_va_arg) <>$ capt_arg_payload $--> va_arg
+  ; +BuiltinDecl.(match_builtin __builtin_va_end) <>$ capt_arg_payload $--> va_end
+  ; +BuiltinDecl.(match_builtin __builtin_va_copy)
+    <>$ capt_arg_payload $+ capt_arg_payload $--> va_copy
+  ; +BuiltinDecl.(match_builtin free) <>$ capt_arg $--> free
   ; +match_regexp_opt Config.pulse_model_free_pattern <>$ capt_arg $+...$--> free
   ; -"realloc" <>$ capt_arg $+ capt_exp $--> realloc ~null_case:true
   ; +match_regexp_opt Config.pulse_model_realloc_pattern

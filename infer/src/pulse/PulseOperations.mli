@@ -44,6 +44,9 @@ end
 val pulse_model_type : Typ.name
 (** Struct type name of "__infer_pulse_model" *)
 
+val va_arg_field : int -> Fieldname.t
+(** the [n]th argument of a variadic call, in the synthetic object Pulse binds those arguments to *)
+
 module ModeledField : sig
   val string_length : Fieldname.t
   (** Modeled field for string length *)
