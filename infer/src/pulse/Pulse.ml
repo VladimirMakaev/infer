@@ -221,10 +221,128 @@ let is_copy_into_constexpr proc_desc (copied_into : Attribute.CopiedInto.t) =
       false
 
 
+(** Every call in the procedure: its callee, whether the frontend put its result in the last actual,
+    and the program variables it takes. Built once per procedure, because the walk below runs for
+    each reported copy and rebuilding this each time made the check quadratic. *)
+let calls_with_pvar_actuals proc_desc =
+  let calls = ref [] in
+  Procdesc.iter_instrs
+    (fun _ instr ->
+      match (instr : Sil.instr) with
+      | Call (_, e_fun, args, _, {cf_assign_last_arg; cf_injected_destructor}) ->
+          let callee = match (e_fun : Exp.t) with Const (Cfun pname) -> Some pname | _ -> None in
+          let pvars =
+            List.filter_map args ~f:(fun (exp, _) ->
+                match (exp : Exp.t) with Lvar pvar -> Some pvar | _ -> None )
+          in
+          (* The destructors the frontend injects for the temporaries of an expression take those
+             temporaries too, but they carry no value onwards. Keeping them would let the walk
+             below mistake a cleanup for the call that consumes a result and stop one step early. *)
+          let is_cleanup =
+            cf_injected_destructor || Option.exists callee ~f:Procname.is_destructor
+          in
+          if (not is_cleanup) && not (List.is_empty pvars) then
+            calls := (callee, cf_assign_last_arg, pvars) :: !calls
+      | _ ->
+          () )
+    proc_desc ;
+  Array.of_list !calls
+
+
+(** Where a call puts its result, by the frontend's own conventions: a constructor writes the object
+    it is called on, which is its first actual, and [cf_assign_last_arg] marks the calls whose
+    result goes in the last one. A call that returns nothing has no result to pass on. *)
+let call_result (callee, assign_last, pvars) =
+  if Option.exists callee ~f:Procname.is_constructor then List.hd pvars
+  else if assign_last then List.last pvars
+  else None
+
+
+(** The order the arguments of a call are evaluated in is unspecified, so an argument that reads the
+    copied object can run after the [std::move] the advice suggests and then read a moved-from
+    object. That is decided here from the call instructions rather than from the order the analysis
+    happened to visit them in.
+
+    A braced-init-list is NOT one of those unspecified-order cases: the standard sequences its
+    clauses left to right, so a clause reading the object runs before a later clause copies it and
+    moving there is safe. Nothing reaching this point tells such a call from a parenthesised one --
+    the frontend gives [J j{a, b}] and [J j(a, b)] identical instructions, and the AST does not
+    carry whether a constructor call came from braces -- so where the two meet at a constructor
+    neither is suppressed. What that buys is narrow and worth stating exactly: a copy and a read
+    that meet at a constructor are reported whether the call was braced or parenthesised, so no
+    braced case is lost, at the price of still reporting the parenthesised ones, whose order really
+    is unspecified. It says nothing about the other sequenced constructs -- a comma operator or a
+    chained call is reported because its calls are never joined into one expression here, not
+    because this knows they are sequenced.
+
+    What the copy and the read have in common is found by walking UP from each, from a call to the
+    call that consumes its result, until the two walks reach the same call. It is that meeting call,
+    not the one the copy's temporary happens to feed first, that decides: in [J j{read(x), copy(s)}]
+    the copy's temporary feeds an ordinary [copy], and only one level further up do the two clauses
+    meet at the constructor. *)
+let is_read_by_sibling_actual calls (copied_into : Attribute.CopiedInto.t)
+    (source_opt : DecompilerExpr.source_expr option) =
+  match (copied_into, source_opt) with
+  | IntoIntermediate {copied_var}, Some (PVar source_pvar, _) ->
+      Option.exists (Var.get_pvar copied_var) ~f:(fun copy_tmp ->
+          let call i = calls.(i) in
+          let indices = List.init (Array.length calls) ~f:Fn.id in
+          let takes i pvar =
+            let _, _, pvars = call i in
+            List.mem pvars pvar ~equal:Pvar.equal
+          in
+          let inputs i =
+            let _, _, pvars = call i in
+            match call_result (call i) with
+            | None ->
+                pvars
+            | Some result ->
+                (* a call can take its own result slot only once, so dropping one occurrence is
+                   enough and keeps a repeated actual like [f(v, v)] intact *)
+                List.filter pvars ~f:(fun p -> not (Pvar.equal p result))
+          in
+          let defining_copy i = takes i copy_tmp && takes i source_pvar in
+          (* the call that consumes this temporary, i.e. takes it as something other than its own
+             result slot *)
+          let consumer_of tmp =
+            List.find indices ~f:(fun i ->
+                List.mem (inputs i) tmp ~equal:Pvar.equal && not (defining_copy i) )
+          in
+          (* the calls enclosing this one, nearest first *)
+          let rec upwards i seen =
+            if List.mem seen i ~equal:Int.equal then []
+            else
+              i
+              ::
+              ( match call_result (call i) with
+              | Some result when Pvar.is_frontend_tmp result -> (
+                match consumer_of result with Some next -> upwards next (i :: seen) | None -> [] )
+              | _ ->
+                  [] )
+          in
+          let from_copy = match consumer_of copy_tmp with Some i -> upwards i [] | None -> [] in
+          let meets_at_an_ordinary_call reader =
+            let from_read = upwards reader [] in
+            match List.find from_copy ~f:(fun i -> List.mem from_read i ~equal:Int.equal) with
+            | None ->
+                (* the two never meet, so they are not arguments of one expression after all *)
+                false
+            | Some meeting ->
+                let callee, _, _ = call meeting in
+                not (Option.exists callee ~f:Procname.is_constructor)
+          in
+          List.exists indices ~f:(fun i ->
+              (not (defining_copy i)) && takes i source_pvar && meets_at_an_ordinary_call i ) )
+  | _ ->
+      false
+
+
 let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
     non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
   let reported = ref [] in
+  (* lazy, so a procedure whose copies are all filtered out earlier never walks its instructions *)
+  let calls = lazy (calls_with_pvar_actuals proc_desc) in
   if is_not_implicit_or_copy_ctor_assignment pname then
     PulseNonDisjunctiveDomain.get_copied
       ~ref_formals:(Procdesc.get_passed_by_ref_formals proc_desc)
@@ -265,6 +383,7 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
              && (not
                    (is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into
                       source_typ ) )
+             && (not (is_read_by_sibling_actual (Lazy.force calls) copied_into source_opt))
              && not
                   (is_copy_of_pointer_free_type tenv copied_into from
                      ~in_conditional_arm:
