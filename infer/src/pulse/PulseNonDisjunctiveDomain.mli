@@ -74,6 +74,11 @@ module Summary : sig
   val has_dropped_disjuncts : t -> bool
 
   val get_pre_post : t -> AbductiveDomain.Summary.t AbstractDomain.Types.bottom_lifted
+
+  val set_move_operation_copies : bool -> t -> t
+
+  val move_operation_copies : t -> bool
+  (** the procedure is a move operation whose body copies rather than moves *)
 end
 
 val add_var :

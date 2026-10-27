@@ -672,6 +672,60 @@ class CopiedToFieldPointerFreeWithMoveOps_Ok {
   }
 };
 
+// A class can declare both move operations and still copy in them, so that both
+// objects keep the payload. The declarations say nothing; only the bodies do.
+struct MoveOpsThatCopy {
+  std::string str;
+  std::vector<int> vec;
+  MoveOpsThatCopy() = default;
+  MoveOpsThatCopy(const MoveOpsThatCopy&) = default;
+  MoveOpsThatCopy& operator=(const MoveOpsThatCopy&) = default;
+  MoveOpsThatCopy(MoveOpsThatCopy&& o) : str(o.str), vec(o.vec) {}
+  MoveOpsThatCopy& operator=(MoveOpsThatCopy&& o) {
+    str = o.str;
+    vec = o.vec;
+    return *this;
+  }
+};
+
+class CopiedToFieldMoveOpsThatCopy_Bad {
+  MoveOpsThatCopy field;
+
+ public:
+  // reported without a `std::move` autofix: the move assignment copies, so
+  // moving saves nothing
+  CopiedToFieldMoveOpsThatCopy_Bad(MoveOpsThatCopy a) { field = a; }
+};
+
+// the same, with the copying move operations defined out of line
+struct OutOfLineMoveOpsThatCopy {
+  std::string str;
+  OutOfLineMoveOpsThatCopy() = default;
+  OutOfLineMoveOpsThatCopy(const OutOfLineMoveOpsThatCopy&) = default;
+  OutOfLineMoveOpsThatCopy& operator=(const OutOfLineMoveOpsThatCopy&) =
+      default;
+  OutOfLineMoveOpsThatCopy(OutOfLineMoveOpsThatCopy&& o);
+  OutOfLineMoveOpsThatCopy& operator=(OutOfLineMoveOpsThatCopy&& o);
+};
+
+OutOfLineMoveOpsThatCopy::OutOfLineMoveOpsThatCopy(OutOfLineMoveOpsThatCopy&& o)
+    : str(o.str) {}
+
+OutOfLineMoveOpsThatCopy& OutOfLineMoveOpsThatCopy::operator=(
+    OutOfLineMoveOpsThatCopy&& o) {
+  str = o.str;
+  return *this;
+}
+
+class CopiedToFieldOutOfLineMoveOpsThatCopy_Bad {
+  OutOfLineMoveOpsThatCopy field;
+
+ public:
+  CopiedToFieldOutOfLineMoveOpsThatCopy_Bad(OutOfLineMoveOpsThatCopy a) {
+    field = a;
+  }
+};
+
 // a reference avoids a copy whatever the type holds, so the remedy here is
 // still a reference
 class HoldsPointerFree {
@@ -764,6 +818,119 @@ void copy_pointer_free_from_get_default_bad(
   auto x = folly::get_default(map, 1, dflt);
   use_pointer_free(x);
 }
+
+// control: a hand-written move operation that really moves must keep its
+// autofix
+struct HandWrittenRealMoveOps {
+  int* p;
+  HandWrittenRealMoveOps() : p(nullptr) {}
+  ~HandWrittenRealMoveOps() { delete p; }
+  HandWrittenRealMoveOps(const HandWrittenRealMoveOps& o)
+      : p(o.p ? new int(*o.p) : nullptr) {}
+  HandWrittenRealMoveOps& operator=(const HandWrittenRealMoveOps& o) {
+    delete p;
+    p = o.p ? new int(*o.p) : nullptr;
+    return *this;
+  }
+  HandWrittenRealMoveOps(HandWrittenRealMoveOps&& o) : p(o.p) { o.p = nullptr; }
+  HandWrittenRealMoveOps& operator=(HandWrittenRealMoveOps&& o) {
+    delete p;
+    p = o.p;
+    o.p = nullptr;
+    return *this;
+  }
+};
+
+class CopiedToFieldHandWrittenRealMoveOps_Bad {
+  HandWrittenRealMoveOps field;
+
+ public:
+  CopiedToFieldHandWrittenRealMoveOps_Bad(HandWrittenRealMoveOps a) {
+    field = a;
+  }
+};
+
+// control: move operations declared in the class and defaulted out of line
+// really move
+struct OutOfLineDefaultedMoveOps {
+  std::string str;
+  OutOfLineDefaultedMoveOps() = default;
+  OutOfLineDefaultedMoveOps(const OutOfLineDefaultedMoveOps&) = default;
+  OutOfLineDefaultedMoveOps& operator=(const OutOfLineDefaultedMoveOps&) =
+      default;
+  OutOfLineDefaultedMoveOps(OutOfLineDefaultedMoveOps&& o);
+  OutOfLineDefaultedMoveOps& operator=(OutOfLineDefaultedMoveOps&& o);
+};
+
+OutOfLineDefaultedMoveOps::OutOfLineDefaultedMoveOps(
+    OutOfLineDefaultedMoveOps&& o) = default;
+
+OutOfLineDefaultedMoveOps& OutOfLineDefaultedMoveOps::operator=(
+    OutOfLineDefaultedMoveOps&& o) = default;
+
+class CopiedToFieldOutOfLineDefaultedMoveOps_Bad {
+  OutOfLineDefaultedMoveOps field;
+
+ public:
+  CopiedToFieldOutOfLineDefaultedMoveOps_Bad(OutOfLineDefaultedMoveOps a) {
+    field = a;
+  }
+};
+
+// A class can move in one of its move operations and copy in the other, so
+// which one the copy site reaches decides whether `std::move` there pays.
+struct MoveCtorMovesAssignmentCopies {
+  std::string str;
+  std::vector<int> vec;
+  MoveCtorMovesAssignmentCopies() = default;
+  MoveCtorMovesAssignmentCopies(const MoveCtorMovesAssignmentCopies&) = default;
+  MoveCtorMovesAssignmentCopies& operator=(
+      const MoveCtorMovesAssignmentCopies&) = default;
+  MoveCtorMovesAssignmentCopies(MoveCtorMovesAssignmentCopies&& o)
+      : str(std::move(o.str)), vec(std::move(o.vec)) {}
+  MoveCtorMovesAssignmentCopies& operator=(MoveCtorMovesAssignmentCopies&& o) {
+    str = o.str;
+    vec = o.vec;
+    return *this;
+  }
+};
+
+class ConstructedIntoFieldMoveCtorMoves_Bad {
+  MoveCtorMovesAssignmentCopies field;
+
+ public:
+  // keeps its autofix: `field(a)` becomes a move construction, and the move
+  // constructor is the operation that really moves
+  ConstructedIntoFieldMoveCtorMoves_Bad(MoveCtorMovesAssignmentCopies a)
+      : field(a) {}
+};
+
+struct MoveCtorCopiesAssignmentMoves {
+  std::string str;
+  std::vector<int> vec;
+  MoveCtorCopiesAssignmentMoves() = default;
+  MoveCtorCopiesAssignmentMoves(const MoveCtorCopiesAssignmentMoves&) = default;
+  MoveCtorCopiesAssignmentMoves& operator=(
+      const MoveCtorCopiesAssignmentMoves&) = default;
+  MoveCtorCopiesAssignmentMoves(MoveCtorCopiesAssignmentMoves&& o)
+      : str(o.str), vec(o.vec) {}
+  MoveCtorCopiesAssignmentMoves& operator=(MoveCtorCopiesAssignmentMoves&& o) {
+    str = std::move(o.str);
+    vec = std::move(o.vec);
+    return *this;
+  }
+};
+
+class CopiedToFieldMoveAssignmentMoves_Bad {
+  MoveCtorCopiesAssignmentMoves field;
+
+ public:
+  // keeps its autofix: `field = a` becomes a move assignment, and the move
+  // assignment is the operation that really moves
+  CopiedToFieldMoveAssignmentMoves_Bad(MoveCtorCopiesAssignmentMoves a) {
+    field = a;
+  }
+};
 
 struct Arrs {
   Arr a;

@@ -1333,7 +1333,10 @@ let astate_is_bottom {astate} = OverApproxDomain.is_bottom astate
 type summary =
   { transitive_info: InterDom.t
   ; has_dropped_disjuncts: AbstractDomain.BooleanOr.t
-  ; astate: AbductiveDomain.Summary.t AbstractDomain.Types.bottom_lifted }
+  ; astate: AbductiveDomain.Summary.t AbstractDomain.Types.bottom_lifted
+  ; move_operation_copies: AbstractDomain.BooleanOr.t
+        (** the procedure is a move operation and copies rather than moves, so [std::move] into it
+            buys nothing *) }
 
 let make_summary proc_attributes location
     ({inter= transitive_info; has_dropped_disjuncts; astate} : t) =
@@ -1348,7 +1351,7 @@ let make_summary proc_attributes location
       | _ ->
           (* TODO(join): we should be more lenient here *) Bottom )
   in
-  {transitive_info; has_dropped_disjuncts; astate}
+  {transitive_info; has_dropped_disjuncts; astate; move_operation_copies= false}
 
 
 let apply_summary ~callee_pname ~call_loc ~skip_transitive_accesses (non_disj : t) summary =
@@ -1369,30 +1372,36 @@ module Summary = struct
 
   let yojson_of_t {transitive_info} = InterDom.yojson_of_t transitive_info
 
-  let pp fmt {transitive_info; has_dropped_disjuncts; astate} =
-    F.fprintf fmt "over-approx:@[%a@]@\n%a%s"
+  let pp fmt {transitive_info; has_dropped_disjuncts; astate; move_operation_copies} =
+    F.fprintf fmt "over-approx:@[%a@]@\n%a%s%s"
       (AbstractDomain.BottomLiftedUtils.pp AbductiveDomain.Summary.pp)
       astate InterDom.pp transitive_info
       (if has_dropped_disjuncts then " (some disjuncts dropped)" else "")
+      (if move_operation_copies then " (move operation copies)" else "")
 
 
   let bottom =
     { transitive_info= InterDom.bottom
     ; has_dropped_disjuncts= AbstractDomain.BooleanOr.bottom
-    ; astate= Bottom }
+    ; astate= Bottom
+    ; move_operation_copies= AbstractDomain.BooleanOr.bottom }
 
 
   let join
       { transitive_info= transitive_info1
       ; has_dropped_disjuncts= has_dropped_disjuncts1
-      ; astate= astate1 }
+      ; astate= astate1
+      ; move_operation_copies= move_operation_copies1 }
       { transitive_info= transitive_info2
       ; has_dropped_disjuncts= has_dropped_disjuncts2
-      ; astate= astate2 } =
+      ; astate= astate2
+      ; move_operation_copies= move_operation_copies2 } =
     { transitive_info= InterDom.join transitive_info1 transitive_info2
     ; has_dropped_disjuncts=
         AbstractDomain.BooleanOr.join has_dropped_disjuncts1 has_dropped_disjuncts2
-    ; astate= AbstractDomain.BottomLiftedUtils.join PulseJoin.join_summaries astate1 astate2 }
+    ; astate= AbstractDomain.BottomLiftedUtils.join PulseJoin.join_summaries astate1 astate2
+    ; move_operation_copies=
+        AbstractDomain.BooleanOr.join move_operation_copies1 move_operation_copies2 }
 
 
   let get_transitive_info_if_not_top {transitive_info} =
@@ -1402,4 +1411,8 @@ module Summary = struct
   let has_dropped_disjuncts {has_dropped_disjuncts} = has_dropped_disjuncts
 
   let get_pre_post {astate} = astate
+
+  let set_move_operation_copies move_operation_copies summary = {summary with move_operation_copies}
+
+  let move_operation_copies {move_operation_copies} = move_operation_copies
 end

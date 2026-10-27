@@ -251,6 +251,8 @@ type t =
       ; location_instantiated: Location.t option
       ; from: PulseAttribute.CopyOrigin.t
       ; has_no_move_operations: bool
+      ; move_copies: bool
+            (** the type's own move operation was found to copy, so [std::move] saves nothing *)
       ; in_conditional_arm: bool }
 [@@deriving compare, equal, yojson_of]
 
