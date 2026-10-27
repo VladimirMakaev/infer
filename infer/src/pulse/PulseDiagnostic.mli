@@ -150,6 +150,14 @@ val pp : F.formatter -> t -> unit
 val aborts_execution : PathContext.t -> t -> bool
 (** whether the presence of an error should abort the execution *)
 
+val unnecessary_copy_remedy_is_a_move :
+     from:PulseAttribute.CopyOrigin.t
+  -> copied_into:PulseAttribute.CopiedInto.t
+  -> in_conditional_arm:bool
+  -> bool
+(** whether the suggestion for this copy offers a [std::move] rather than a reference; the same case
+    analysis that picks the suggestion text *)
+
 val get_message_and_suggestion : t -> string * string option
 
 val get_location : t -> Location.t
