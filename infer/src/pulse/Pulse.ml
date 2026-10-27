@@ -105,6 +105,17 @@ let is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_int
       false
 
 
+(** Moving a pointer-free value copies it, so a copy of one has no cheaper alternative and there is
+    nothing to report. This holds whether or not the class declares move operations: adding them
+    would not help either. Only the copies the suggestion answers with a [std::move] are in scope: a
+    reference avoids a copy whatever the type holds. *)
+let is_copy_of_pointer_free_type tenv copied_into from ~in_conditional_arm source_typ =
+  Diagnostic.unnecessary_copy_remedy_is_a_move ~from ~copied_into ~in_conditional_arm
+  && Option.exists source_typ ~f:(fun ({desc} as typ : Typ.t) ->
+      let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
+      Tenv.is_pointer_free tenv typ )
+
+
 let is_non_deleted_copy (tenv_method : Struct.tenv_method) =
   let pname = tenv_method.name in
   (* TODO: Default is set to true for now because we can't get the attributes of library calls right now. *)
@@ -251,8 +262,14 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
                   source_typ )
              && (not (is_unnecessary_copy_in_loop node copied_into source_opt))
              && (not (is_copy_into_constexpr proc_desc copied_into))
+             && (not
+                   (is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into
+                      source_typ ) )
              && not
-                  (is_shared_ptr_copied_into_field_of_move_operation proc_desc pname copied_into
+                  (is_copy_of_pointer_free_type tenv copied_into from
+                     ~in_conditional_arm:
+                       (Procdesc.Node.equal_nodekind (Procdesc.Node.get_kind node)
+                          (Stmt_node ConditionalStmtBranch) )
                      source_typ )
            then
              if not (List.exists !reported ~f:(Diagnostic.equal diagnostic)) then (

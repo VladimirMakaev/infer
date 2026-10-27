@@ -538,7 +538,9 @@ void call_unknown_constructor_twice_ok(const ClassWithoutConstructDef& src) {
 }
 
 #define LOCAL_MACRO(accessor) \
-  { auto cpy = (accessor); }
+  {                           \
+    auto cpy = (accessor);    \
+  }
 
 void foo(std::vector<int> my_vec) { LOCAL_MACRO(my_vec); }
 
@@ -606,6 +608,162 @@ class CopiedToFieldDeclaredMoveOps_Bad {
  public:
   CopiedToFieldDeclaredMoveOps_Bad(DeclaredMoveOps a) { field = a; }
 };
+
+// Moving a value that owns nothing outside itself copies it, so a copy of one
+// has no cheaper alternative and is not reported. Whether the class declares
+// move operations makes no difference, and adding them would not help either.
+struct PointerFreeInner {
+  float x;
+  float y;
+};
+
+struct PointerFreeNoMoveOps {
+  float a;
+  float matrix[16];
+  int counts[4];
+  PointerFreeInner inner;
+  ~PointerFreeNoMoveOps();
+};
+
+class CopiedToFieldPointerFreeNoMoveOps_Ok {
+  PointerFreeNoMoveOps field;
+
+ public:
+  CopiedToFieldPointerFreeNoMoveOps_Ok(PointerFreeNoMoveOps a) { field = a; }
+};
+
+// the same shape, but owning the heap: still reported, and still told to add
+// move operations
+struct OwningNoMoveOps {
+  float a;
+  std::vector<int> vec;
+  std::string str;
+  std::shared_ptr<int> shared;
+  int* raw;
+  ~OwningNoMoveOps();
+};
+
+class CopiedToFieldOwningNoMoveOps_Bad {
+  OwningNoMoveOps field;
+
+ public:
+  CopiedToFieldOwningNoMoveOps_Bad(OwningNoMoveOps a) { field = a; }
+};
+
+// pointer-free and movable: moving it still copies it, so this is not reported
+// either
+struct PointerFreeWithMoveOps {
+  float matrix[16];
+  float scale;
+  PointerFreeWithMoveOps() = default;
+  PointerFreeWithMoveOps(const PointerFreeWithMoveOps& other);
+  PointerFreeWithMoveOps& operator=(const PointerFreeWithMoveOps& other) =
+      default;
+  PointerFreeWithMoveOps(PointerFreeWithMoveOps&&) = default;
+  PointerFreeWithMoveOps& operator=(PointerFreeWithMoveOps&&) = default;
+};
+
+class CopiedToFieldPointerFreeWithMoveOps_Ok {
+  PointerFreeWithMoveOps field;
+
+ public:
+  CopiedToFieldPointerFreeWithMoveOps_Ok(PointerFreeWithMoveOps a) {
+    field = a;
+  }
+};
+
+// a reference avoids a copy whatever the type holds, so the remedy here is
+// still a reference
+class HoldsPointerFree {
+  PointerFreeWithMoveOps pod;
+
+ public:
+  const PointerFreeWithMoveOps& get_const_ref() const { return pod; }
+};
+
+void copy_pointer_free_const_refable_bad(const HoldsPointerFree& h) {
+  auto x = h.get_const_ref();
+}
+
+// a data member inherited from a base counts: the frontend puts it in the
+// derived class's fields
+struct BaseThatOwns {
+  std::vector<int> vec;
+};
+
+struct DerivedOfOwning : BaseThatOwns {
+  float matrix[4];
+  ~DerivedOfOwning();
+};
+
+class CopiedToFieldDerivedOfOwning_Bad {
+  DerivedOfOwning field;
+
+ public:
+  CopiedToFieldDerivedOfOwning_Bad(DerivedOfOwning a) { field = a; }
+};
+
+struct PointerFreeBase {
+  float base_matrix[8];
+};
+
+struct DerivedPointerFree : PointerFreeBase {
+  float matrix[4];
+  ~DerivedPointerFree();
+};
+
+class CopiedToFieldDerivedPointerFree_Ok {
+  DerivedPointerFree field;
+
+ public:
+  CopiedToFieldDerivedPointerFree_Ok(DerivedPointerFree a) { field = a; }
+};
+
+// One arm of a conditional copy-constructs from a local, so the suggestion is
+// to move from that arm. That is a move remedy, so a pointer-free type is out
+// of scope here too.
+void use_pointer_free(const PointerFreeWithMoveOps&);
+
+void copy_pointer_free_from_conditional_arm_ok(bool c) {
+  PointerFreeWithMoveOps local;
+  PointerFreeWithMoveOps x = c ? local : PointerFreeWithMoveOps();
+  use_pointer_free(x);
+}
+
+struct OwningWithMoveOps {
+  std::vector<int> vec;
+  OwningWithMoveOps() = default;
+  OwningWithMoveOps(const OwningWithMoveOps& other);
+  OwningWithMoveOps& operator=(const OwningWithMoveOps& other) = default;
+  OwningWithMoveOps(OwningWithMoveOps&&) = default;
+  OwningWithMoveOps& operator=(OwningWithMoveOps&&) = default;
+};
+
+void use_owning(const OwningWithMoveOps&);
+
+void copy_owning_from_conditional_arm_bad(bool c) {
+  OwningWithMoveOps local;
+  OwningWithMoveOps x = c ? local : OwningWithMoveOps();
+  use_owning(x);
+}
+
+// A copy that `folly::get_default` returned is answered with
+// `folly::get_ref_default` or `folly::get_ptr`, a reference, so it stays
+// reported however cheap the type is.
+namespace folly {
+template <typename M, typename K, typename V>
+V get_default(const M& map, const K& key, const V& dflt) {
+  auto found = map.find(key);
+  return found == map.end() ? dflt : found->second;
+}
+} // namespace folly
+
+void copy_pointer_free_from_get_default_bad(
+    const std::map<int, PointerFreeWithMoveOps>& map,
+    const PointerFreeWithMoveOps& dflt) {
+  auto x = folly::get_default(map, 1, dflt);
+  use_pointer_free(x);
+}
 
 struct Arrs {
   Arr a;
@@ -801,7 +959,8 @@ class FieldCopyClass {
     my_arr1_ = my_arr2_; // rhs is a field, we cannot suggest move
   }
 
-  void copy_assign_bad(NonTrivialCopyClass arg) { nt_ = arg; }
+  // pointer-free, so moving it would copy it just the same
+  void copy_assign_pointer_free_ok(NonTrivialCopyClass arg) { nt_ = arg; }
 
   void copy_assign_small_ok(NonTrivialCopySmallClass arg) { nt_small_ = arg; }
 
@@ -1004,8 +1163,8 @@ void captured_by_ref_constructed_into_field_ok() {
   make();
 }
 
-// the by-value capture of a mutable lambda belongs to the lambda, so moving out of
-// it is what the run-once continuation idiom wants
+// the by-value capture of a mutable lambda belongs to the lambda, so moving out
+// of it is what the run-once continuation idiom wants
 void captured_by_value_constructed_into_field_bad() {
   Arr x;
   auto make = [x]() mutable { return ArrWrap{x}; };

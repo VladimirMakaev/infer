@@ -623,6 +623,34 @@ let rec is_trivially_copyable tenv {Typ.desc} =
       false
 
 
+(** Whether a value of this type owns nothing outside itself: no field is a pointer or a reference,
+    and no field, base or array element is a class that holds one. Moving such a value can only copy
+    it, so a copy of it has no cheaper alternative. A class whose definition the type environment
+    does not have may own anything, so it is not pointer-free. *)
+let is_pointer_free tenv typ =
+  let rec aux visited {Typ.desc} =
+    match desc with
+    | Tint _ | Tfloat _ | Tvoid ->
+        true
+    | Tptr _ | Tfun _ | TVar _ ->
+        false
+    | Tarray {elt} ->
+        aux visited elt
+    | Tstruct name ->
+        (* a class reached twice is being looked at by an enclosing call, which decides it *)
+        Typ.Name.Set.mem name visited
+        ||
+        let visited = Typ.Name.Set.add name visited in
+        (* [fields] already holds the data members a C++ class inherits, so the bases need no
+           visit of their own. Visiting them would reject every class whose base the frontend
+           names in [supers] without recording a struct for it, which is every fixed-size Eigen
+           matrix. *)
+        Option.exists (lookup tenv name) ~f:(fun {Struct.fields; dummy} ->
+            (not dummy) && List.for_all fields ~f:(fun ({typ} : Struct.field) -> aux visited typ) )
+  in
+  aux Typ.Name.Set.empty typ
+
+
 let has_no_move_operations tenv {Typ.desc} =
   match desc with
   | Tstruct name -> (

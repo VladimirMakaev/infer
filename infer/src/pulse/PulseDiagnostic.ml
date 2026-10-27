@@ -614,6 +614,29 @@ let pp_retain_cycle fmt values =
       Option.iter v.location ~f:(fun loc -> F.fprintf fmt ", assigned on line %d" loc.Location.line) )
 
 
+(** What the suggestion for an unnecessary copy offers instead of the copy. [get_suggestion_msg]
+    dispatches on this, so the text and the classification cannot drift apart: a reader deciding
+    whether a copy has a cheaper alternative at all must consult the same cases the user is told
+    about. *)
+type copy_remedy = Reference | Move
+
+let copy_remedy ~(from : PulseAttribute.CopyOrigin.t) ~(copied_into : PulseAttribute.CopiedInto.t)
+    ~in_conditional_arm =
+  match (from, copied_into) with
+  | CopyInGetDefault, _ ->
+      (* [folly::get_ref_default] or [folly::get_ptr], whatever the copy went into *)
+      Reference
+  | CopyCtor, IntoVar _ ->
+      if in_conditional_arm then Move else Reference
+  | (CopyCtor | CopyAssignment _ | CopyToOptional), (IntoField _ | IntoIntermediate _)
+  | (CopyAssignment _ | CopyToOptional), IntoVar _ ->
+      Move
+
+
+let unnecessary_copy_remedy_is_a_move ~from ~copied_into ~in_conditional_arm =
+  match copy_remedy ~from ~copied_into ~in_conditional_arm with Move -> true | Reference -> false
+
+
 let get_message_and_suggestion diagnostic =
   match diagnostic with
   | AssertionError {location} ->
@@ -1022,24 +1045,28 @@ let get_message_and_suggestion diagnostic =
          the warning"
       in
       let get_suggestion_msg source_opt =
-        match (from, copied_into) with
-        | CopyInGetDefault, _ ->
-            F.asprintf
-              "To avoid the copy, use either `folly::get_ref_default` or `folly::get_ptr` instead%t"
-              (fun f ->
-                Option.iter FbInternalLinks.bad_pattern_folly_get_default ~f:(fun link ->
-                    F.fprintf f " ([[%s | bad patterns]])" link ) )
-        | CopyCtor, IntoVar _ when in_conditional_arm ->
-            "To avoid the copy, move from this arm of the conditional expression with `std::move`"
-        | CopyCtor, IntoVar _ ->
-            "To avoid the copy, use reference `&`"
-        | _, _ -> (
-          match source_typ with
-          | Some typ
-            when has_no_move_operations && not (Option.exists ~f:is_from_std_move source_opt) ->
-              get_suggestion_msg_no_move typ
-          | _ ->
-              get_suggestion_msg_move copied_into source_opt )
+        match copy_remedy ~from ~copied_into ~in_conditional_arm with
+        | Reference -> (
+          match from with
+          | CopyInGetDefault ->
+              F.asprintf
+                "To avoid the copy, use either `folly::get_ref_default` or `folly::get_ptr` \
+                 instead%t" (fun f ->
+                  Option.iter FbInternalLinks.bad_pattern_folly_get_default ~f:(fun link ->
+                      F.fprintf f " ([[%s | bad patterns]])" link ) )
+          | CopyCtor | CopyAssignment _ | CopyToOptional ->
+              "To avoid the copy, use reference `&`" )
+        | Move -> (
+          match (from, copied_into) with
+          | CopyCtor, IntoVar _ ->
+              "To avoid the copy, move from this arm of the conditional expression with `std::move`"
+          | _ -> (
+            match source_typ with
+            | Some typ
+              when has_no_move_operations && not (Option.exists ~f:is_from_std_move source_opt) ->
+                get_suggestion_msg_no_move typ
+            | _ ->
+                get_suggestion_msg_move copied_into source_opt ) )
       in
       match (copied_into, source_opt) with
       | IntoIntermediate _, (None | Some (Block _, _)) ->
