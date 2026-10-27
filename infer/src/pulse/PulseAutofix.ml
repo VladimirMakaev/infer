@@ -102,6 +102,8 @@ let get_autofix pdesc diagnostic =
   match (diagnostic : Diagnostic.t) with
   | UnnecessaryCopy {copied_into= IntoField _; has_no_move_operations= true} ->
       []
+  | UnnecessaryCopy {move_copies= true} ->
+      []
   | UnnecessaryCopy {copied_into; source_opt; location; copied_location= None; in_conditional_arm}
     -> (
       let is_formal pvar =
