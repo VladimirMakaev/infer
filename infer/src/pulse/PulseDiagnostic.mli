@@ -140,6 +140,9 @@ type t =
       ; from: PulseAttribute.CopyOrigin.t
       ; has_no_move_operations: bool
             (** the copied type has no move operations, so moving would copy too *)
+      ; move_copies: bool
+            (** the copied type's own move operation was found, by analysing its body, to copy
+                rather than move, so [std::move] saves nothing *)
       ; in_conditional_arm: bool
             (** the copy is made by an arm of a conditional expression whose result is a prvalue, so
                 binding a reference to the result would copy too *) }
