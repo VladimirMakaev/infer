@@ -1314,6 +1314,7 @@ struct Lists {
 };
 
 void take_two_ptrs(std::shared_ptr<int> a, std::shared_ptr<int> b);
+void use_ptr(const std::shared_ptr<int>& p);
 
 // the order of evaluation of the arguments is unspecified: `v` cannot be moved
 // into either of them
@@ -1325,9 +1326,75 @@ void same_variable_passed_twice_ok(int x) {
 std::shared_ptr<int> identity_ptr(const std::shared_ptr<int>& p);
 
 // the use of `v` by the other argument is in a nested call
-void FP_same_variable_in_nested_call_of_other_argument_ok(int x) {
+void same_variable_in_nested_call_of_other_argument_ok(int x) {
   std::shared_ptr<int> v = std::make_shared<int>(x);
   take_two_ptrs(identity_ptr(v), v);
+}
+
+// the same, with the nested read second: argument order is unspecified, so
+// neither order may be moved from and the two must be treated alike
+void same_variable_in_nested_call_of_other_argument_reversed_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_two_ptrs(v, identity_ptr(v));
+}
+
+void take_two_ptrs_outer(std::shared_ptr<int> a, std::shared_ptr<int> b);
+std::shared_ptr<int> wrap_ptr(std::shared_ptr<int> p);
+
+// the copy and the read are not arguments of the same call: each is nested in
+// its own sibling call, and they only meet at the outer one. This is the shape
+// real code takes, and the reason the check follows the whole expression rather
+// than one call's actuals.
+void same_variable_in_two_sibling_inner_calls_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_two_ptrs_outer(identity_ptr(v), wrap_ptr(v));
+}
+
+struct TakesTwoPtrs {
+  std::shared_ptr<int> first;
+  std::shared_ptr<int> second;
+  TakesTwoPtrs(std::shared_ptr<int> a, std::shared_ptr<int> b);
+};
+
+// a braced-init-list evaluates its clauses left to right, so `identity_ptr(v)`
+// runs before `v` is copied and moving `v` into the second clause is safe: the
+// advice is correct and the copy is reported
+void same_variable_in_nested_call_of_braced_constructor_bad(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  TakesTwoPtrs t{identity_ptr(v), v};
+  use_ptr(t.second);
+}
+
+// the parenthesized twin, whose argument order IS unspecified, so `v` must not
+// be moved and this report is a false positive. Nothing reaching the report
+// site distinguishes the two: the frontend gives them identical instructions
+// and the AST exporter does not say whether a constructor call came from
+// braces, so a copy feeding a constructor is conservatively still reported
+void FP_same_variable_in_nested_call_of_constructor_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  TakesTwoPtrs t(identity_ptr(v), v);
+  use_ptr(t.second);
+}
+
+std::shared_ptr<int> wrap_read_ptr(std::shared_ptr<int> p);
+std::shared_ptr<int> wrap_copy_ptr(std::shared_ptr<int> p);
+void take_two_ptrs_fn(std::shared_ptr<int> a, std::shared_ptr<int> b);
+
+// the copy and the read are not arguments of the constructor itself: each is
+// one call deeper, and the two clauses meet only at the braced constructor. Its
+// clauses are still sequenced left to right, so the advice is still correct and
+// the copy is still reported
+void same_variable_deeper_in_braced_constructor_bad(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  TakesTwoPtrs t{wrap_read_ptr(identity_ptr(v)), wrap_copy_ptr(v)};
+  use_ptr(t.second);
+}
+
+// the same depth, but the two meet at an ordinary call, whose argument order is
+// unspecified: `v` may be read after the move, so no advice is given
+void same_variable_deeper_in_call_arguments_ok(int x) {
+  std::shared_ptr<int> v = std::make_shared<int>(x);
+  take_two_ptrs_fn(wrap_read_ptr(identity_ptr(v)), wrap_copy_ptr(v));
 }
 
 void take_one_ptr(std::shared_ptr<int> a);
