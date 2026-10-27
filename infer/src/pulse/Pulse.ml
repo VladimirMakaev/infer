@@ -73,22 +73,38 @@ let is_not_implicit_or_copy_ctor_assignment pname =
          || attrs.ProcAttributes.is_cpp_copy_assignment ) )
 
 
-(** a move constructor, or a move assignment operator: the class's own [operator=] taking an rvalue
-    reference to it. An [operator=] converting from another type is not one: the contract that keeps
-    a moved-from object usable is one a class states about itself. *)
-let is_move_operation proc_desc pname =
-  let is_move_assignment () =
-    Procname.is_cpp_assignment_operator pname
-    &&
-    match (Procdesc.get_formals proc_desc, Procname.get_class_type_name pname) with
-    | [_this; (_, ({desc= Tptr (pointee, _)} as typ), _)], Some class_name ->
-        Typ.is_rvalue_reference typ
-        && Option.exists (Typ.name pointee) ~f:(Typ.Name.equal class_name)
-    | _ ->
-        false
-  in
+let is_move_ctor pname =
   Option.exists (IRAttributes.load pname) ~f:(fun attrs -> attrs.ProcAttributes.is_cpp_move_ctor)
-  || is_move_assignment ()
+
+
+(** the class's own [operator=] taking an rvalue reference to it. An [operator=] converting from
+    another type is not one: the contract that keeps a moved-from object usable is one a class
+    states about itself. *)
+let is_move_assignment_with_formals (formals : (Mangled.t * Typ.t * Annot.Item.t) list) pname =
+  Procname.is_cpp_assignment_operator pname
+  &&
+  match (formals, Procname.get_class_type_name pname) with
+  | [_this; (_, ({desc= Tptr (pointee, _)} as typ), _)], Some class_name ->
+      Typ.is_rvalue_reference typ && Option.exists (Typ.name pointee) ~f:(Typ.Name.equal class_name)
+  | _ ->
+      false
+
+
+(** a move constructor, or a move assignment operator *)
+let is_move_operation proc_desc pname =
+  is_move_ctor pname || is_move_assignment_with_formals (Procdesc.get_formals proc_desc) pname
+
+
+(** the one move operation that writing [std::move] at a copy site would select: a copy that
+    constructs is turned into a move construction, a copy assignment into a move assignment. *)
+let is_selected_move_operation (from : Attribute.CopyOrigin.t) pname =
+  match from with
+  | CopyCtor | CopyToOptional | CopyInGetDefault ->
+      is_move_ctor pname
+  | CopyAssignment _ ->
+      IRAttributes.load pname
+      |> Option.exists ~f:(fun (attrs : ProcAttributes.t) ->
+          is_move_assignment_with_formals attrs.ProcAttributes.formals pname )
 
 
 (** A class can give its move operations a copy of a [shared_ptr] member on purpose, so that a
@@ -114,6 +130,47 @@ let is_copy_of_pointer_free_type tenv copied_into from ~in_conditional_arm sourc
   && Option.exists source_typ ~f:(fun ({desc} as typ : Typ.t) ->
       let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
       Tenv.is_pointer_free tenv typ )
+
+
+(** Whether this procedure is a move operation that copies. The unnecessary-copy checker has already
+    found, inside the move operation's own body, a member it copies instead of moving, so no
+    syntactic pattern is needed here. Only that body is read, and only one copy of it is kept: a
+    copy the operation delegates to a helper belongs to the helper and is not seen here. *)
+let move_operation_copies proc_desc pname non_disj_astate =
+  is_move_operation proc_desc pname
+  && PulseNonDisjunctiveDomain.get_copied
+       ~ref_formals:(Procdesc.get_passed_by_ref_formals proc_desc)
+       ~ptr_formals:(Procdesc.get_pointer_formals proc_desc)
+       ~ref_captures:(Procdesc.get_captured_by_ref proc_desc)
+       non_disj_astate
+     |> List.exists ~f:(fun (copied_into, _, _, _, _, _, _) ->
+         match (copied_into : Attribute.CopiedInto.t) with
+         | IntoField _ | IntoIntermediate _ ->
+             true
+         | IntoVar _ ->
+             false )
+
+
+(** [std::move] is only worth suggesting if the move operation it selects moves. One that copies
+    does the same work either way, so the suggestion is noise. The two operations are consulted
+    separately: a type can move in one of them and copy in the other, and then only the one this
+    copy site would reach decides. Reads the fact off that operation's summary, which costs one
+    on-demand analysis of a procedure the copy site does not otherwise call. *)
+let move_operation_of_copied_type_copies {InterproceduralAnalysis.tenv; analyze_dependency} pname
+    from source_typ =
+  Option.exists source_typ ~f:(fun ({desc} as typ : Typ.t) ->
+      let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
+      Option.exists (Typ.name typ) ~f:(fun name ->
+          Option.exists (Tenv.lookup tenv name) ~f:(fun {Struct.methods} ->
+              List.exists methods ~f:(fun ({name= callee} : Struct.tenv_method) ->
+                  (not (Procname.equal callee pname))
+                  && is_selected_move_operation from callee
+                  &&
+                  match analyze_dependency callee with
+                  | Ok {PulseSummary.main= {non_disj}} ->
+                      PulseNonDisjunctiveDomain.Summary.move_operation_copies non_disj
+                  | Error _ ->
+                      false ) ) ) )
 
 
 let is_non_deleted_copy (tenv_method : Struct.tenv_method) =
@@ -381,10 +438,15 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
                  let typ = match desc with Tptr (typ, _) -> typ | _ -> typ in
                  Tenv.has_no_move_operations tenv typ )
            in
+           let move_copies =
+             (not has_no_move_operations)
+             && move_operation_of_copied_type_copies analysis_data pname from source_typ
+           in
            let diagnostic =
              Diagnostic.UnnecessaryCopy
                { copied_into
                ; source_typ
+               ; move_copies
                ; source_opt
                ; location
                ; copied_location
@@ -2822,7 +2884,12 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
              missed the statements that modify copied objects. *)
           report_unnecessary_copies analysis_data non_disj_astate ;
           report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
-        summary
+        if move_operation_copies proc_desc (Procdesc.get_proc_name proc_desc) non_disj_astate then
+          { summary with
+            non_disj=
+              PulseNonDisjunctiveDomain.Summary.set_move_operation_copies true
+                summary.PulseSummary.non_disj }
+        else summary
     | None ->
         PulseSummary.empty
   in
