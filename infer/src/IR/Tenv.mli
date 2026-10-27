@@ -173,6 +173,11 @@ val find_cpp_constructor : t -> Typ.Name.t -> Procname.t list
 
 val is_trivially_copyable : t -> Typ.t -> bool
 
+val is_pointer_free : t -> Typ.t -> bool
+(** whether a value of the type owns nothing outside itself: no field is a pointer or a reference,
+    and no field, base or array element is a class that holds one. A class the type environment has
+    no definition for is not pointer-free, since it may own anything. *)
+
 val has_no_move_operations : t -> Typ.t -> bool
 (** whether the type is a C++ class that declares a destructor or a copy operation and no move
     operation *)
