@@ -787,6 +787,94 @@ module SharedPtr = struct
     (astates, non_disj)
 
 
+  (** The constructor [make_shared] forwards its arguments to, found the same way
+      [Basic.call_constructor] finds it a moment later. Resolving it twice is deliberate: deciding
+      which parameters to copy needs the constructor's own formals, and the alternative is to make
+      every caller of [Basic.call_constructor] return them, which would reach [std::optional] too.
+      The second resolution is a type-environment lookup over one class's constructors. *)
+  let resolve_constructor tenv class_name actuals =
+    let candidates = Tenv.find_cpp_constructor tenv class_name in
+    List.find_map Typ.overloading_resolution ~f:(fun comparator ->
+        List.find candidates ~f:(fun proc ->
+            List.equal comparator (IRAttributes.load_formal_types proc) actuals ) )
+
+
+  (** A constructor parameter taken BY VALUE is copy-constructed from the lvalue [make_shared]
+      forwards, so a [std::move] of that parameter inside the constructor empties the copy, not the
+      caller's object. Give each such parameter an object of its own. Only the constructor's own
+      formals can say which parameters those are: [make_shared] takes forwarding references, so its
+      formals say nothing about how the constructor receives the argument. Reference parameters,
+      rvalue references included, keep binding the caller's object, so a caller that really does
+      write [std::move] still loses it. If the constructor cannot be resolved, nothing is copied and
+      the behaviour is what it was. *)
+  let copy_by_value_parameters {analysis_data; callee_procname; path; location} class_name actuals
+      args astate =
+    match resolve_constructor analysis_data.tenv class_name actuals with
+    | None ->
+        Ok (astate, args)
+    | Some constructor -> (
+        (* The formal TYPE cannot tell a by-value class parameter from a reference one: the
+           frontend gives a by-value [std::shared_ptr<T>] parameter the type [std::shared_ptr<T>&],
+           exactly like an lvalue reference parameter. [reference_formals] is the frontend's own
+           record of which formals really are references, so index membership decides it. *)
+        let reference_formals =
+          IRAttributes.load constructor
+          |> Option.value_map ~default:[] ~f:(fun (a : ProcAttributes.t) -> a.reference_formals)
+        in
+        let formals = IRAttributes.load_formal_types constructor in
+        let copy_one astate (FuncArg.{arg_payload} as arg) =
+          let value = ValueOrigin.addr_hist arg_payload in
+          let* astate, obj =
+            PulseOperations.eval_access path Read location value Dereference astate
+          in
+          let* astate, obj_copy = PulseOperations.shallow_copy path location obj astate in
+          let address =
+            (AbstractValue.mk_fresh (), Hist.add_call path location "parameter copy" (snd value))
+          in
+          let+ astate =
+            PulseOperations.write_deref path location ~ref:address ~obj:obj_copy astate
+          in
+          (astate, {arg with FuncArg.arg_payload= ValueOrigin.unknown address})
+        in
+        (* [ctor_index] indexes the constructor's formals, whose 0 is [this]; [forwarded_index]
+           indexes [make_shared]'s own formals, which have no [this], so the two advance together
+           from 1 and 0 respectively rather than being related by arithmetic at the point of use. *)
+        let rec go astate acc ctor_index forwarded_index args formals =
+          match (args, formals) with
+          | [], _ | _, [] ->
+              Ok (astate, List.rev_append acc args)
+          | arg :: args, (formal : Typ.t) :: formals ->
+              let is_class =
+                match formal.Typ.desc with
+                | Typ.Tstruct _ ->
+                    true
+                | Typ.Tptr ({desc= Tstruct _}, _) ->
+                    true
+                | _ ->
+                    false
+              in
+              let is_by_value = not (List.mem reference_formals ctor_index ~equal:Int.equal) in
+              (* A by-value parameter is constructed from the forwarded argument WITH ITS VALUE
+                 CATEGORY: copy-constructed from an lvalue, move-constructed from an rvalue. Only
+                 the lvalue case needs an object of its own; when the caller wrote [std::move] the
+                 caller really does lose the value, and that report is a true positive. *)
+              let forwarded_lvalue = not (is_rvalue callee_procname forwarded_index) in
+              if is_class && is_by_value && forwarded_lvalue then
+                let* astate, arg = copy_one astate arg in
+                go astate (arg :: acc) (ctor_index + 1) (forwarded_index + 1) args formals
+              else go astate (arg :: acc) (ctor_index + 1) (forwarded_index + 1) args formals
+        in
+        (* the first actual is the object being constructed, matching the constructor's [this] *)
+        match (args, formals) with
+        | this_arg :: args, _this_formal :: formals ->
+            (* drop the constructor's [this] formal and the object being constructed together, so
+               what remains is exactly the forwarded arguments against the parameters they bind *)
+            let* astate, args = go astate [] 1 0 args formals in
+            Ok (astate, this_arg :: args)
+        | _ ->
+            Ok (astate, args) )
+
+
   let make_shared (args : (AbstractValue.t * ValueHistory.t) FuncArg.t list) ~desc : model =
    fun ({callee_procname; path; location} as model_data) astate non_disj ->
     let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
@@ -841,6 +929,7 @@ module SharedPtr = struct
         (* create the list of types of the actual arguments of the constructor
            Note that these types are the formal arguments of make_shared *)
         let actuals = typ :: actuals in
+        let<*> astate, args = copy_by_value_parameters model_data class_name actuals args astate in
         Basic.call_constructor class_name actuals args fake_exp model_data astate non_disj
     | _ -> (
         L.d_printfln "std::make_shared called on non-class type, assuming primitive type" ;

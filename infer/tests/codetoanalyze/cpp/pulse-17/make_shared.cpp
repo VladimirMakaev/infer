@@ -268,4 +268,71 @@ void allocate_in_branch_ok(bool b) {
     const B* read = (*a3)->f;
   }
 }
+
+// A constructor parameter taken BY VALUE is copy-constructed from the lvalue
+// make_shared forwards, so moving that parameter inside the constructor must
+// not empty the caller's shared_ptr.
+struct ByValueMoves {
+  explicit ByValueMoves(std::shared_ptr<int> p) : field(std::move(p)) {}
+  std::shared_ptr<int> field;
+};
+
+// the parameter is read after being copied, so the copy is necessary and this
+// control exercises a by-value parameter the constructor does NOT move out of
+// without also tripping the unnecessary-copy checker
+struct ByValueCopies {
+  explicit ByValueCopies(std::shared_ptr<int> p)
+      : field(p), live(p != nullptr) {}
+  std::shared_ptr<int> field;
+  bool live;
+};
+
+struct ByConstRef {
+  explicit ByConstRef(const std::shared_ptr<int>& p) : field(p) {}
+  std::shared_ptr<int> field;
+};
+
+struct ByRvalueRef {
+  explicit ByRvalueRef(std::shared_ptr<int>&& p) : field(std::move(p)) {}
+  std::shared_ptr<int> field;
+};
+
+int make_shared_byvalue_param_ok() {
+  auto p = std::make_shared<int>(7);
+  auto holder = std::make_shared<ByValueMoves>(p);
+  return *p;
+}
+
+int make_shared_byvalue_param_copied_ok() {
+  auto p = std::make_shared<int>(7);
+  auto holder = std::make_shared<ByValueCopies>(p);
+  return *p;
+}
+
+int make_shared_const_ref_param_ok() {
+  auto p = std::make_shared<int>(7);
+  auto holder = std::make_shared<ByConstRef>(p);
+  return *p;
+}
+
+int direct_byvalue_param_ok() {
+  auto p = std::make_shared<int>(7);
+  ByValueMoves holder(p);
+  return *p;
+}
+
+// the caller gives up ownership, so reading it back is a real null dereference
+int make_shared_rvalue_ref_param_bad() {
+  auto p = std::make_shared<int>(7);
+  auto holder = std::make_shared<ByRvalueRef>(std::move(p));
+  return *p;
+}
+
+// a by-value parameter the caller moves into is move-constructed, so the
+// caller really does lose it
+int make_shared_byvalue_param_moved_bad() {
+  auto p = std::make_shared<int>(7);
+  auto holder = std::make_shared<ByValueMoves>(std::move(p));
+  return *p;
+}
 } // namespace make_shared_ptr
