@@ -1397,11 +1397,42 @@ void same_variable_deeper_in_call_arguments_ok(int x) {
   take_two_ptrs_fn(wrap_read_ptr(identity_ptr(v)), wrap_copy_ptr(v));
 }
 
+// A by-value PARAMETER reaches a call differently from a local: the frontend
+// loads it into an identifier first and passes that, where a local is passed by
+// address. The sibling is the same sibling either way, so these must behave
+// like the local cases above.
+void same_variable_in_nested_call_of_other_argument_param_ok(
+    std::shared_ptr<int> v) {
+  take_two_ptrs(identity_ptr(v), v);
+}
+
+void same_variable_in_nested_call_of_other_argument_param_reversed_ok(
+    std::shared_ptr<int> v) {
+  take_two_ptrs(v, identity_ptr(v));
+}
+
+void same_variable_in_two_sibling_inner_calls_param_ok(std::shared_ptr<int> v) {
+  take_two_ptrs_outer(identity_ptr(v), wrap_ptr(v));
+}
+
 void take_one_ptr(std::shared_ptr<int> a);
 
 void variable_passed_once_bad(int x) {
   std::shared_ptr<int> v = std::make_shared<int>(x);
   take_one_ptr(v);
+}
+
+// the control for the parameter cases: nothing else reads it, so the advice
+// stands
+void variable_passed_once_param_bad(std::shared_ptr<int> v) { take_one_ptr(v); }
+
+// a parameter whose copy and whose reader meet at a CONSTRUCTOR is still
+// reported, exactly as the local version is: braced and parenthesized
+// constructor calls cannot be told apart here
+void FP_same_variable_in_nested_call_of_constructor_param_ok(
+    std::shared_ptr<int> v) {
+  TakesTwoPtrs t(identity_ptr(v), v);
+  (void)t;
 }
 
 struct InfoWithId {
