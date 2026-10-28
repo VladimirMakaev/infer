@@ -223,8 +223,24 @@ let is_copy_into_constexpr proc_desc (copied_into : Attribute.CopiedInto.t) =
 
 (** Every call in the procedure: its callee, whether the frontend put its result in the last actual,
     and the program variables it takes. Built once per procedure, because the walk below runs for
-    each reported copy and rebuilding this each time made the check quadratic. *)
+    each reported copy and rebuilding this each time made the check quadratic.
+
+    An actual naming a variable reaches a call in one of two shapes, and both have to be read. A
+    local is passed by address, as [Lvar v]. A by-value PARAMETER is loaded first, so the frontend
+    emits [n$k = *&v] and passes the identifier [n$k]; reading only [Lvar] would find no variable at
+    all for such a call, which is why a copy whose source is a parameter never found a sibling.
+    Identifiers are assigned once, so the load map below is unambiguous. *)
 let calls_with_pvar_actuals proc_desc =
+  let loaded_from = ref Ident.Map.empty in
+  Procdesc.iter_instrs
+    (fun _ instr ->
+      match (instr : Sil.instr) with
+      | Load {id; e= Lvar pvar} ->
+          loaded_from := Ident.Map.add id pvar !loaded_from
+      | _ ->
+          () )
+    proc_desc ;
+  let loaded_from = !loaded_from in
   let calls = ref [] in
   Procdesc.iter_instrs
     (fun _ instr ->
@@ -233,7 +249,13 @@ let calls_with_pvar_actuals proc_desc =
           let callee = match (e_fun : Exp.t) with Const (Cfun pname) -> Some pname | _ -> None in
           let pvars =
             List.filter_map args ~f:(fun (exp, _) ->
-                match (exp : Exp.t) with Lvar pvar -> Some pvar | _ -> None )
+                match (exp : Exp.t) with
+                | Lvar pvar ->
+                    Some pvar
+                | Var id ->
+                    Ident.Map.find_opt id loaded_from
+                | _ ->
+                    None )
           in
           (* The destructors the frontend injects for the temporaries of an expression take those
              temporaries too, but they carry no value onwards. Keeping them would let the walk
