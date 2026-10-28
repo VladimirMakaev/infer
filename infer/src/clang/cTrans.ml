@@ -4016,8 +4016,71 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       let is_constant_initialized =
         vdi.vdi_is_constexpr || (Typ.is_const typ.Typ.quals && vdi.vdi_is_init_expr_cxx11_constant)
       in
+      (* The initialiser is not translated, but it does read the locals its expression names, on
+         whichever pass runs it. Record those reads, or a local a static local's initialiser is the
+         only reader of looks written and never read, and liveness calls its store dead. A load
+         says only that the value may be read here, which is true; it says nothing about when the
+         initialisation happens, which is the false claim translating the initialiser would make.
+         The atomic compare-exchange branches use the same device for the same reason. *)
+      let static_local_initialiser_reads () =
+        match init_expr with
+        | None ->
+            []
+        | Some init_expr ->
+            let rec decl_refs acc stmt =
+              let acc =
+                match (stmt : Clang_ast_t.stmt) with
+                | `DeclRefExpr (_, _, expr_info, {drti_decl_ref= Some ({dr_kind= `Var} as dr)}) ->
+                    (dr, expr_info) :: acc
+                | _ ->
+                    acc
+              in
+              match stmt with
+              | `LambdaExpr _ | `BlockExpr _ ->
+                  (* the body of a lambda or a block is a different procedure, and its locals are
+                     not this frame's: descending would name variables that do not exist here *)
+                  acc
+              | _ ->
+                  let _, children = Clang_ast_proj.get_stmt_tuple stmt in
+                  List.fold children ~init:acc ~f:decl_refs
+            in
+            let sil_loc =
+              CLocation.location_of_stmt_info context.CContext.translation_unit_context.source_file
+                stmt_info
+            in
+            decl_refs [] init_expr |> List.rev
+            |> List.filter_map ~f:(fun (dr, {Clang_ast_t.ei_qual_type}) ->
+                let read_pvar =
+                  CVar_decl.sil_var_of_decl_ref context stmt_info.Clang_ast_t.si_source_range dr
+                    procname
+                in
+                (* the static itself is a global, and so is anything else the initialiser
+                      names that does not belong to this frame: neither can be a dead store here *)
+                if Pvar.is_global read_pvar then None
+                else
+                  let read_typ =
+                    CType_decl.qual_type_to_sil_type context.CContext.tenv ei_qual_type
+                  in
+                  Some
+                    (Sil.Load
+                       { id= Ident.create_fresh Ident.knormal
+                       ; e= Exp.Lvar read_pvar
+                       ; typ= read_typ
+                       ; loc= sil_loc } ) )
+      in
       if vdi.vdi_is_static_local && not is_constant_initialized then
-        mk_trans_result var_exp_typ {empty_control with root_nodes= trans_state.succ_nodes}
+        match static_local_initialiser_reads () with
+        | [] ->
+            mk_trans_result var_exp_typ {empty_control with root_nodes= trans_state.succ_nodes}
+        | instrs ->
+            let sil_loc =
+              CLocation.location_of_stmt_info context.CContext.translation_unit_context.source_file
+                stmt_info
+            in
+            let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info in
+            PriorityNode.compute_results_to_parent trans_state_pri sil_loc DeclStmt stmt_info
+              ~return:var_exp_typ
+              [mk_trans_result var_exp_typ {empty_control with instrs}]
       else
         init_expr_trans ~is_structured_binding trans_state var_exp_typ ~qual_type stmt_info
           init_expr
