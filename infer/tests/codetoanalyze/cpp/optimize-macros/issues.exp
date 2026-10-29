@@ -1,0 +1,1 @@
+codetoanalyze/cpp/optimize-macros/optimize_guard.cpp, optimized_build_is_still_analysed_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

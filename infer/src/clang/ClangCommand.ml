@@ -368,9 +368,58 @@ let with_plugin_args args =
          ; plugin_arg_flag
          ; "MAX_STRING_SIZE=" ^ string_of_int CFrontend_config.biniou_buffer_size ]
   in
-  (* add -O0 option to avoid compiler obfuscation of AST *)
+  (* -O0 keeps the optimiser from running, which is all this capture wants from it: the AST is
+     built before any optimisation, so the optimisation level cannot rewrite what gets exported.
+     What it does rewrite is the preprocessor. -O0 is appended after the original arguments and
+     the last level wins, so a translation unit the build compiles optimised is preprocessed here
+     as an unoptimised one. Source that asserts the level it needs stops compiling and is not
+     analysed at all, and source that merely branches on the level is analysed in a form that is
+     never built. Keep -O0 for the optimiser, and put the macros of the original level back. *)
+  (* A command that names one of these macros itself has already said what it wants of it, and a
+     -D or -U on the original line is not ours to overrule: a build that compiles optimised and
+     then removes __OPTIMIZE__ gets a preprocessor without it, here as in the real compile. Both
+     the joined and the separate spelling count. *)
+  let macro_name s = match String.lsplit2 s ~on:'=' with Some (name, _) -> name | None -> s in
+  let macros_named_by_command =
+    let rec collect acc = function
+      | [] ->
+          acc
+      | ("-D" | "-U") :: value :: rest ->
+          collect (macro_name value :: acc) rest
+      | arg :: rest ->
+          if String.is_prefix arg ~prefix:"-D" || String.is_prefix arg ~prefix:"-U" then
+            collect (macro_name (String.drop_prefix arg 2) :: acc) rest
+          else collect acc rest
+    in
+    collect [] args.orig_argv
+  in
+  let left_to_the_command flag =
+    List.mem macros_named_by_command (macro_name (String.drop_prefix flag 2)) ~equal:String.equal
+  in
+  let optimize_macros =
+    let last_o_level =
+      List.fold args.orig_argv ~init:None ~f:(fun acc arg ->
+          match arg with
+          | "-O0" ->
+              Some `None
+          | "-O" | "-O1" | "-O2" | "-O3" | "-Ofast" | "-Og" ->
+              Some `Speed
+          | "-Os" | "-Oz" ->
+              Some `Size
+          | _ ->
+              acc )
+    in
+    match last_o_level with
+    | None | Some `None ->
+        []
+    | Some `Speed ->
+        ["-U__NO_INLINE__"; "-D__OPTIMIZE__=1"]
+    | Some `Size ->
+        ["-U__NO_INLINE__"; "-D__OPTIMIZE__=1"; "-D__OPTIMIZE_SIZE__=1"]
+  in
+  let optimize_macros = List.filter optimize_macros ~f:(fun f -> not (left_to_the_command f)) in
   let args_after_rev =
-    [] |> argv_cons "-O0" |> argv_cons "-fno-builtin"
+    List.rev optimize_macros |> argv_cons "-O0" |> argv_cons "-fno-builtin"
     |> argv_do_if Config.fcp_syntax_only (argv_cons "-fsyntax-only")
   in
   {args with argv= List.rev_append args_before_rev (args.argv @ List.rev args_after_rev)}
