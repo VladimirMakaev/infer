@@ -83,6 +83,9 @@ DIRECT_TESTS += \
   cpp_liveness \
   cpp_liveness-20 \
   cpp_liveness-options \
+  cpp_optimize-macros \
+  cpp_optimize-macros-none \
+  cpp_optimize-macros-user \
   cpp_performance \
   cpp_performance-11 \
   cpp_pulse \
