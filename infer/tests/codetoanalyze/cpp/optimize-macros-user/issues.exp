@@ -1,0 +1,1 @@
+codetoanalyze/cpp/optimize-macros-user/optimize_user_undef.cpp, user_undef_is_respected_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
