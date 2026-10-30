@@ -411,6 +411,18 @@ val load_uid : ?capture_only:bool -> string -> t option
 val mark_if_unchanged : old_pdesc:t -> new_pdesc:t -> unit
 (** Record the [changed] attribute in-place on [new_pdesc] if it is unchanged wrt [old_pdsec] *)
 
+val replace_attributes_degrading :
+     check_stored_definition:(Sqlite3.Data.t -> unit) option
+  -> proc_desc:SQLite.t
+  -> ProcAttributes.t
+  -> analysis:bool
+  -> unit
+(** Write the procedure's row, dropping whatever part of it exceeds [Config.sqlite_max_blob_size]
+    instead of raising {!SqliteUtils.DataTooBig} and aborting the whole translation unit: a body
+    that does not fit is stored as NULL with the procedure marked undefined, attributes that do not
+    fit mean no row at all, callees that do not fit are stored as none. Whatever is dropped is
+    reported with {!Logging.internal_error}. *)
+
 module Loop : sig
   val get_all_nodes_upwards_until : Node.t -> Node.t list -> NodeSet.t
   (** Starting from the start_nodes, find all the nodes upwards until the target is reached, i.e
