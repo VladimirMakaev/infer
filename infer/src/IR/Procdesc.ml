@@ -989,6 +989,46 @@ module SQLite = struct
     serialize t_opt
 end
 
+(** Write a row of the procedures table, dropping whatever part of it the database refuses rather
+    than letting the exception escape and abort the whole translation unit. A procedure whose body
+    does not fit is stored without one, which is what is already stored for a procedure that was
+    only declared, so calls to it become calls to an unknown procedure; one whose attributes do not
+    fit has no row to write at all, since that column is NOT NULL; callees that do not fit are
+    stored as none. Only the outcome that took effect is logged. *)
+let replace_attributes_degrading ~check_stored_definition ~proc_desc (attr : ProcAttributes.t)
+    ~analysis =
+  let pname = attr.proc_name in
+  let too_big what size =
+    L.internal_error "Serialising the %s of %a needs %d bytes, over the %d byte limit; %s@\n" what
+      Procname.pp pname size Config.sqlite_max_blob_size
+  in
+  let attr, proc_desc, cfg, body_dropped =
+    match SQLite.serialize proc_desc with
+    | cfg ->
+        (attr, proc_desc, cfg, None)
+    | exception SqliteUtils.DataTooBig size ->
+        ({attr with is_defined= false}, None, SQLite.serialize None, Some size)
+  in
+  match ProcAttributes.SQLite.serialize attr with
+  | exception SqliteUtils.DataTooBig size ->
+      (* supersedes any body message: without attributes there is no row, dropped body or not *)
+      too_big "attributes" size "skipping the procedure"
+  | proc_attributes ->
+      Option.iter body_dropped ~f:(fun size ->
+          too_big "body" size "storing the procedure without a body" ) ;
+      let callees =
+        let callees = Option.value_map proc_desc ~f:get_static_callees ~default:[] in
+        match Procname.SQLiteList.serialize callees with
+        | serialized ->
+            serialized
+        | exception SqliteUtils.DataTooBig size ->
+            too_big "callees" size "storing none" ;
+            Procname.SQLiteList.serialize []
+      in
+      DBWriter.replace_attributes ~check_stored_definition ~proc_uid:(Procname.to_unique_id pname)
+        ~proc_attributes ~cfg ~callees ~analysis
+
+
 let load_uid_ =
   let load_statement db =
     Database.register_statement db "SELECT cfg FROM procedures WHERE proc_uid = :k"
@@ -1078,13 +1118,8 @@ let mark_if_unchanged ~old_pdesc ~new_pdesc =
   in
   if not (Bool.equal new_attrs.changed changed) then (
     new_attrs.changed <- changed ;
-    let pname = new_attrs.proc_name in
-    let proc_uid = Procname.to_unique_id pname in
-    let proc_attributes = ProcAttributes.SQLite.serialize new_attrs in
-    let cfg = SQLite.serialize (Some new_pdesc) in
-    let callees = get_static_callees new_pdesc |> Procname.SQLiteList.serialize in
-    DBWriter.replace_attributes ~check_stored_definition:None ~proc_uid ~proc_attributes ~cfg
-      ~callees ~analysis:true )
+    replace_attributes_degrading ~check_stored_definition:None ~proc_desc:(Some new_pdesc) new_attrs
+      ~analysis:true )
 
 
 module Loop = struct
