@@ -210,7 +210,7 @@ module SQLite = struct
     | Some payload ->
         let blob = Marshal.to_string payload [Closures] in
         if String.length blob < Config.sqlite_max_blob_size then Sqlite3.Data.BLOB blob
-        else raise SqliteUtils.DataTooBig
+        else raise (SqliteUtils.DataTooBig (String.length blob))
 
 
   let serialize payloads =
@@ -227,7 +227,7 @@ module SQLite = struct
           match Field.get field payloads |> serialize_payload_opt with
           | data ->
               (payloads, data :: rev_data)
-          | exception SqliteUtils.DataTooBig ->
+          | exception SqliteUtils.DataTooBig _ ->
               L.internal_error "%s payload of %a exceeds the blob size limit, dropping it@\n"
                 (PayloadId.Variants.to_name payload_id)
                 Procname.pp proc_name ;
@@ -243,7 +243,7 @@ module SQLite = struct
     let pulse_dropped = Option.is_some payloads.pulse && Option.is_none pulse in
     let serialize_with_pulse pulse_payload =
       try serialize {stored_payloads with pulse= Some (SafeLazy.from_val pulse_payload)}
-      with SqliteUtils.DataTooBig ->
+      with SqliteUtils.DataTooBig _ ->
         L.internal_error
           "Pulse payload of %a merged with the stored one exceeds the blob size limit, dropping \
            the stored one@\n"

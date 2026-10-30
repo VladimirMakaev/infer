@@ -10,7 +10,7 @@ module L = Logging
 
 exception Error of string
 
-exception DataTooBig
+exception DataTooBig of int
 
 let error fmt = Format.kasprintf (fun err -> raise (Error err)) fmt
 
@@ -157,7 +157,8 @@ module MarshalledDataNOTForComparison (D : T) = struct
 
   let serialize x =
     let s = Marshal.to_string x [] in
-    if String.length s < Config.sqlite_max_blob_size then Sqlite3.Data.BLOB s else raise DataTooBig
+    if String.length s < Config.sqlite_max_blob_size then Sqlite3.Data.BLOB s
+    else raise (DataTooBig (String.length s))
 end
 
 module MarshalledNullableDataNOTForComparison (D : T) = struct
@@ -176,5 +177,5 @@ module MarshalledNullableDataNOTForComparison (D : T) = struct
     | Some x ->
         let s = Marshal.to_string x [] in
         if String.length s < Config.sqlite_max_blob_size then Sqlite3.Data.BLOB s
-        else raise DataTooBig
+        else raise (DataTooBig (String.length s))
 end
