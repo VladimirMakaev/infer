@@ -61,21 +61,12 @@ let load, clear_cache, store, set_lru_limit =
       Logging.die InternalError
         "Was given UNDEFINED procedure WITH procdesc:@\nAttributes:%a@\nProcdesc:%a@."
         ProcAttributes.pp attr (Pp.option Procdesc.pp_signature) proc_desc ;
-    let pname = attr.proc_name in
-    let proc_uid = Procname.to_unique_id pname in
-    let cfg = Procdesc.SQLite.serialize proc_desc in
-    let proc_attributes = ProcAttributes.SQLite.serialize attr in
-    let callees =
-      Option.value_map proc_desc ~f:Procdesc.get_static_callees ~default:[]
-      |> Procname.SQLiteList.serialize
-    in
     let check_stored_definition =
       Option.map check_stored_definition ~f:(fun check stored ->
           check (ProcAttributes.SQLite.deserialize stored) )
     in
-    DBWriter.replace_attributes ~check_stored_definition ~proc_uid ~proc_attributes ~cfg ~callees
-      ~analysis ;
-    Cache.remove cache pname
+    Procdesc.replace_attributes_degrading ~check_stored_definition ~proc_desc attr ~analysis ;
+    Cache.remove cache attr.proc_name
   in
   let set_lru_limit ~lru_limit = Cache.set_lru_mode cache ~lru_limit in
   (load, clear_cache, store, set_lru_limit)

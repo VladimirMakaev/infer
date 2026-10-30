@@ -259,7 +259,7 @@ module OnDisk = struct
       (* Make sure the summary in memory is identical to the saved one *)
       add_to_cache proc_name analysis_req summary ;
       summary
-    with SqliteUtils.DataTooBig ->
+    with SqliteUtils.DataTooBig _ ->
       (* Serialization exceeded size limits, write and return an empty summary  *)
       L.internal_error
         "Summary for %a caused exceeds blob size limit, writing empty summary instead.@\n"

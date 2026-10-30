@@ -1,0 +1,1 @@
+codetoanalyze/c/capture-max-blob-size-recapture/many_locals.c, call_deref_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,when calling `deref` here,parameter `p` of deref,invalid access occurs here]

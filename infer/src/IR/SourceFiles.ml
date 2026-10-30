@@ -93,11 +93,34 @@ let add ?textual source_file cfg tenv integer_type_widths =
               DBWriter.delete_attributes ~proc_uid:(Procname.to_unique_id pname) ) ) ;
   let tenv = Tenv.normalize tenv in
   Cfg.store source_file cfg ;
+  (* None of these three columns can be left out of the row, so when one does not fit the file is
+     recorded with that column emptied rather than not recorded at all: a file Infer knows about
+     and has partial data for is worth more than a file it has never heard of. *)
+  (* [empty] is a thunk: building the fallback eagerly would allocate it on every capture, and
+     the point of this is to cost nothing when everything fits. *)
+  let serialize_or_empty : type a.
+      string -> (a -> Sqlite3.Data.t) -> a -> empty:(unit -> a) -> Sqlite3.Data.t =
+   fun column serialize value ~empty ->
+    match serialize value with
+    | serialized ->
+        serialized
+    | exception SqliteUtils.DataTooBig size ->
+        L.internal_error
+          "Serialising the %s of %a needs %d bytes, over the %d byte limit; storing it empty@\n"
+          column SourceFile.pp source_file size Config.sqlite_max_blob_size ;
+        serialize (empty ())
+  in
   DBWriter.add_source_file
     ~source_file:(SourceFile.SQLite.serialize source_file)
-    ~tenv:(Tenv.SQLite.serialize tenv)
-    ~integer_type_widths:(IntegerWidths.SQLite.serialize integer_type_widths)
-    ~proc_names:(Procname.SQLiteList.serialize proc_names)
+    ~tenv:
+      (serialize_or_empty "type environment" Tenv.SQLite.serialize tenv ~empty:(fun () ->
+           Tenv.FileLocal (Tenv.create ()) ) )
+    ~integer_type_widths:
+      (serialize_or_empty "integer type widths" IntegerWidths.SQLite.serialize integer_type_widths
+         ~empty:(fun () -> None ) )
+    ~proc_names:
+      (serialize_or_empty "procedure names" Procname.SQLiteList.serialize proc_names
+         ~empty:(fun () -> [] ) )
     ~textual:
       (* When --dump-textual or --store-textual is used, the caller passes the textual SIL string.
          Otherwise NULL is stored, which has no storage cost in SQLite. *)
