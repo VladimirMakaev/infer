@@ -11,8 +11,9 @@ open! IStd
     particular, they may raise if the [Sqlite3.Rc.t] result of certain operations is unexpected. *)
 exception Error of string
 
-(** Raised from serializers when final size exceeds Sqlite3 limits (normally 1000_000_000 bytes). *)
-exception DataTooBig
+(** Raised from serializers when the final size exceeds [Config.sqlite_max_blob_size]. Carries that
+    size in bytes, so that whoever handles it can report what did not fit. *)
+exception DataTooBig of int
 
 val check_result_code : Sqlite3.db -> log:string -> Sqlite3.Rc.t -> unit
 (** Assert that the result is either [Sqlite3.Rc.OK] or [Sqlite3.Rc.ROW]. If the result is not

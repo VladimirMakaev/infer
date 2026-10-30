@@ -62,6 +62,8 @@ endif
 DIRECT_TESTS += \
   c_annotreach \
   c_bufferoverrun \
+  c_capture-max-blob-size \
+  c_capture-max-blob-size-recapture \
   c_performance \
   c_pulse \
   c_pulse-max-blob-size \
