@@ -45,20 +45,31 @@ let mutex_of_recursive_initializer_store (lhs : Exp.t) (rhs : Exp.t) =
         None
   in
   let is_int n exp = Option.exists (eval exp) ~f:(Int.equal n) in
+  (* glibc keeps the kind inside the mutex union's [__data] member, so the initializer stores to
+     [m.__data.__kind]. What gets locked is the union [m], not the member, so step back out of any
+     union members the store went through. *)
+  let rec enclosing_union_object (exp : Exp.t) =
+    match exp with
+    | Lfield ({exp= base}, _, {desc= Tstruct name}) when Typ.Name.is_union name ->
+        enclosing_union_object base
+    | _ ->
+        exp
+  in
+  let mutex exp = Some (enclosing_union_object exp) in
   match lhs with
   | Lfield ({exp}, field, _) -> (
     match Fieldname.get_field_name field with
     | "__kind" when is_int 1 rhs ->
-        Some exp
+        mutex exp
     | "__sig" when is_int 0x32AAABA2 rhs ->
-        Some exp
+        mutex exp
     | _ ->
         None )
   | Lindex (Lfield ({exp}, field, _), index)
     when String.equal (Fieldname.get_field_name field) "__private"
          && is_int 0 index
          && is_int (1 lsl 14) rhs ->
-      Some exp
+      mutex exp
   | _ ->
       None
 
