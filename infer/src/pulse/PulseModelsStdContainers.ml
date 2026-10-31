@@ -599,36 +599,66 @@ let destructor this container ~desc : model_no_non_disj =
     addresses astate
 
 
-(** What an insertion stores, when the container holds scalars: the argument before the slot the
-    return value is written to, read through its reference. Without this the inserted value is
-    reachable from nothing, so an owner handed to the container looks leaked in its caller. The
-    container's destructor is what reclaims it again when the container itself dies. *)
-let inserted_scalar_value path location args astate =
+(** What one argument of an insertion stores, read through its reference: a scalar directly, and
+    both halves of a pair, since an entry of a map-like container is a pair and EITHER half can be
+    an owner. [const Key] makes the key object const, not whatever it points to, so a
+    [std::map<Owner*, int>] owns through its key. *)
+let inserted_owners_of_arg path location (arg : _ FuncArg.t) astate =
   let is_scalar typ = Typ.is_int typ || Typ.is_pointer typ in
-  let inserted =
-    match List.rev args with [value] -> Some value | _ret :: value :: _ -> Some value | [] -> None
-  in
-  match inserted with
-  | Some
-      { FuncArg.arg_payload
-      ; typ= {Typ.desc= Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))} }
+  match arg with
+  | { FuncArg.arg_payload
+    ; typ= {Typ.desc= Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))} }
     when is_scalar value_typ ->
       let+ astate, v =
         PulseOperations.eval_access path Read location arg_payload Dereference astate
       in
-      (astate, Some v)
+      (astate, [v])
+  | { FuncArg.arg_payload
+    ; typ=
+        { Typ.desc=
+            Tptr
+              ( {desc= Tstruct (CppClass _ as pair_name)}
+              , (Pk_lvalue_reference | Pk_rvalue_reference) ) } }
+    when Option.exists (class_name pair_name) ~f:(String.equal "pair") ->
+      let read_half astate half =
+        let* astate, field =
+          PulseOperations.eval_access path Read location arg_payload
+            (FieldAccess (Fieldname.make pair_name half))
+            astate
+        in
+        PulseOperations.eval_access path Read location field Dereference astate
+      in
+      let* astate, first = read_half astate "first" in
+      let+ astate, second = read_half astate "second" in
+      (astate, [first; second])
   | _ ->
-      Ok (astate, None)
+      Ok (astate, [])
 
 
-(** what the inserted value owns stays reachable from the container *)
-let write_inserted_into path location elem args astate =
-  let* astate, inserted = inserted_scalar_value path location args astate in
+(** What an insertion stores: every argument before the slot the return value is written to. The key
+    of a map-like container is inserted as its own argument, so it is read here too. Without this an
+    inserted value is reachable from nothing and an owner handed to the container looks leaked in
+    its caller. The container's destructor is what reclaims it when the container dies. *)
+let inserted_owners path location args astate =
+  let inserted = match List.rev args with [value] -> [value] | _ret :: rest -> rest | [] -> [] in
+  PulseResult.list_fold (List.rev inserted) ~init:(astate, []) ~f:(fun (astate, owners) arg ->
+      let+ astate, more = inserted_owners_of_arg path location arg astate in
+      (astate, owners @ more) )
+
+
+(** what an insertion stores stays reachable from the container. Each owner gets an element of its
+    own rather than sharing one: the model only has to keep them reachable, and the halves of a map
+    entry are separate owners. *)
+let write_inserted_into path location this elem args astate =
+  let* astate, inserted = inserted_owners path location args astate in
   match inserted with
-  | None ->
+  | [] ->
       Ok astate
-  | Some v ->
-      PulseOperations.write_deref path location ~ref:elem ~obj:v astate
+  | first :: rest ->
+      let* astate = PulseOperations.write_deref path location ~ref:elem ~obj:first astate in
+      PulseResult.list_fold rest ~init:astate ~f:(fun astate v ->
+          let* astate, elem = fresh_element path location this astate in
+          PulseOperations.write_deref path location ~ref:elem ~obj:v astate )
 
 
 (** insertions into a node-based container invalidate nothing; one that returns an iterator inserts
@@ -642,14 +672,14 @@ let node_insertion ~desc this args : model_no_non_disj =
     | Some result ->
         let=* astate, ret_iter = result in
         let=* astate, elem = fresh_element path location this astate in
-        let=* astate = write_inserted_into path location elem args astate in
+        let=* astate = write_inserted_into path location this elem args astate in
         let=* astate =
           make_iterator ~has_token:false path location event this ret_iter elem astate
         in
         set_size_positive path location event this astate
     | None ->
         let=* astate, elem = fresh_element path location this astate in
-        let=* astate = write_inserted_into path location elem args astate in
+        let=* astate = write_inserted_into path location this elem args astate in
         let=* astate =
           PulseOperations.havoc_deref_field path location this Collection.size_field
             (Hist.single_event event) astate
@@ -1105,6 +1135,32 @@ end
 (** a constructor whose body is translated, eg from headers under the project root, runs instead of
     the model: the other translated methods read the fields that it sets. The size is then unknown,
     as these methods do not maintain it. *)
+let is_move_constructor callee_procname =
+  List.nth (IRAttributes.load_formal_types callee_procname) 1
+  |> Option.exists ~f:Typ.is_rvalue_reference
+
+
+(** a node container moved from another one takes over its elements, as [std::vector]'s constructor
+    already does. Without this a container returned by value, or one holding another, loses what its
+    elements own and the owner looks leaked in the caller. *)
+let move_constructor ~desc this other : model_no_non_disj =
+ fun {path; location} astate ->
+  let<*> astate, other_array =
+    PulseOperations.eval_deref_access path Read location other (FieldAccess Collection.field) astate
+  in
+  let<*> astate, other_size = Collection.to_internal_size_deref path Read location other astate in
+  let<*> astate =
+    PulseOperations.write_deref_field path location ~ref:this Collection.size_field ~obj:other_size
+      astate
+  in
+  let<+> astate =
+    PulseOperations.write_deref_field path location ~ref:this Collection.field
+      ~obj:(fst other_array, Hist.add_call path location desc (snd other_array))
+      astate
+  in
+  astate
+
+
 let default_constructor ({FuncArg.arg_payload= this; typ} : _ FuncArg.t) : model =
  fun ({analysis_data; path; location; callee_procname; ret} as model_data) astate non_disj ->
   let is_translated =
@@ -1132,6 +1188,9 @@ let matchers : matcher list =
   in
   let is_iterator _ name = is_iterator name in
   let is_container ?(f = fun _ -> true) _ name = Option.exists (container_of_name name) ~f in
+  let is_container_move_constructor (_, procname) name =
+    is_container () name && is_move_constructor procname
+  in
   let ordered_map_method name =
     -"std"
     &::+ (fun (_, procname) name ->
@@ -1194,6 +1253,12 @@ let matchers : matcher list =
   (* the element of these is the value itself, so a one-argument [emplace] is an [insert]; the
      associative containers build a pair instead, and a multi-argument [emplace] builds the element
      from all of them, so neither is matched below *)
+  let is_map_like : Invalidation.std_container -> bool = function
+    | Map | Multimap | UnorderedMap | UnorderedMultimap ->
+        true
+    | Deque | List | Multiset | Set | UnorderedMultiset | UnorderedSet ->
+        false
+  in
   let is_set_like : Invalidation.std_container -> bool = function
     | Multiset | Set | UnorderedMultiset | UnorderedSet ->
         true
@@ -1220,6 +1285,15 @@ let matchers : matcher list =
         $+ capt_arg_payload
         $--> fun this pos ret_iter -> on_container (erase this pos ret_iter) )
       ; ( container_method ~f:is_node_based "insert"
+        $ capt_arg_payload
+        $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+      ; ( container_method ~f:is_map_like "emplace"
+        $ capt_arg_payload
+        $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+      ; ( container_method ~f:is_map_like "try_emplace"
+        $ capt_arg_payload
+        $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+      ; ( container_method ~f:is_map_like "insert_or_assign"
         $ capt_arg_payload
         $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
       ; ( container_method ~f:is_set_like "emplace"
@@ -1251,12 +1325,6 @@ let matchers : matcher list =
   in
   (* the elements of the set-like containers are const, so nothing can be stored through an
      iterator to one and [equal_range] on them cannot lose a value the way it does on a map *)
-  let is_map_like : Invalidation.std_container -> bool = function
-    | Map | Multimap | UnorderedMap | UnorderedMultimap ->
-        true
-    | Deque | List | Multiset | Set | UnorderedMultiset | UnorderedSet ->
-        false
-  in
   let lookup_matchers =
     (* [lower_bound] and [upper_bound] return an iterator to an element of the container, as
        [find] does, so they take the same model. Without one the returned iterator is unrelated
@@ -1341,4 +1409,10 @@ let matchers : matcher list =
   @ front_back_matchers @ map_matchers @ deque_matchers @ adapter_matchers @ destructor_matchers
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
   |> List.cons (-"std" &::+ is_container &::+ is_container <>$ capt_arg $--> default_constructor)
+  |> List.cons
+       ( -"std" &::+ is_container &::+ is_container_move_constructor <>$ capt_arg_payload
+       $+ capt_arg_payload_of_typ (-"std" &::+ is_container)
+       $+...$--> (fun this other ->
+       move_constructor ~desc:"std::container::container(container&&)" this other )
+       |> ProcnameDispatcher.Call.map_matcher ~f:lift_model )
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
