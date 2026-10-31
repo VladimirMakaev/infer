@@ -3441,6 +3441,29 @@ module GenericMapCollection = struct
     @@> lift_to_monad (lift_model (ForwardIterator.copy_position ~src:other ~dst:it))
 end
 
+(** [rbegin] and [rend] return a [std::reverse_iterator] over [end()] and over [begin()]
+    respectively, and both standard libraries keep that base iterator in a member called [current].
+    Binding it with the container's own [begin] or [end] model is all that is needed: the library's
+    [operator*] copies the base iterator, steps it back and dereferences it, and those are modelled,
+    so reverse iteration needs no model of its own. Without this the base comes from the container's
+    internal array, which is not modelled, and a value stored through a reverse iterator is
+    reachable from nothing. *)
+let reverse_begin_or_end base_model ~desc collection (ret : _ FuncArg.t) : model_no_non_disj =
+ fun ({path; location} as model_data) astate ->
+  match ret.FuncArg.typ with
+  | {Typ.desc= Tptr ({desc= Tstruct (CppClass {name} as reverse_iterator)}, _)}
+    when Option.exists (QualifiedCppName.extract_last name) ~f:(fun (last, _) ->
+             String.is_prefix last ~prefix:"reverse_iterator" ) ->
+      let<*> astate, base =
+        PulseOperations.eval_access path Read location ret.FuncArg.arg_payload
+          (FieldAccess (Fieldname.make reverse_iterator "current"))
+          astate
+      in
+      base_model ~desc collection base model_data astate
+  | _ ->
+      Basic.ok_continue astate
+
+
 let get_cpp_matchers =
   let cpp_separator_regex = Str.regexp_string "::" in
   fun config ~model ->
@@ -4127,6 +4150,18 @@ let simple_matchers =
       |> observe_matcher ~rule:"std.vector.end.1"
     ; -"std" &:: "vector" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
       $--> Vector.vector_end ~desc:"std::vector::cend()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "rbegin" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_end ~desc:"std::vector::rbegin()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "crbegin" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_end ~desc:"std::vector::crbegin()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "rend" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_begin ~desc:"std::vector::rend()"
+      |> with_non_disj
+    ; -"std" &:: "vector" &:: "crend" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_begin ~desc:"std::vector::crend()"
       |> with_non_disj
     ; -"std" &:: "vector" &:: "clear" <>$ capt_arg_payload $--> Vector.clear
       |> observe_matcher ~rule:"std.vector.clear.1"

@@ -506,6 +506,44 @@ let equal_range this (ret : _ FuncArg.t) container ~desc : model_no_non_disj =
   astate
 
 
+(** the base iterator a [std::reverse_iterator] is built on, which both standard libraries keep in a
+    member called [current] *)
+let reverse_iterator_current path location (ret : _ FuncArg.t) astate =
+  match ret with
+  | {arg_payload= rev; typ= {desc= Tptr ({desc= Tstruct (CppClass _ as rev_name)}, _)}}
+    when Option.exists (class_name rev_name) ~f:(String.equal "reverse_iterator") ->
+      Some
+        (PulseOperations.eval_access path Read location rev
+           (FieldAccess (Fieldname.make rev_name "current"))
+           astate )
+  | _ ->
+      None
+
+
+(** [rbegin] and [rend] return a [std::reverse_iterator] over [end()] and over [begin()]
+    respectively. Only that base iterator needs binding: the library's own [operator*] copies it,
+    steps it back and dereferences it, and those three are modelled already, so reverse iteration
+    needs no model of its own. Without this the base is produced by the containers' internal trees
+    and arrays, which are not modelled, and a value stored through a reverse iterator is reachable
+    from nothing. *)
+let reverse_begin_or_end ~over_end this ret container ~desc : model_no_non_disj =
+ fun {path; location} astate ->
+  let event = Hist.call_event path location desc in
+  let has_token = has_token container in
+  let<++> astate =
+    match reverse_iterator_current path location ret astate with
+    | None ->
+        Sat (Ok astate)
+    | Some current ->
+        let=* astate, iter = current in
+        if over_end then
+          let** astate, end_value = eval_end path location this astate in
+          Sat (make_iterator ~has_token path location event this iter end_value astate)
+        else bind_iterator ~has_token path location event this iter astate
+  in
+  astate
+
+
 (** insertions into a [std::deque] invalidate all its iterators; references to its elements are not
     invalidated, which is only right for insertions at either end *)
 let deque_insertion deque_f ~ret ~desc this args : model_no_non_disj =
@@ -1167,26 +1205,36 @@ let matchers : matcher list =
     ; returns_iterator "cbegin" begin_or_find
     ; returns_iterator "end" end_
     ; returns_iterator "cend" end_
-    ; ( container_method "erase" <>$ capt_arg_payload
-      $+ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $+ capt_arg_payload
-      $--> fun this pos ret_iter -> on_container (erase this pos ret_iter) )
-    ; ( container_method ~f:is_node_based "insert"
-      $ capt_arg_payload
-      $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
-    ; ( container_method ~f:is_set_like "emplace"
-      $ capt_arg_payload $+ capt_arg $+ capt_arg
-      $--> fun this value ret ->
-      on_container (fun _ ~desc -> node_insertion ~desc this [value; ret]) )
-    ; ( container_method ~f:is_set_like "emplace_hint"
-      $ capt_arg_payload $+ capt_arg $+ capt_arg $+ capt_arg
-      $--> fun this hint value ret ->
-      on_container (fun _ ~desc -> node_insertion ~desc this [hint; value; ret]) )
-    ; (container_method "clear" <>$ capt_arg_payload $--> fun this -> on_container (clear this))
-    ; ( container_method "empty" <>$ capt_arg_payload
-      $--> fun this -> on_container (fun _ ~desc -> Collection.empty ~desc this) )
-    ; ( container_method "size" <>$ capt_arg_payload
-      $--> fun this -> on_container (fun _ ~desc -> Collection.size ~desc this) ) ]
+      (* every container that has reverse iterators at all gets them: leaving one unmodelled
+         would be a gap of exactly the kind this fixes, and the containers without them, the
+         unordered ones, simply never match *)
+    ]
+    @ List.concat_map ["rbegin"; "crbegin"] ~f:(fun method_name ->
+        [ ( container_method method_name <>$ capt_arg_payload $+ capt_arg
+          $--> fun this ret -> on_container (reverse_begin_or_end ~over_end:true this ret) ) ] )
+    @ List.concat_map ["rend"; "crend"] ~f:(fun method_name ->
+        [ ( container_method method_name <>$ capt_arg_payload $+ capt_arg
+          $--> fun this ret -> on_container (reverse_begin_or_end ~over_end:false this ret) ) ] )
+    @ [ ( container_method "erase" <>$ capt_arg_payload
+        $+ capt_arg_payload_of_typ_exists (iterator_typs ())
+        $+ capt_arg_payload
+        $--> fun this pos ret_iter -> on_container (erase this pos ret_iter) )
+      ; ( container_method ~f:is_node_based "insert"
+        $ capt_arg_payload
+        $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+      ; ( container_method ~f:is_set_like "emplace"
+        $ capt_arg_payload $+ capt_arg $+ capt_arg
+        $--> fun this value ret ->
+        on_container (fun _ ~desc -> node_insertion ~desc this [value; ret]) )
+      ; ( container_method ~f:is_set_like "emplace_hint"
+        $ capt_arg_payload $+ capt_arg $+ capt_arg $+ capt_arg
+        $--> fun this hint value ret ->
+        on_container (fun _ ~desc -> node_insertion ~desc this [hint; value; ret]) )
+      ; (container_method "clear" <>$ capt_arg_payload $--> fun this -> on_container (clear this))
+      ; ( container_method "empty" <>$ capt_arg_payload
+        $--> fun this -> on_container (fun _ ~desc -> Collection.empty ~desc this) )
+      ; ( container_method "size" <>$ capt_arg_payload
+        $--> fun this -> on_container (fun _ ~desc -> Collection.size ~desc this) ) ]
   in
   let is_associative : Invalidation.std_container -> bool = function
     | Deque | List ->
