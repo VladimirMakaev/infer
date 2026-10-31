@@ -1095,16 +1095,20 @@ let matchers : matcher list =
         true
   in
   let lookup_matchers =
-    [ ( container_method ~f:is_associative "find"
-      $ capt_arg_payload $+ any_arg
-      $+ capt_arg_payload_of_typ_exists (iterator_typs ())
-      $--> fun this iter -> on_container (begin_or_find this iter) )
-    ; ( container_method ~f:is_associative "count"
-      $ capt_arg_payload $+ any_arg
-      $--> fun this -> on_container (fun _ ~desc -> count ~desc this) )
-    ; ( container_method ~f:is_associative "contains"
-      $ capt_arg_payload $+ any_arg
-      $--> fun this -> on_container (fun _ ~desc -> count ~desc this) ) ]
+    (* [lower_bound] and [upper_bound] return an iterator to an element of the container, as
+       [find] does, so they take the same model. Without one the returned iterator is unrelated
+       to the container, and a value stored through it is reachable from nothing. *)
+    List.map ["find"; "lower_bound"; "upper_bound"] ~f:(fun method_name ->
+        container_method ~f:is_associative method_name
+        $ capt_arg_payload $+ any_arg
+        $+ capt_arg_payload_of_typ_exists (iterator_typs ())
+        $--> fun this iter -> on_container (begin_or_find this iter) )
+    @ [ ( container_method ~f:is_associative "count"
+        $ capt_arg_payload $+ any_arg
+        $--> fun this -> on_container (fun _ ~desc -> count ~desc this) )
+      ; ( container_method ~f:is_associative "contains"
+        $ capt_arg_payload $+ any_arg
+        $--> fun this -> on_container (fun _ ~desc -> count ~desc this) ) ]
   in
   let is_sequence container = not (is_associative container) in
   let front_back_matchers =
