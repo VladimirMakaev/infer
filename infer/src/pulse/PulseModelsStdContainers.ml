@@ -1115,6 +1115,17 @@ let matchers : matcher list =
       <>$ capt_arg_payload
       $--> fun this -> on_container (fun _ ~desc -> element_reference ~desc this) ) ]
   in
+  (* the adapters keep their elements in an underlying container and have no iterators of their
+     own, so they are not in [containers]; their element accessors still have to return a
+     reference into the adapter, or a pointer stored through one is unreachable *)
+  let adapter_matchers =
+    List.concat_map
+      [("stack", ["top"]); ("queue", ["front"; "back"]); ("priority_queue", ["top"])]
+      ~f:(fun (adapter, accessors) ->
+        List.map accessors ~f:(fun accessor ->
+            -"std" &:: adapter &:: accessor <>$ capt_arg_payload
+            $--> fun this -> element_reference ~desc:(desc adapter accessor) this ) )
+  in
   let is_map : Invalidation.std_container -> bool = function
     | Map | UnorderedMap ->
         true
@@ -1152,7 +1163,7 @@ let matchers : matcher list =
   ordered_map_matchers
   @ iterator_matchers ~in_detail:false
   @ iterator_matchers ~in_detail:true @ comparison_matchers @ container_matchers @ lookup_matchers
-  @ front_back_matchers @ map_matchers @ deque_matchers
+  @ front_back_matchers @ map_matchers @ deque_matchers @ adapter_matchers
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
   |> List.cons (-"std" &::+ is_container &::+ is_container <>$ capt_arg $--> default_constructor)
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
