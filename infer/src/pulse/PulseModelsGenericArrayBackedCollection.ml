@@ -528,7 +528,7 @@ module Iterator = struct
 
 
   let operator_step step ~desc iter : model_no_non_disj =
-   fun {path; location} astate ->
+   fun {path; location; ret} astate ->
     let event = Hist.call_event path location desc in
     let<*> astate, pointer, (index, _), _ =
       to_elem_pointed_by_iterator path Read ~step:(Some step) location iter astate
@@ -562,12 +562,16 @@ module Iterator = struct
     (* the internal pointer is shared with the copies of the iterator, and with the other [end()]
        iterators of the collection, so we replace it instead of writing through it *)
     let pointer_new = (AbstractValue.mk_fresh (), snd pointer) in
-    let<+> astate =
+    let<*> astate =
       PulseOperations.write_field path location ~ref:iter internal_pointer ~obj:pointer_new astate
       >>= PulseOperations.write_deref path location ~ref:pointer_new
             ~obj:(index_new, Hist.add_event event (snd pointer))
     in
-    astate
+    (* prefix [++] and [--] return the iterator itself. Without binding that reference [*--it]
+       reads an unrelated fresh value, so an owner stored through it is reachable from nothing.
+       Both standard libraries write exactly that inside [reverse_iterator::operator*]. *)
+    Basic.ok_continue
+      (PulseOperations.write_id (fst ret) (fst iter, Hist.add_event event (snd iter)) astate)
 end
 
 (* functions of [<algorithm>] that return an iterator into the range starting at their first
