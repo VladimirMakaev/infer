@@ -15,15 +15,26 @@ PLUGIN=${PLUGIN:?set PLUGIN to the path of FacebookClangPlugin.dylib}
 ELEMENTS=${ELEMENTS:-100000}
 CPU_LIMIT=${CPU_LIMIT:-60}
 
+# WHERE is the long line: "include" puts it in an included header, "main" puts it in the
+# translation unit itself, whose last line is then the one without a terminator.
+WHERE=${WHERE:-include}
+
 DIR=$(mktemp -d); trap 'rm -rf "$DIR"' EXIT
 python3 -c "
 import sys
-n = int(sys.argv[1])
-open(sys.argv[2] + '/blob.inc', 'w').write(','.join(str(i % 251) for i in range(n)))
-open(sys.argv[2] + '/blob.cpp', 'w').write(
-    'constexpr unsigned char kBlob[] = {\n#include \"blob.inc\"\n};\n'
-    'const unsigned char* blob() { return kBlob; }\n')
-" "$ELEMENTS" "$DIR" || exit 1
+n, where, d = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+body = ','.join(str(i % 251) for i in range(n))
+if where == 'main':
+    # the initializer ends the file, so the translation unit's own last line is the long
+    # one and it has no terminator
+    open(d + '/blob.cpp', 'w').write(
+        'const unsigned char* blob();\nconstexpr unsigned char kBlob[] = {' + body + '};')
+else:
+    open(d + '/blob.inc', 'w').write(body)
+    open(d + '/blob.cpp', 'w').write(
+        'constexpr unsigned char kBlob[] = {\n#include \"blob.inc\"\n};\n'
+        'const unsigned char* blob() { return kBlob; }\n')
+" "$ELEMENTS" "$WHERE" "$DIR" || exit 1
 
 ( ulimit -t "$CPU_LIMIT"
   "$CLANG" -std=c++20 -c "$DIR/blob.cpp" -o /dev/null -I"$DIR" \
@@ -35,9 +46,9 @@ open(sys.argv[2] + '/blob.cpp', 'w').write(
     > /dev/null 2>&1 )
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
-  printf '[!] exporting %s elements on an unterminated line used more than %ss of CPU\n' \
-    "$ELEMENTS" "$CPU_LIMIT"
+  printf '[!] exporting %s elements on an unterminated %s line used more than %ss of CPU\n' \
+    "$ELEMENTS" "$WHERE" "$CPU_LIMIT"
   exit 1
 fi
-printf '[+] exported %s elements on an unterminated line within %ss of CPU\n' \
-  "$ELEMENTS" "$CPU_LIMIT"
+printf '[+] exported %s elements on an unterminated %s line within %ss of CPU\n' \
+  "$ELEMENTS" "$WHERE" "$CPU_LIMIT"
