@@ -244,16 +244,22 @@ module Iterator = struct
     Collection.Iterator.compare_values comparison ~desc elem_lhs elem_rhs model_data astate
 end
 
+(** make [iter] an iterator into [container], over the past-the-end value if the container is known
+    to be empty and over a fresh element otherwise *)
+let bind_iterator ~has_token path location event container iter astate =
+  let=* astate, (size, _) = Collection.to_internal_size_deref path Read location container astate in
+  let** astate, elem =
+    if PulseArithmetic.is_known_zero astate size then eval_end path location container astate
+    else Sat (fresh_element path location container astate)
+  in
+  Sat (make_iterator ~has_token path location event container iter elem astate)
+
+
 let begin_or_find this iter container ~desc : model_no_non_disj =
  fun {path; location} astate ->
   let event = Hist.call_event path location desc in
   let<++> astate =
-    let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
-    let** astate, elem =
-      if PulseArithmetic.is_known_zero astate size then eval_end path location this astate
-      else Sat (fresh_element path location this astate)
-    in
-    Sat (make_iterator ~has_token:(has_token container) path location event this iter elem astate)
+    bind_iterator ~has_token:(has_token container) path location event this iter astate
   in
   astate
 
@@ -470,6 +476,34 @@ let returned_iterator path location event (ret : _ FuncArg.t option) astate =
            astate )
   | _ ->
       None
+
+
+(** [equal_range] returns the pair of iterators that delimits the elements with a given key. Both
+    halves are iterators into the container, and both have to be bound to it: the mapped value of a
+    map entry is assigned through exactly such an iterator, and without this the value stored is
+    reachable from nothing. *)
+let equal_range this (ret : _ FuncArg.t) container ~desc : model_no_non_disj =
+ fun {path; location} astate ->
+  let event = Hist.call_event path location desc in
+  let<++> astate =
+    match ret with
+    | {arg_payload= pair; typ= {desc= Tptr ({desc= Tstruct (CppClass _ as pair_name)}, _)}}
+      when Option.exists (class_name pair_name) ~f:(String.equal "pair") ->
+        let has_token = has_token container in
+        let bind_half field astate =
+          let=* astate, iter =
+            PulseOperations.eval_access path Read location pair
+              (FieldAccess (Fieldname.make pair_name field))
+              astate
+          in
+          bind_iterator ~has_token path location event this iter astate
+        in
+        let** astate = bind_half "first" astate in
+        bind_half "second" astate
+    | _ ->
+        Sat (Ok astate)
+  in
+  astate
 
 
 (** insertions into a [std::deque] invalidate all its iterators; references to its elements are not
@@ -1167,6 +1201,14 @@ let matchers : matcher list =
     | UnorderedSet ->
         true
   in
+  (* the elements of the set-like containers are const, so nothing can be stored through an
+     iterator to one and [equal_range] on them cannot lose a value the way it does on a map *)
+  let is_map_like : Invalidation.std_container -> bool = function
+    | Map | Multimap | UnorderedMap | UnorderedMultimap ->
+        true
+    | Deque | List | Multiset | Set | UnorderedMultiset | UnorderedSet ->
+        false
+  in
   let lookup_matchers =
     (* [lower_bound] and [upper_bound] return an iterator to an element of the container, as
        [find] does, so they take the same model. Without one the returned iterator is unrelated
@@ -1176,6 +1218,9 @@ let matchers : matcher list =
         $ capt_arg_payload $+ any_arg
         $+ capt_arg_payload_of_typ_exists (iterator_typs ())
         $--> fun this iter -> on_container (begin_or_find this iter) )
+    @ [ ( container_method ~f:is_map_like "equal_range"
+        $ capt_arg_payload $+ any_arg $+ capt_arg
+        $--> fun this ret -> on_container (equal_range this ret) ) ]
     @ [ ( container_method ~f:is_associative "count"
         $ capt_arg_payload $+ any_arg
         $--> fun this -> on_container (fun _ ~desc -> count ~desc this) )
