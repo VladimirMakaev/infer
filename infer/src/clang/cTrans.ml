@@ -3632,9 +3632,44 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         base_results @ List.map2_exn own_field_exps field_stmts ~f:init_field
     | [], stmts when Int.equal (List.length field_exps) (List.length stmts) ->
         List.map2_exn field_exps stmts ~f:init_field
+    | [], [stmt] when Typ.Name.is_union tname ->
+        (* A union aggregate initializes exactly one member. Initializing [var_exp] stores at the
+           union's base, so a read that goes through the member name addresses a different path
+           and never sees the value. Clang's chosen member is not exported, so recover it from the
+           initializer's type: it is the one member that type can initialize. *)
+        let init_typ =
+          match Clang_ast_proj.get_expr_tuple stmt with
+          | Some (_, _, {Clang_ast_t.ei_qual_type}) ->
+              Some (CType_decl.qual_type_to_sil_type tenv ei_qual_type)
+          | None ->
+              None
+        in
+        let initializes_field (field_typ : Typ.t) (init_typ : Typ.t) =
+          match (field_typ.desc, init_typ.desc) with
+          | Tstruct field_name, Tstruct init_name ->
+              Typ.Name.equal field_name init_name
+          | _ ->
+              Typ.equal field_typ init_typ
+        in
+        let matching_fields =
+          match init_typ with
+          | Some init_typ ->
+              List.filter field_exps ~f:(fun (_, field_typ) -> initializes_field field_typ init_typ)
+          | None ->
+              []
+        in
+        (* Only act when exactly one member can be the target. Two members of the same type, or an
+           initializer whose type we cannot read, stay on the previous translation. *)
+        if Int.equal (List.length matching_fields) 1 then
+          List.map matching_fields ~f:(fun field_exp_typ -> init_field field_exp_typ stmt)
+        else (
+          L.debug Capture Medium
+            "union initListExpr for %a: %d of %d members match the initializer type, keeping the \
+             base initialization@\n"
+            Typ.Name.pp tname (List.length matching_fields) (List.length field_exps) ;
+          [init_expr_trans trans_state (var_exp, var_typ) stmt_info (Some stmt)] )
     | [], [stmt] ->
-        (* This happens for instance with unions, where one element initializes one of several
-           fields. *)
+        (* A single initializer for a type with several fields, where the type is not a union. *)
         [init_expr_trans trans_state (var_exp, var_typ) stmt_info (Some stmt)]
     | _, _ ->
         (* This happens with some braced-init-list for instance; translate each sub-statement so

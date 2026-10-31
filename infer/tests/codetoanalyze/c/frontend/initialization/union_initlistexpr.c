@@ -9,7 +9,7 @@ union U {
   int f2[3];
 };
 
-void union_initialize_FIXME() {
+void union_initialize() {
   union U set_f1 = {.f1 = 2};
   union U set_f2 = {.f2 = {1, 2, 3}};
   union U set_f1_implicit = {1};
