@@ -189,7 +189,6 @@ module Name : sig
   (** [is_class name] holds if [name] names CPP/Objc/Java class *)
 
   val is_union : t -> bool
-  [@@warning "-unused-value-declaration"]
   (** [is_union name] holds if [name] names C/CPP union *)
 
   val name_without_templates : t -> string
