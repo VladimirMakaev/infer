@@ -49,11 +49,24 @@ void find_store_ok(std::map<int, Box>& m) {
 // TRUE POSITIVE: nothing receives the allocation.
 void plain_leak_bad() { malloc(16); }
 
-// KNOWN LIMITATION, shared with the already-modelled `find` and `begin`: once an
-// iterator is tied to the container, a local container dying does not make what it
-// holds unreachable, so this leak is missed. Modelling lower_bound does not create
-// the gap, it joins it; on an unmodelled operation the leak was caught by accident.
-void FN_local_map_lower_bound_bad() {
+// TRUE POSITIVE: a local container dying while holding an owner stored through
+// an iterator is reported. The iterator's element is a cell of the backing array,
+// so the container's death makes the owner unreachable. The map has to be
+// non-empty for the store to happen at all -- see the companion below.
+void local_map_lower_bound_dies_bad() {
+  std::map<int, Box> m;
+  m[1] = Box{nullptr};
+  auto it = m.lower_bound(1);
+  if (it != m.end()) {
+    it->second.p = (char*)malloc(16);
+  }
+}
+
+// The same shape on an EMPTY map. lower_bound then returns end(), so the guarded
+// store is unreachable -- in Pulse and in real execution alike. Nothing is
+// allocated on any path, so the silence here is correct and is pinned
+// deliberately rather than mistaken for a limitation.
+void local_empty_map_guarded_store_ok() {
   std::map<int, Box> m;
   auto it = m.lower_bound(1);
   if (it != m.end()) {
