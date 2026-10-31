@@ -2492,6 +2492,35 @@ module Vector = struct
            PulseOperations.write_deref path location ~ref:elem ~obj:v astate )
 
 
+  (* An insertion does not put its value at the end the way [push_back] does, and the position is
+     usually not known, so the value is written into an element at an unconstrained index: what
+     keeps an owner from looking leaked is that it is reachable from the vector at all, not where
+     it sits. The write happens after the wrapped model, because an insertion may reallocate. *)
+  let tie_inserted_value vector (value : _ FuncArg.t) (model : model_no_non_disj) :
+      model_no_non_disj =
+   fun ({path; location; callee_procname} as model_data) astate ->
+    let<*> astate, inserted = read_pushed_value path location callee_procname (Some value) astate in
+    match inserted with
+    | None ->
+        model model_data astate
+    | Some v ->
+        model model_data astate
+        |> List.map ~f:(fun exec_result ->
+            let* exec = exec_result in
+            match (exec : ExecutionDomain.t) with
+            | ContinueProgram astate ->
+                let+ astate =
+                  let* astate, elem =
+                    GenericArrayBackedCollection.element path location vector
+                      (AbstractValue.mk_fresh ()) astate
+                  in
+                  PulseOperations.write_deref path location ~ref:elem ~obj:v astate
+                in
+                ExecutionDomain.ContinueProgram astate
+            | _ ->
+                Ok exec )
+
+
   let push_back_common ?value vector ~vector_f ~desc : model_no_non_disj =
    fun {path; location; callee_procname; ret= ret_id, _} astate ->
     let<*> astate, pushed = read_pushed_value path location callee_procname value astate in
@@ -4107,6 +4136,11 @@ let simple_matchers =
       $--> Vector.data ~desc:"std::vector::data()"
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.data.1"
+    ; (* [emplace(pos, value)], the one-value form: the element is the value *)
+      -"std" &:: "vector" &:: "emplace" $ capt_arg_payload $+ any_arg $+ capt_arg $+ any_arg
+      $--> (fun vector value ->
+      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Emplace vector) )
+      |> with_non_disj
     ; -"std" &:: "vector" &:: "emplace" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_one_more Emplace
       |> with_non_disj
@@ -4127,11 +4161,17 @@ let simple_matchers =
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg
       $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
       $+ any_arg $--> Vector.insert_initializer_list |> with_non_disj
-    ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ any_arg
-      $+ any_arg $--> Vector.insert_count |> with_non_disj
+    ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ capt_arg
+      $+ any_arg
+      $--> (fun vector count value ->
+      Vector.tie_inserted_value vector value (Vector.insert_count vector count) )
+      |> with_non_disj
     ; (* [insert(pos, value)], the returned iterator is passed as the last argument *)
-      -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ capt_arg_payload $+ any_arg
-      $+ capt_arg_payload $--> Vector.insert_one |> with_non_disj
+      -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ capt_arg_payload $+ capt_arg
+      $+ capt_arg_payload
+      $--> (fun vector first value iter ->
+      Vector.tie_inserted_value vector value (Vector.insert_one vector first iter) )
+      |> with_non_disj
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_unknown_size Insert
       |> with_non_disj
