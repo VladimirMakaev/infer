@@ -543,7 +543,7 @@ module IntraDomElt = struct
      still uses it, nor how many times it is itself called, so moving out of it is not safe. *)
   let is_captured_by_ref_var ~ref_captures pvar = List.mem ref_captures pvar ~equal:Pvar.equal
 
-  let get_copied ~ref_formals ~ptr_formals ~ref_captures
+  let get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts
       ({copy_map; captured; reached_end; shared_intermediates} as astate_n) =
     let modified =
       CopyMap.fold
@@ -566,10 +566,18 @@ module IntraDomElt = struct
         | IntoIntermediate {copied_var}, _
           when SharedIntermediates.mem copied_var shared_intermediates ->
             acc
-        | (IntoVar _ | IntoIntermediate _), Copied _ when not (ReachedEnd.mem copy_var reached_end)
-          ->
-            (* the copy is checked at the end of the scope of its variable, which no path where the
-               copy was made reached, e.g. because their disjuncts were dropped *)
+        | (IntoVar _ | IntoIntermediate _), Copied _
+          when has_dropped_disjuncts && not (ReachedEnd.mem copy_var reached_end) ->
+            (* The copy is checked at the end of the scope of its variable, and this procedure
+               abandoned some of its states, so a path that made the copy and would have modified
+               it may be among the ones never explored: say nothing.
+
+               When nothing was abandoned, not reaching that end is not a reason to stay silent.
+               Every path Pulse explored either kept the copy unmodified or marked it modified --
+               an assignment to the copy does so whichever paths survive -- so a copy still
+               recorded as [Copied] here is unnecessary on all of them. Requiring the end to be
+               reached as well would make the report depend on which disjuncts survive, so sound
+               pruning of an infeasible path would silently delete a genuine report. *)
             acc
         | _, Copied _ when CopiedSet.mem copied_into modified ->
             acc
@@ -976,8 +984,9 @@ module IntraDom = struct
 
   let checked_via_destructor var = map (IntraDomElt.checked_via_destructor var)
 
-  let get_copied ~ref_formals ~ptr_formals ~ref_captures =
-    get ~default:[] (IntraDomElt.get_copied ~ref_formals ~ptr_formals ~ref_captures)
+  let get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts =
+    get ~default:[]
+      (IntraDomElt.get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts)
 
 
   let get_const_refable_parameters = get ~default:[] IntraDomElt.get_const_refable_parameters
@@ -1207,8 +1216,8 @@ let mark_parameter_as_modified ~is_modified ~var =
 
 let checked_via_destructor var = map_intra (IntraDom.checked_via_destructor var)
 
-let get_copied ~ref_formals ~ptr_formals ~ref_captures {intra} =
-  IntraDom.get_copied ~ref_formals ~ptr_formals ~ref_captures intra
+let get_copied ~ref_formals ~ptr_formals ~ref_captures {intra; has_dropped_disjuncts} =
+  IntraDom.get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts intra
 
 
 let get_const_refable_parameters {intra} = IntraDom.get_const_refable_parameters intra
