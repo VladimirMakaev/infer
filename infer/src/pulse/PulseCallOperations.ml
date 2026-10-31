@@ -1359,7 +1359,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
         match needs_aliasing_specialization with
         | `AliasSpecializationImpossible ->
             L.d_printfln "Alias specialization of %a failed" Procname.pp callee_pname ;
-            (`NoMoreSpecialization, false, AbstractValue.Set.empty)
+            (`SpecializationImpossible, false, AbstractValue.Set.empty)
         | `AliasSpeciationWith alias_specialization ->
             let specialization =
               {specialization with Specialization.Pulse.aliases= Some alias_specialization}
@@ -1433,6 +1433,11 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
                     (`NoMoreSpecialization, false, AbstractValue.Set.empty) )
       in
       match more_specialization with
+      | `SpecializationImpossible ->
+          (* the caller aliases two of the callee's addresses and the alias cannot be expressed as
+             a specialization, so the summary cannot be applied at all; say so rather than
+             reporting a known call with no disjuncts, which would silently drop the state *)
+          case_if_specialization_is_impossible res
       | `NoMoreSpecialization ->
           (res, summary, non_disj, contradiction, `KnownCall)
       | `MoreSpecialization specialization
@@ -1508,6 +1513,22 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
       if has_continue_program then GlobalForStats.node_is_not_stuck () ;
       let res, non_disj =
         if
+          (not has_continue_program)
+          && match resolution_status with `UnknownCall -> true | `KnownCall -> false
+        then (
+          (* The callee has a summary, but it could not be applied: the caller aliases two of the
+             callee's addresses and no alias specialization was possible, so every disjunct was
+             discarded. Keeping none of them would leave the whole of the rest of the caller
+             unanalysed and lose any defect in it, which is worse than the imprecision of not
+             knowing what the call did, so fall back to the unknown-call model. This is not
+             guarded by [pulse_force_continue]: that option is about a callee with no normal
+             post, whereas here the summary is fine and it is the application that failed. *)
+          L.d_printfln_escaped ~color:Orange
+            "Could not apply the summary of %a, treating the call as unknown" Procname.pp
+            callee_pname ;
+          let unknown_results, non_disj = call_as_unknown () in
+          (unknown_results @ res, non_disj) )
+        else if
           Config.pulse_force_continue
           && ( PulseNonDisjunctiveDomain.Summary.has_dropped_disjuncts summary_used.non_disj
              || List.is_empty summary_used.pre_post_list )
