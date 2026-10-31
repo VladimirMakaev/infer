@@ -101,9 +101,9 @@ void FN_stack_local_dies_bad() {
   s.top()->p = (char*)malloc(16);
 }
 
-// The same shape on std::deque, to record that this is the behaviour of the sequence
-// containers rather than something the adapters introduce.
-void FN_deque_local_dies_bad() {
+// The same shape on std::deque. This was a known false negative when the node-based
+// containers had no destructor model; it reports now that they do.
+void deque_local_dies_bad() {
   std::deque<Box*> d;
   Box b;
   b.p = nullptr;
