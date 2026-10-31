@@ -326,12 +326,16 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   const char *LastMacroLocFilename;
   unsigned LastMacroLocLine;
 
-  // The file whose final line was last measured by getPresumedLocFast, and the
-  // offset that line starts at, or ~0U when that file does not end in an
-  // unterminated line.
-  FileID FinalLineFileID;
-  unsigned FinalLineStart;
-  bool FinalLineKnown;
+  // What getPresumedLocFast learnt about the file it last looked at: the file,
+  // the source locations it spans, and the offset its final line starts at, or
+  // ~0U when that line is terminated. Holding the span lets a location in that
+  // file be recognised by comparing its raw value, which is what almost every
+  // location needs, instead of decomposing it.
+  FileID ExaminedFileID;
+  unsigned ExaminedRawBegin;
+  unsigned ExaminedRawEnd;
+  unsigned ExaminedFinalLineStart;
+  bool ExaminedValid;
 
   // The \c FullComment parent of the comment being dumped.
   const FullComment *FC;
@@ -357,8 +361,10 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
         LastLocColumn(~0U),
         LastMacroLocFilename(""),
         LastMacroLocLine(~0U),
-        FinalLineStart(~0U),
-        FinalLineKnown(false),
+        ExaminedRawBegin(0),
+        ExaminedRawEnd(0),
+        ExaminedFinalLineStart(~0U),
+        ExaminedValid(false),
         FC(0),
         NamePrint(Context.getSourceManager(), OF) {}
 
@@ -378,6 +384,11 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
                     PresumedLoc MLoc);
   void dumpPointer(const void *Ptr);
   void dumpSourceRange(SourceRange R);
+  PresumedLoc presumedLocOnFinalLine(const SourceManager &SM,
+                                     FileID FID,
+                                     unsigned Offset,
+                                     unsigned FinalLineStart,
+                                     SourceLocation Loc);
   PresumedLoc getPresumedLocFast(SourceLocation Loc);
   void dumpSourceLocation(SourceLocation Loc);
   void dumpQualType(const QualType &qt);
@@ -710,17 +721,58 @@ PresumedLoc ASTExporter<ATDWriter>::getPresumedLocFast(SourceLocation Loc) {
   if (Loc.isInvalid()) {
     return SM.getPresumedLoc(Loc);
   }
+  // A location written in a file is its offset into one flat space, so a
+  // location in the file looked at last is recognised by two comparisons. Only
+  // a location on an unterminated final line needs anything more, and files
+  // holding one are rare, so this is what almost every location costs.
+  if (Loc.isFileID() && ExaminedValid) {
+    unsigned Raw = Loc.getRawEncoding();
+    if (Raw >= ExaminedRawBegin && Raw < ExaminedRawEnd) {
+      if (ExaminedFinalLineStart == ~0U ||
+          Raw - ExaminedRawBegin < ExaminedFinalLineStart) {
+        return SM.getPresumedLoc(Loc);
+      }
+      return presumedLocOnFinalLine(SM,
+                                    ExaminedFileID,
+                                    Raw - ExaminedRawBegin,
+                                    ExaminedFinalLineStart,
+                                    Loc);
+    }
+  }
   auto LocInfo = SM.getDecomposedExpansionLoc(Loc);
   FileID FID = LocInfo.first;
   unsigned Offset = LocInfo.second;
-  if (!FinalLineKnown || FID != FinalLineFileID) {
-    FinalLineFileID = FID;
-    FinalLineStart = unterminatedFinalLineStart(SM, FID);
-    FinalLineKnown = true;
-  }
-  if (FinalLineStart == ~0U || Offset < FinalLineStart) {
+  bool Invalid = false;
+  const SrcMgr::SLocEntry &Entry = SM.getSLocEntry(FID, &Invalid);
+  if (Invalid || !Entry.isFile()) {
     return SM.getPresumedLoc(Loc);
   }
+  // Remember the file so the comparisons above answer for the locations that
+  // follow, which are nearly always in the same file.
+  if (auto Buffer = SM.getBufferOrNone(FID)) {
+    ExaminedFileID = FID;
+    ExaminedRawBegin = SM.getLocForStartOfFile(FID).getRawEncoding();
+    ExaminedRawEnd = ExaminedRawBegin + Buffer->getBufferSize() + 1;
+    ExaminedFinalLineStart = unterminatedFinalLineStart(SM, FID);
+    ExaminedValid = true;
+  }
+  if (ExaminedFinalLineStart == ~0U || !ExaminedValid ||
+      FID != ExaminedFileID || Offset < ExaminedFinalLineStart) {
+    return SM.getPresumedLoc(Loc);
+  }
+  return presumedLocOnFinalLine(SM, FID, Offset, ExaminedFinalLineStart, Loc);
+}
+
+/// The presumed location of \p Offset in \p FID, which is on a final line with
+/// no terminator. Everything SourceManager::getPresumedLoc would report,
+/// without the scan it would run to find the start of the line.
+template <class ATDWriter>
+PresumedLoc ASTExporter<ATDWriter>::presumedLocOnFinalLine(
+    const SourceManager &SM,
+    FileID FID,
+    unsigned Offset,
+    unsigned FinalLineStart,
+    SourceLocation Loc) {
   bool Invalid = false;
   const SrcMgr::SLocEntry &Entry = SM.getSLocEntry(FID, &Invalid);
   if (Invalid || !Entry.isFile()) {
