@@ -1374,6 +1374,83 @@ module InitializerList = struct
     binop PlusPI first size >>= assign_ret
 end
 
+(** [std::error_code] carries a category and a message that the analysis has no use for, and an
+    integer value that it does: the boolean conversion is exactly "the value is not zero", which is
+    how a caller's status check relates to the branch its callee took. Only the value is modelled;
+    the category stays unknown. *)
+module ErrorCode = struct
+  let value_field = Fieldname.make PulseOperations.pulse_model_type "__infer_error_code_value"
+
+  let load_value this =
+    let open PulseModelsDSL.Syntax in
+    load_access this (FieldAccess value_field)
+
+
+  let default_constructor ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* zero = int 0 in
+    store_field ~ref:this value_field zero
+
+
+  let constructor_of_value ~desc this value : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> store_field ~ref:this value_field value
+
+
+  (* the free function returns by value, so the frontend passes the object to fill as an
+     argument; the enum argument's value is the code *)
+  let make ~desc value result : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> store_field ~ref:result value_field value
+
+
+  let copy ~desc this source : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* value = load_value source in
+    store_field ~ref:this value_field value @@> assign_ret this
+
+
+  let clear ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* zero = int 0 in
+    store_field ~ref:this value_field zero
+
+
+  let value ~desc this : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc @@ fun () -> load_value this >>= assign_ret
+
+
+  (* [operator bool] splits on the value so that a status check prunes the branch it rules out:
+     a nonzero code is an error, a zero one is not. *)
+  let operator_bool ~desc this : model_no_non_disj =
+   fun {path; location; ret= ret_id, _} astate ->
+    let ret_addr = AbstractValue.mk_fresh () in
+    let<*> astate, (value_addr, _) =
+      PulseOperations.eval_deref_access path Read location this (FieldAccess value_field) astate
+    in
+    let hist more = Hist.single_call path location ~more desc in
+    let is_error =
+      PulseArithmetic.prune_ne_zero value_addr astate
+      >>== PulseArithmetic.prune_positive ret_addr
+      >>|| PulseOperations.write_id ret_id (ret_addr, hist "error case")
+      >>|| ExecutionDomain.continue
+    in
+    let is_success =
+      PulseArithmetic.prune_eq_zero value_addr astate
+      >>== PulseArithmetic.prune_eq_zero ret_addr
+      >>|| PulseOperations.write_id ret_id (ret_addr, hist "success case")
+      >>|| ExecutionDomain.continue
+    in
+    SatUnsat.to_list is_error @ SatUnsat.to_list is_success
+end
+
 module Vector = struct
   (* This is a lower bound, not an exact capacity. Only concrete bounds are retained: symbolic
      growth keeps the existing reserved-vector approximation without adding summary preconditions. *)
@@ -4165,6 +4242,26 @@ let simple_matchers =
       |> with_non_disj
     ; -"std" &:: "initializer_list" &:: "initializer_list" <>$ capt_arg_payload
       $--> InitializerList.default_constructor ~desc:"std::initializer_list::initializer_list()"
+      (* std::error_code: only the integer value is modelled, see the module comment *)
+    ; -"std" &:: "error_code" &:: "error_code" <>$ capt_arg_payload
+      $--> ErrorCode.default_constructor ~desc:"std::error_code::error_code()"
+    ; -"std" &:: "error_code" &:: "error_code" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "error_code")
+      $--> ErrorCode.copy ~desc:"std::error_code::error_code(copy)"
+    ; -"std" &:: "error_code" &:: "error_code" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
+      $--> ErrorCode.constructor_of_value ~desc:"std::error_code::error_code(value, category)"
+    ; -"std" &:: "error_code" &:: "operator=" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "error_code")
+      $--> ErrorCode.copy ~desc:"std::error_code::operator=()"
+    ; -"std" &:: "error_code" &:: "operator_bool" <>$ capt_arg_payload
+      $--> ErrorCode.operator_bool ~desc:"std::error_code::operator bool()"
+      |> with_non_disj
+    ; -"std" &:: "error_code" &:: "value" <>$ capt_arg_payload
+      $--> ErrorCode.value ~desc:"std::error_code::value()"
+    ; -"std" &:: "error_code" &:: "clear" <>$ capt_arg_payload
+      $--> ErrorCode.clear ~desc:"std::error_code::clear()"
+    ; -"std" &:: "make_error_code" $ capt_arg_payload $+ capt_arg_payload
+      $--> ErrorCode.make ~desc:"std::make_error_code()"
     ; -"std" &:: "initializer_list" &:: "size" <>$ capt_arg_payload
       $--> InitializerList.size ~desc:"std::initializer_list::size()"
     ; -"std" &:: "initializer_list" &:: "begin" <>$ capt_arg_payload
