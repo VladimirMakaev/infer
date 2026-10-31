@@ -21,22 +21,13 @@ struct Box {
 
 // rbegin and rend return iterators into the container, so an owner stored
 // through one is held by the container and is not leaked.
-//
-// KNOWN LIMITATION, std::vector and std::string only, and only with libc++:
-// binding the base iterator is enough for the node-based containers because
-// their iterator dereference is modelled, but the array-backed iterator model
-// records the position in a Pulse-internal field, and libc++'s __wrap_iter
-// dereference is real code that reads its own member instead. The same two
-// cases are silent when the tests are built against libstdc++, whose
-// __normal_iterator dereference the models do cover. These are the FPs that
-// were here before this change; it does not add any.
-void FP_vector_reverse_loop_ok(std::vector<Box>& v) {
+void vector_reverse_loop_ok(std::vector<Box>& v) {
   for (auto it = v.rbegin(); it != v.rend(); ++it) {
     it->p = (char*)malloc(16);
   }
 }
 
-void FP_vector_rbegin_ok(std::vector<Box>& v) {
+void vector_rbegin_ok(std::vector<Box>& v) {
   auto it = v.rbegin();
   if (it != v.rend()) {
     it->p = (char*)malloc(16);
@@ -162,6 +153,36 @@ void reverse_overwritten_bad(std::vector<Box>& v) {
   if (it != v.rend()) {
     it->p = p;
   }
+}
+
+// The defect behind the reverse-iteration false positives, in plain user code and
+// independent of any container model: prefix ++/-- return the iterator itself, so
+// dereferencing that returned reference must reach the element. Both standard
+// libraries write `*--tmp` inside reverse_iterator::operator*.
+static Box& step_back_then_deref(std::vector<Box>::iterator it) {
+  auto t = it;
+  return *--t;
+}
+
+void deref_prefix_decrement_ok(std::vector<Box>& v) {
+  step_back_then_deref(v.end()).p = (char*)malloc(16);
+}
+
+static Box& step_forward_then_deref(std::vector<Box>::iterator it) {
+  auto t = it;
+  return *++t;
+}
+
+void deref_prefix_increment_ok(std::vector<Box>& v) {
+  step_forward_then_deref(v.begin()).p = (char*)malloc(16);
+}
+
+// TRUE POSITIVE: the same shape on a local container that dies holding the owner.
+void local_deref_prefix_decrement_bad() {
+  std::vector<Box> v;
+  v.push_back(Box{nullptr});
+  v.push_back(Box{nullptr});
+  step_back_then_deref(v.end()).p = (char*)malloc(16);
 }
 
 } // namespace container_reverse_iteration
