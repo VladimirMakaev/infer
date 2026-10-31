@@ -527,6 +527,38 @@ let destructor this container ~desc : model_no_non_disj =
     addresses astate
 
 
+(** What an insertion stores, when the container holds scalars: the argument before the slot the
+    return value is written to, read through its reference. Without this the inserted value is
+    reachable from nothing, so an owner handed to the container looks leaked in its caller. The
+    container's destructor is what reclaims it again when the container itself dies. *)
+let inserted_scalar_value path location args astate =
+  let is_scalar typ = Typ.is_int typ || Typ.is_pointer typ in
+  let inserted =
+    match List.rev args with [value] -> Some value | _ret :: value :: _ -> Some value | [] -> None
+  in
+  match inserted with
+  | Some
+      { FuncArg.arg_payload
+      ; typ= {Typ.desc= Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))} }
+    when is_scalar value_typ ->
+      let+ astate, v =
+        PulseOperations.eval_access path Read location arg_payload Dereference astate
+      in
+      (astate, Some v)
+  | _ ->
+      Ok (astate, None)
+
+
+(** what the inserted value owns stays reachable from the container *)
+let write_inserted_into path location elem args astate =
+  let* astate, inserted = inserted_scalar_value path location args astate in
+  match inserted with
+  | None ->
+      Ok astate
+  | Some v ->
+      PulseOperations.write_deref path location ~ref:elem ~obj:v astate
+
+
 (** insertions into a node-based container invalidate nothing; one that returns an iterator inserts
     an element, or finds an equal one *)
 let node_insertion ~desc this args : model_no_non_disj =
@@ -538,11 +570,14 @@ let node_insertion ~desc this args : model_no_non_disj =
     | Some result ->
         let=* astate, ret_iter = result in
         let=* astate, elem = fresh_element path location this astate in
+        let=* astate = write_inserted_into path location elem args astate in
         let=* astate =
           make_iterator ~has_token:false path location event this ret_iter elem astate
         in
         set_size_positive path location event this astate
     | None ->
+        let=* astate, elem = fresh_element path location this astate in
+        let=* astate = write_inserted_into path location elem args astate in
         let=* astate =
           PulseOperations.havoc_deref_field path location this Collection.size_field
             (Hist.single_event event) astate
