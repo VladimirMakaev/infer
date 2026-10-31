@@ -64,6 +64,7 @@ type std_container =
 
 type std_container_function =
   | Clear
+  | Destructor
   | Emplace
   | EmplaceBack
   | EmplaceFront

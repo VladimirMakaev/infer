@@ -506,6 +506,27 @@ let deque_insertion deque_f ~ret ~desc this args : model_no_non_disj =
   astate
 
 
+(** A node-based container owns its elements, so destroying it invalidates them. Without this a
+    value tied to an element stays reachable for ever, and a local container holding the only owner
+    of an allocation no longer looks like a leak. [std::vector] has had this since its [~vector]
+    model; this brings the node-based containers to the same footing. *)
+let destructor this container ~desc : model_no_non_disj =
+ fun {path; location} astate ->
+  let cause = Invalidation.StdContainer (container, Destructor) in
+  let<+> astate, array = Collection.eval path NoAccess location this astate in
+  let addresses =
+    AbductiveDomain.reachable_addresses_from
+      ~edge_filter:(function Access.FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
+      (Seq.return (fst array))
+      astate `Post
+  in
+  ignore desc ;
+  AbstractValue.Set.fold
+    (fun addr astate ->
+      PulseOperations.invalidate path UntraceableAccess location cause (addr, snd array) astate )
+    addresses astate
+
+
 (** insertions into a node-based container invalidate nothing; one that returns an iterator inserts
     an element, or finds an equal one *)
 let node_insertion ~desc this args : model_no_non_disj =
@@ -1164,10 +1185,15 @@ let matchers : matcher list =
     ; -"std" &:: "deque" &:: "emplace" $ capt_arg_payload
       $++$--> deque_insertion Emplace ~ret:`Iterator ~desc:(deque_desc "emplace") ]
   in
+  let destructor_matchers =
+    List.map containers ~f:(fun (container, _) ->
+        -"std" &:: container &:: "~" ^ container <>$ capt_arg_payload
+        $--> fun this -> on_container (destructor this) )
+  in
   ordered_map_matchers
   @ iterator_matchers ~in_detail:false
   @ iterator_matchers ~in_detail:true @ comparison_matchers @ container_matchers @ lookup_matchers
-  @ front_back_matchers @ map_matchers @ deque_matchers @ adapter_matchers
+  @ front_back_matchers @ map_matchers @ deque_matchers @ adapter_matchers @ destructor_matchers
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
   |> List.cons (-"std" &::+ is_container &::+ is_container <>$ capt_arg $--> default_constructor)
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)

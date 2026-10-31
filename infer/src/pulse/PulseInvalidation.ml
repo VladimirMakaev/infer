@@ -129,6 +129,7 @@ type std_container =
 
 type std_container_function =
   | Clear
+  | Destructor
   | Emplace
   | EmplaceBack
   | EmplaceFront
@@ -164,6 +165,8 @@ let pp_std_container f = function
 let pp_std_container_function f = function
   | Clear ->
       F.fprintf f "clear"
+  | Destructor ->
+      F.fprintf f "~"
   | Emplace ->
       F.fprintf f "emplace"
   | EmplaceBack ->
@@ -425,6 +428,9 @@ let describe f cause =
       F.fprintf f "was potentially invalidated by `%a`" pp_std_string_function std_string_f
   | CppMap (map_t, map_f) ->
       F.fprintf f "was potentially invalidated by `%a::%a`" pp_map_type map_t pp_map_function map_f
+  | StdContainer (container, Destructor) ->
+      F.fprintf f "was invalidated when the `%a` holding it was destroyed" pp_std_container
+        container
   | StdContainer (container, container_f) ->
       F.fprintf f "was invalidated by `%a::%a`" pp_std_container container pp_std_container_function
         container_f
