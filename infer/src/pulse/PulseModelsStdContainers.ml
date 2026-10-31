@@ -1119,6 +1119,15 @@ let matchers : matcher list =
     $--> fun this iter -> on_container (model this iter)
   in
   let is_node_based : Invalidation.std_container -> bool = function Deque -> false | _ -> true in
+  (* the element of these is the value itself, so a one-argument [emplace] is an [insert]; the
+     associative containers build a pair instead, and a multi-argument [emplace] builds the element
+     from all of them, so neither is matched below *)
+  let is_set_like : Invalidation.std_container -> bool = function
+    | Multiset | Set | UnorderedMultiset | UnorderedSet ->
+        true
+    | Deque | List | Map | Multimap | UnorderedMap | UnorderedMultimap ->
+        false
+  in
   let container_matchers =
     [ returns_iterator "begin" begin_or_find
     ; returns_iterator "cbegin" begin_or_find
@@ -1131,6 +1140,14 @@ let matchers : matcher list =
     ; ( container_method ~f:is_node_based "insert"
       $ capt_arg_payload
       $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+    ; ( container_method ~f:is_set_like "emplace"
+      $ capt_arg_payload $+ capt_arg $+ capt_arg
+      $--> fun this value ret ->
+      on_container (fun _ ~desc -> node_insertion ~desc this [value; ret]) )
+    ; ( container_method ~f:is_set_like "emplace_hint"
+      $ capt_arg_payload $+ capt_arg $+ capt_arg $+ capt_arg
+      $--> fun this hint value ret ->
+      on_container (fun _ ~desc -> node_insertion ~desc this [hint; value; ret]) )
     ; (container_method "clear" <>$ capt_arg_payload $--> fun this -> on_container (clear this))
     ; ( container_method "empty" <>$ capt_arg_payload
       $--> fun this -> on_container (fun _ ~desc -> Collection.empty ~desc this) )
