@@ -159,8 +159,7 @@ let is_cpp_copy_assignment method_decl =
    else: copying the object representation is left to code generation by way of the "trivial" flag,
    so no assignment appears in the AST. Translating that body yields a procedure that is *defined*
    and yet writes nothing, which is worse than leaving it untranslated, as the caller then keeps
-   whatever the destination held before the assignment. The same assignment written in C has no
-   operator and is translated as one whole-object store, which is correct. *)
+   whatever the destination held before the assignment. *)
 let is_cpp_implicit_union_assignment method_decl =
   let open Clang_ast_t in
   match method_decl with
