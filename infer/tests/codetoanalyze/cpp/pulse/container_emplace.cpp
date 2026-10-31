@@ -6,6 +6,7 @@
  */
 
 #include <cstdlib>
+#include <map>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -27,6 +28,30 @@ void unordered_emplace_ok(std::unordered_set<Box*>& s) {
   s.emplace((Box*)malloc(16));
 }
 
+// The map-like family builds the entry in place rather than taking a pair, so
+// each of these has to be recognised too.
+#if __cplusplus >= 201703L
+void map_try_emplace_ok(std::map<int, Box*>& m) {
+  m.try_emplace(1, (Box*)malloc(16));
+}
+
+void map_insert_or_assign_ok(std::map<int, Box*>& m) {
+  m.insert_or_assign(1, (Box*)malloc(16));
+}
+
+void local_map_try_emplace_bad() {
+  std::map<int, Box*> m;
+  m.try_emplace(1, (Box*)malloc(16));
+}
+
+void local_map_insert_or_assign_bad() {
+  std::map<int, Box*> m;
+  m.insert_or_assign(1, (Box*)malloc(16));
+}
+#endif // __cplusplus >= 201703L
+
+void map_emplace_ok(std::map<int, Box*>& m) { m.emplace(1, (Box*)malloc(16)); }
+
 // TRUE POSITIVES: the container is local, so what it owns dies with it.
 void local_emplace_bad() {
   std::set<Box*> s;
@@ -36,6 +61,11 @@ void local_emplace_bad() {
 void local_unordered_emplace_bad() {
   std::unordered_set<Box*> s;
   s.emplace((Box*)malloc(16));
+}
+
+void local_map_emplace_bad() {
+  std::map<int, Box*> m;
+  m.emplace(1, (Box*)malloc(16));
 }
 
 // The size is tracked, so the container is no longer empty after an emplace.
