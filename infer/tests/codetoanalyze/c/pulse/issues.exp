@@ -692,6 +692,7 @@ codetoanalyze/c/pulse/uninit_storage.c, uninit_c_array_bad, 0, PULSE_UNINITIALIZ
 codetoanalyze/c/pulse/uninit_storage.c, uninit_c_partial_bad, 0, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [variable `values` declared here,read to uninitialized value occurs here]
 codetoanalyze/c/pulse/uninit_storage.c, uninit_c_nonzero_first_bad, 0, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [variable `values` declared here,read to uninitialized value occurs here]
 codetoanalyze/c/pulse/uninit_storage.c, uninit_c_wrapper_bad, 1, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [struct field address `member.second` created,read to uninitialized value occurs here]
+codetoanalyze/c/pulse/union_copy.c, union_assigned_then_unchecked_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/unsigned_values.c, signed_int_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/unsigned_values.c, signed_int_ptr_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
 codetoanalyze/c/pulse/unsigned_values.c, signed_field_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

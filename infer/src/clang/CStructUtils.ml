@@ -34,7 +34,7 @@ let max_scalar_copies = 16
 let rec count_scalar_copies tenv (typ : Typ.t) =
   let saturate n = Int.min n (max_scalar_copies + 1) in
   match (typ.desc, unrolled_array_length typ) with
-  | Tstruct ((CStruct _ | CppClass _) as struct_name), _ -> (
+  | Tstruct ((CStruct _ | CUnion _ | CppClass _) as struct_name), _ -> (
     match Tenv.lookup tenv struct_name with
     | Some {Struct.fields} ->
         List.fold fields ~init:0 ~f:(fun n (field : Struct.field) ->
@@ -88,7 +88,7 @@ let rec copy tenv ~unroll loc e1 e2 (typ : Typ.t) rev_acc =
     Sil.Store {e1; typ; e2= Exp.Var id; loc} :: Sil.Load {id; e= e2; typ; loc} :: rev_acc
   in
   match (typ.desc, unrolled_array_length typ) with
-  | Tstruct ((CStruct _ | CppClass _) as struct_name), _ ->
+  | Tstruct ((CStruct _ | CUnion _ | CppClass _) as struct_name), _ ->
       copy_fields tenv ~unroll loc e1 e2 typ struct_name rev_acc
   | Tarray {elt}, Some length when unroll ->
       (* copying an array as a whole does not copy its elements, which are separate from it, but

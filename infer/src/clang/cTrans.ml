@@ -1233,7 +1233,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       CType_decl.qual_type_to_sil_type context.CContext.tenv expr_info.Clang_ast_t.ei_qual_type
     in
     match (stmt_list, res_typ.desc, binary_operator_info.Clang_ast_t.boi_kind) with
-    | [s1; `ImplicitCastExpr (_, [s2], _, _, _)], Tstruct (CStruct _ as struct_name), `Assign ->
+    | ( [s1; `ImplicitCastExpr (_, [s2], _, _, _)]
+      , Tstruct ((CStruct _ | CUnion _) as struct_name)
+      , `Assign ) ->
         let res_trans_e1, res_trans_e2 =
           (instruction trans_state' s1, instruction trans_state' s2)
         in
