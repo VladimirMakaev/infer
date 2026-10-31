@@ -565,7 +565,7 @@ module Name = struct
         false
 
 
-  let is_union = function CUnion _ -> true | _ -> false
+  let is_union = function CUnion _ -> true | CppClass {is_union} -> is_union | _ -> false
 
   let is_objc_protocol name = match name with ObjcProtocol _ -> true | _ -> false
 
