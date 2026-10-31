@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -39,10 +40,7 @@ void swapped_out_ok() {
   global_sink.swap(s);
 }
 
-// KNOWN LIMITATION: returning the container by value is still reported. std::vector
-// does not have this problem, so it is a remaining gap in node-container parity, not
-// something this change introduced -- it was reported before the change too.
-std::set<Box*> FP_returned_ok() {
+std::set<Box*> returned_ok() {
   std::set<Box*> s;
   s.insert((Box*)malloc(16));
   return s;
@@ -81,9 +79,28 @@ void local_member_set_bad() {
   o.s.insert((Box*)malloc(16));
 }
 
-// KNOWN LIMITATION: a map's element is a pair, not a scalar, so the inserted value
-// is not tied and this is still reported. Recorded rather than hidden.
-void FP_map_insert_ok(std::map<int, Box*>& m) {
+// An entry of a map-like container is a pair, and either half of it can be the
+// owner; container_owning_key.cpp covers the key side.
+void map_insert_ok(std::map<int, Box*>& m) { m.insert({1, (Box*)malloc(16)}); }
+
+void unordered_map_insert_ok(std::unordered_map<int, Box*>& m) {
+  m.insert({1, (Box*)malloc(16)});
+}
+
+void multimap_insert_ok(std::multimap<int, Box*>& m) {
+  m.insert({1, (Box*)malloc(16)});
+}
+
+void unordered_multimap_insert_ok(std::unordered_multimap<int, Box*>& m) {
+  m.insert({1, (Box*)malloc(16)});
+}
+
+void map_index_ok(std::map<int, Box*>& m) { m[1] = (Box*)malloc(16); }
+
+// TRUE POSITIVE: tying the mapped value to the container does not save it when
+// the container itself is local.
+void local_map_insert_bad() {
+  std::map<int, Box*> m;
   m.insert({1, (Box*)malloc(16)});
 }
 
