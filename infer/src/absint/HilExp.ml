@@ -585,10 +585,18 @@ and eval_boolean_exp var = function
 let rec ignore_cast e = match e with Cast (_, e) -> ignore_cast e | _ -> e
 
 let access_expr_of_exp ~include_array_indexes ~f_resolve_id exp typ =
+  (* an address that is not reached through any variable, as in [*0xdeadbeef = 0] used for
+     debugging or a memory-mapped register at an absolute address: give it a base of its own,
+     named after the address, so that two accesses to the same address are related to each other
+     and accesses to different ones are not *)
+  let absolute_address_base name =
+    let dummy_base_var = Var.of_id (Ident.create_normal (Ident.string_to_name name) 0) in
+    Some (AccessExpression.base (dummy_base_var, StdTyp.void_star))
+  in
   match ignore_cast (of_sil ~include_array_indexes ~f_resolve_id ~add_deref:true exp typ) with
   | AccessExpression access_expr ->
       Some access_expr
-  | BinaryOperator (_, exp0, exp1) -> (
+  | BinaryOperator (_, exp0, exp1) as binop_exp -> (
     (* pointer arithmetic. somewhere in one of the expressions, there should be at least
        one pointer type represented as an access path. just use that access path and forget
        about the arithmetic. if you need to model this more precisely, you should be using
@@ -597,13 +605,17 @@ let access_expr_of_exp ~include_array_indexes ~f_resolve_id exp typ =
     | ap :: _ ->
         Some ap
     | [] -> (
-      match get_access_exprs exp1 with ap :: _ -> Some ap | [] -> None ) )
+      match get_access_exprs exp1 with
+      | ap :: _ ->
+          Some ap
+      | [] ->
+          (* Neither side holds an access path, so the address is reached through no variable at
+             all. Firmware writing a register at [BASE + OFFSET] is the motivating case, but this
+             covers every such shape: the address of a function plus an offset, a string literal,
+             [null] plus an offset, arithmetic over [sizeof]. Each gets a base of its own rather
+             than no access expression, which the caller treats as a fatal error. *)
+          absolute_address_base (F.asprintf "%a" pp binop_exp) ) )
   | Constant (Const.Cint i) ->
-      (* this can happen in intentionally crashing code like *0xdeadbeef = 0 used for
-         debugging. doesn't really matter what we do here, so just create a dummy var *)
-      let dummy_base_var =
-        Var.of_id (Ident.create_normal (Ident.string_to_name (IntLit.to_string i)) 0)
-      in
-      Some (AccessExpression.base (dummy_base_var, StdTyp.void_star))
+      absolute_address_base (IntLit.to_string i)
   | _ ->
       None
