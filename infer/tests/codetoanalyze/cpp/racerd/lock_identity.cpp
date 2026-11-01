@@ -114,5 +114,11 @@ class DifferentRequirements {
   int FN_read_different_requirement_bad() IDENTITY_REQUIRES(second_) {
     return value_;
   }
+  // The same FN through a release: entry capabilities are counted, not
+  // identified.
+  int FN_read_different_release_bad()
+      __attribute__((release_capability(second_))) {
+    return value_;
+  }
 };
 } // namespace lock_identity
