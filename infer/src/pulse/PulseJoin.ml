@@ -223,6 +223,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | JavaResourceReleased
   (* could move these two to the "keep if one sided" case if this creates too many FPs *)
   | ReturnedFromUnknown _
+  | OwnershipTransferred _
   | UnknownEffect _
   (* could be more forgiving about one-sided [StaticType] too *)
   | StaticType _
@@ -396,7 +397,7 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       Some (TaintSanitized sanitizers)
   | Uninitialized t1, Uninitialized t2 ->
       if Attribute.UninitializedTyp.equal t1 t2 then Some attr1 else None
-  | UnknownEffect _, UnknownEffect _ ->
+  | OwnershipTransferred _, OwnershipTransferred _ | UnknownEffect _, UnknownEffect _ ->
       (* arbitrary, doesn't matter much which side *) Some attr1
   | UnreachableAt loc1, UnreachableAt loc2 ->
       let loc = if Location.compare loc1 loc2 > 0 then loc1 else loc2 in

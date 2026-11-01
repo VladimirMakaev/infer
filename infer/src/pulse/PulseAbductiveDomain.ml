@@ -2501,6 +2501,23 @@ let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) hist x astate =
   {astate with post= PostDomain.update ~attrs ~heap astate.post}
 
 
+(** An unknown callee that receives the ownership of what [x] reaches releases this procedure from
+    the obligation to free it, and nothing more: the values stay as they were and no write is
+    recorded. The dual of [apply_unknown_effect], which also havocs. *)
+let transfer_ownership x astate =
+  let x = CanonValue.canon' astate x in
+  let post = (astate.post :> BaseDomain.t) in
+  let attrs =
+    GraphVisit.fold_from_addresses (Seq.return x) astate `Post ~init:post.attrs
+      ~already_visited:CanonValue.Set.empty
+      ~f:(fun attrs addr _edges ->
+        Continue (BaseAddressAttributes.remove_allocation_attr addr attrs) )
+      ~finish:Fn.id
+    |> snd
+  in
+  {astate with post= PostDomain.update ~attrs astate.post}
+
+
 let overwrite_contents ?(havoc_filter = fun _ -> true) hist x astate =
   let rec visit ((visited, old_values, astate) as acc) addr =
     if CanonValue.Set.mem addr visited then acc
