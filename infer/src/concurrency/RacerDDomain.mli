@@ -113,6 +113,11 @@ module AccessSnapshot : sig
   (** the access as seen when the procedure it was recorded in starts with the given number of locks
       held *)
 
+  val is_conditionally_owned_excluding : receiver_index:int option -> t -> bool
+  (** the access is owned if the caller's actuals for the given formals are owned, and the receiver
+      is not one of them: whether it races is then a property of the call site, resolved when a
+      caller is analysed *)
+
   val is_unprotected : t -> bool
   (** return true if not protected by lock, thread, or ownership *)
 end
