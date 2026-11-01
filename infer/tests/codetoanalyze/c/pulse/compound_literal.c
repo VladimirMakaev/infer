@@ -27,3 +27,12 @@ int detect_zero_ok() {
     *p = 42;
   }
 }
+
+// in C a compound literal is an lvalue with automatic storage, so its address
+// escaping is a real one
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-stack-address"
+int* return_address_of_compound_literal_bad() { return &(int){1}; }
+#pragma clang diagnostic pop
+
+int value_of_compound_literal_ok() { return (int){1} << 0; }
