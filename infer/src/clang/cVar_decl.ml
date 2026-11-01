@@ -61,7 +61,8 @@ let mk_sil_global_var tenv {CFrontend_config.source_file} ?(mk_name = fun _ x ->
   in
   Pvar.mk_global ~is_constexpr ~is_ice ~is_pod
     ~is_static_local:var_decl_info.Clang_ast_t.vdi_is_static_local ~is_static_global
-    ~is_constant_array ~is_const ~is_volatile ~is_weak ?translation_unit ~template_args
+    ~is_constant_array ~is_const ~is_volatile ~is_weak
+    ~is_thread_local:var_decl_info.Clang_ast_t.vdi_is_thread_local ?translation_unit ~template_args
     (mk_name name_string simple_name)
 
 

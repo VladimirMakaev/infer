@@ -58,18 +58,24 @@ let pp_exp fmt exp =
       L.die InternalError "Swift not supported"
 
 
-let rec should_keep_exp formals (exp : AccessExpression.t) =
+(* [through_deref] is whether the expression reaches its base through a dereference, which
+   decides whether a thread-local base shields the access: each thread has its own copy of the
+   variable itself, but what a thread-local POINTER points at is ordinary shared memory. *)
+let rec should_keep_exp ?(through_deref = false) formals (exp : AccessExpression.t) =
   match exp with
   | FieldOffset (prefix, fld) ->
       (not (String.is_substring ~substring:"$SwitchMap" (Fieldname.get_field_name fld)))
-      && should_keep_exp formals prefix
-  | ArrayOffset (prefix, _, _) | AddressOf prefix | Dereference prefix ->
-      should_keep_exp formals prefix
+      && should_keep_exp ~through_deref formals prefix
+  | ArrayOffset (prefix, _, _) | AddressOf prefix ->
+      should_keep_exp ~through_deref formals prefix
+  | Dereference prefix ->
+      should_keep_exp ~through_deref:true formals prefix
   | Base (LogicalVar _, _) ->
       false
   | Base (((ProgramVar pvar as var), _) as base) ->
       Var.appears_in_source_code var
       && (not (Pvar.is_static_local pvar))
+      && ((not (Pvar.is_thread_local pvar)) || through_deref)
       && (Pvar.is_global pvar || FormalMap.is_formal base formals)
 
 
