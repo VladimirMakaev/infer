@@ -82,11 +82,21 @@ let mk_temp_sil_var_for_qual_type context ~name ~clang_pointer qual_type =
       pvar_typ
 
 
-let mk_local_var_mangled_with_line decl_info name_string procname =
+(* the declaration line is what tells two same-named locals apart, so two of them declared on one
+   line -- sibling scopes, or a scope nested in another -- became a single variable. The column
+   separates them. *)
+let mk_local_var_mangled_with_location decl_info name_string procname =
   let start_location = fst decl_info.Clang_ast_t.di_source_range in
-  let line_opt = start_location.Clang_ast_t.sl_line in
-  let line_str = match line_opt with Some line -> string_of_int line | None -> "" in
-  let mangled = Utils.string_crc_hex32 line_str in
+  let position_str =
+    match (start_location.Clang_ast_t.sl_line, start_location.Clang_ast_t.sl_column) with
+    | None, _ ->
+        ""
+    | Some line, None ->
+        string_of_int line
+    | Some line, Some column ->
+        Printf.sprintf "%d:%d" line column
+  in
+  let mangled = Utils.string_crc_hex32 position_str in
   let mangled_name = Mangled.mangled name_string mangled in
   Pvar.mk mangled_name procname
 
@@ -119,7 +129,7 @@ let mk_sil_var ~is_decomposition context named_decl_info decl_info_qual_type_opt
           mk_sil_global_var tenv trans_unit_ctx ?mk_name decl_info named_decl_info var_decl_info
             template_args_opt qt
         else if not should_be_mangled then Pvar.mk simple_name procname
-        else mk_local_var_mangled_with_line decl_info name_string procname
+        else mk_local_var_mangled_with_location decl_info name_string procname
   | None ->
       let name_string =
         CAst_utils.get_qualified_name named_decl_info |> QualifiedCppName.to_qual_string
@@ -137,7 +147,7 @@ let sil_var_of_decl context var_decl procname =
       let name_string =
         CAst_utils.get_qualified_name name_info |> QualifiedCppName.to_qual_string
       in
-      mk_local_var_mangled_with_line decl_info name_string procname
+      mk_local_var_mangled_with_location decl_info name_string procname
   | _ ->
       let should_be_mangled =
         match var_decl with
