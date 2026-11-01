@@ -65,6 +65,7 @@ let default_var_decl_info =
   ; vdi_is_static= false
   ; vdi_is_static_local= false
   ; vdi_is_static_data_member= false
+  ; vdi_is_thread_local= false
   ; vdi_is_constexpr= false
   ; vdi_is_init_ice= false
   ; vdi_init_expr= None
