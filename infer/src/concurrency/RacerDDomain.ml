@@ -387,6 +387,20 @@ module AccessSnapshot = struct
     else None
 
 
+  (** the access is owned exactly when the caller's actuals for the given formals are owned, so
+      whether it races is a property of the call site and not of this procedure: it is resolved when
+      a caller is analysed. [except] is the receiver's index where there is one — an access
+      conditioned on the receiver is the ordinary "field of a shared object" case that RacerD exists
+      to report, and must not be deferred. *)
+  let is_conditionally_owned_excluding ~receiver_index {elem= {ownership_precondition}} =
+    match (ownership_precondition : OwnershipAbstractValue.t) with
+    | OwnedIf set ->
+        (not (IInt.Set.is_empty set))
+        && Option.exists receiver_index ~f:(fun i -> not (IInt.Set.mem i set))
+    | Unowned ->
+        false
+
+
   let make_if_not_owned formals access lock thread ownership_precondition loc =
     let lock = LockDomain.for_access lock in
     make {access; lock; thread; ownership_precondition} loc |> filter formals
