@@ -3183,10 +3183,14 @@ and racerd_ignore_procedures =
     ~in_help:InferCommand.[(Analyze, manual_racerd)]
     ~meta:"regex"
     "Regex of procedures that RacerD should treat as having no effect: a call to one contributes \
-     no accesses and no locking to its caller. A procedure is ignored when the regex matches the \
-     start of its qualified name (e.g. $(i,ns::Class::method)) or of its unique identifier. Use it \
-     for handlers that are called from everywhere and whose accesses do not race with the callers, \
-     such as an assertion handler."
+     no accesses and no locking to its caller. Use it for handlers that are called from everywhere \
+     and whose accesses do not race with the callers, such as an assertion handler. DO NOT name a \
+     procedure that acquires or releases a lock: dropping its locking makes accesses that only it \
+     protected look unsynchronised, which ADDS reports in its callers. A procedure is ignored when \
+     the regex matches the START of its qualified name (e.g. $(i,ns::Class::method)) or of its \
+     unique identifier, so a bare $(i,method) does not match a procedure in a namespace, and \
+     $(i,handleAssert) also ignores $(i,handleAssertion); to match a name exactly, end the regex \
+     with a dollar sign."
 
 
 and reactive =
