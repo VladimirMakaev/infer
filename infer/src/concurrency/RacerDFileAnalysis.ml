@@ -554,25 +554,41 @@ let report_unsafe_access_java_csharp accesses acc
 
 
 (** main reporting hook for C langs *)
-let report_unsafe_access_objc_cpp accesses acc ({snapshot} as reported_access) =
+let report_unsafe_access_objc_cpp accesses acc ({snapshot; procname} as reported_access) =
   let open RacerDDomain in
-  match snapshot.elem.access with
-  | InterfaceCall _ | Write _ | ContainerWrite _ ->
-      (* Do not report unprotected writes for ObjC_Cpp *)
-      acc
-  | (Read _ | ContainerRead _) when AccessSnapshot.is_unprotected snapshot ->
-      (* unprotected read. for c++ filter out unprotected writes *)
-      let is_conflict {snapshot} =
-        AccessSnapshot.is_write snapshot && not (AccessSnapshot.is_unprotected snapshot)
-      in
-      List.find ~f:is_conflict accesses
-      |> Option.value_map ~default:acc ~f:(fun conflict ->
-          let make_description = make_read_write_race_description ~read_is_sync:false conflict in
-          let report_kind = ReadWriteRace conflict.snapshot in
-          report_thread_safety_violation ~acc ~make_description ~report_kind reported_access )
-  | Read _ | ContainerRead _ ->
-      (* Do not report protected reads for ObjC_Cpp *)
-      acc
+  let receiver_index =
+    (* the clang frontend names a C++ instance method's receiver [this] and passes it first *)
+    Attributes.load procname
+    |> Option.bind ~f:(fun {ProcAttributes.formals} -> List.hd formals)
+    |> Option.bind ~f:(fun (name, _, _) ->
+        if String.equal (Mangled.to_string name) "this" then Some 0 else None )
+  in
+  if AccessSnapshot.is_conditionally_owned_excluding ~receiver_index snapshot then
+    (* the access is to a formal the caller owns unless it shares it: in C++ this covers both a
+       by-value class parameter, which the frontend passes by reference so it is indistinguishable
+       here from a real reference, and a genuine out-parameter. Either way the callee holds the
+       only handle unless some caller passes a shared object, and that caller is where the
+       precondition is resolved and the race reported. Accusing the callee reports every such
+       method whether or not anything is shared. *)
+    acc
+  else
+    match snapshot.elem.access with
+    | InterfaceCall _ | Write _ | ContainerWrite _ ->
+        (* Do not report unprotected writes for ObjC_Cpp *)
+        acc
+    | (Read _ | ContainerRead _) when AccessSnapshot.is_unprotected snapshot ->
+        (* unprotected read. for c++ filter out unprotected writes *)
+        let is_conflict {snapshot} =
+          AccessSnapshot.is_write snapshot && not (AccessSnapshot.is_unprotected snapshot)
+        in
+        List.find ~f:is_conflict accesses
+        |> Option.value_map ~default:acc ~f:(fun conflict ->
+            let make_description = make_read_write_race_description ~read_is_sync:false conflict in
+            let report_kind = ReadWriteRace conflict.snapshot in
+            report_thread_safety_violation ~acc ~make_description ~report_kind reported_access )
+    | Read _ | ContainerRead _ ->
+        (* Do not report protected reads for ObjC_Cpp *)
+        acc
 
 
 (** report hook dispatching to language specific functions *)

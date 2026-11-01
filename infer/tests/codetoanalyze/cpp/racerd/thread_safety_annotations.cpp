@@ -331,11 +331,11 @@ struct Edit {
 };
 
 // the caller owns the edit, and the protocol (not modelled) allows one caller
-// at a time; also reported when the method takes mu_ itself instead of
-// requiring it
+// at a time. Whether the edit is shared is a property of the call site, so the
+// access is conditionally owned and deferred to a caller that shares one.
 class Versions {
  public:
-  void FP_log_and_apply_ok(Edit* edit) REQUIRES(mu_) {
+  void log_and_apply_ok(Edit* edit) REQUIRES(mu_) {
     edit->set_seq(last_seq_);
     mu_.unlock();
     int record = edit->encode();
