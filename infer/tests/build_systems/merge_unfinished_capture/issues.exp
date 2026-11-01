@@ -1,0 +1,1 @@
+build_systems/merge_unfinished_capture/good.cpp, call_into_the_unfinished_capture_bad, 5, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

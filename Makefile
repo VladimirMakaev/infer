@@ -36,6 +36,7 @@ BUILD_SYSTEMS_TESTS += \
   infer-debug \
   j1 \
   liveness_messages \
+  merge_unfinished_capture \
   missing_deps \
   pass_on_suppression \
   procs_to_analyze \

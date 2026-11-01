@@ -139,14 +139,38 @@ module Implementation : DBWriterS.S = struct
               FROM attached.source_files
             |}
     in
+    (* A capture whose process died partway can hold procedures while never having recorded the
+       file they belong to. Taking its procedures would give the analysis one whose type
+       environment it cannot find, which is fatal and costs every other file in the merge its
+       results, so leave such a capture out and say so. *)
+    let records_no_source_file ~db_file =
+      let db = Database.get_database CaptureDatabase in
+      let count table =
+        let log = Printf.sprintf "counting %s of database '%s'" table db_file in
+        let stmt = Sqlite3.prepare db (Printf.sprintf "SELECT count(*) FROM attached.%s" table) in
+        match SqliteUtils.result_single_column_option db ~log stmt with
+        | Some (Sqlite3.Data.INT n) ->
+            Int64.to_int_exn n
+        | _ ->
+            0
+      in
+      Int.equal (count "source_files") 0 && count "procedures" > 0
+    in
     let merge_db infer_out_src =
       let db_file = ResultsDirEntryName.get_path ~results_dir:infer_out_src CaptureDB in
       if not (ISys.file_exists db_file) then
         L.die InternalError "Tried to merge in DB at %s but path does not exist.@\n" db_file ;
       let main_db = Database.get_database CaptureDatabase in
       SqliteUtils.with_attached_db main_db ~db_file ~db_name:"attached" ~f:(fun () ->
-          merge_procedures_table ~db:CaptureDatabase ~to_db:"memdb" ~db_file ;
-          merge_source_files_table ~db_file )
+          if records_no_source_file ~db_file then
+            L.user_error
+              "The capture in %s holds procedures but records no source file, so its capture did \
+               not finish; leaving it out of the merge. The files it should have covered have no \
+               results.@\n"
+              infer_out_src
+          else (
+            merge_procedures_table ~db:CaptureDatabase ~to_db:"memdb" ~db_file ;
+            merge_source_files_table ~db_file ) )
     in
     let copy_to_main db =
       SqliteUtils.exec db ~log:"Copying procedures into main db"
