@@ -1296,6 +1296,10 @@ let matchers : matcher list =
       ; ( container_method ~f:is_map_like "insert_or_assign"
         $ capt_arg_payload
         $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
+        (* the hint is an iterator, so it contributes no owner of its own *)
+      ; ( container_method ~f:is_map_like "emplace_hint"
+        $ capt_arg_payload
+        $++$--> fun this args -> on_container (fun _ ~desc -> node_insertion ~desc this args) )
       ; ( container_method ~f:is_set_like "emplace"
         $ capt_arg_payload $+ capt_arg $+ capt_arg
         $--> fun this value ret ->
