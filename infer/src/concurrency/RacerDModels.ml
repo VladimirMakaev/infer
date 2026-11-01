@@ -679,13 +679,23 @@ let is_initializer tenv proc_name =
        tenv proc_name
 
 
+(* [release_capability(mu)] says the capability is held on entry and given up by the time the
+   method returns, so like [requires_capability(mu)] it is a precondition that [mu] is held, which
+   is how clang's own thread safety analysis reads it. The release itself is a call-site effect and
+   is modelled separately. *)
 let num_required_capabilities proc_name =
   if Procname.is_clang proc_name then
     Attributes.load proc_name
-    |> Option.bind ~f:(fun {ProcAttributes.ret_annots} ->
-        List.find ret_annots ~f:(fun {Annot.class_name} ->
-            String.equal class_name Annotations.requires_capability ) )
-    |> Option.value_map ~default:0 ~f:(fun {Annot.parameters} -> List.length parameters)
+    |> Option.value_map ~default:0 ~f:(fun {ProcAttributes.ret_annots} ->
+        List.sum
+          (module Int)
+          ret_annots
+          ~f:(fun {Annot.class_name; parameters} ->
+            if
+              String.equal class_name Annotations.requires_capability
+              || String.equal class_name Annotations.release_capability
+            then List.length parameters
+            else 0 ) )
   else 0
 
 
