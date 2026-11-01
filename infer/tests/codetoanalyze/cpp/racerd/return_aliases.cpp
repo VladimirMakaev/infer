@@ -381,9 +381,8 @@ class ThreadLocalAccessor {
     thread_state()->x = v;
   }
 
-  // each thread has its own [thread_state_], but thread-local variables are
-  // treated as globals
-  int FP_thread_local_accessor_ok() { return thread_state()->x; }
+  // each thread has its own [thread_state_]
+  int thread_local_accessor_ok() { return thread_state()->x; }
 
  private:
   std::mutex mu_;

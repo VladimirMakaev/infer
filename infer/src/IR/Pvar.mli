@@ -68,6 +68,10 @@ val is_volatile : t -> bool
 val is_weak : t -> bool
 (** Check if the pvar is declared weak, so that its definition may be replaced at link time *)
 
+val is_thread_local : t -> bool
+(** Check if the pvar is thread-local, so that each thread has its own copy and accesses to it
+    cannot race *)
+
 val is_local : t -> bool
 (** Check if the pvar is a (non-static) local var *)
 
@@ -123,6 +127,7 @@ val mk_global :
   -> ?is_const:bool
   -> ?is_volatile:bool
   -> ?is_weak:bool
+  -> ?is_thread_local:bool
   -> ?translation_unit:SourceFile.t
   -> ?template_args:Typ.template_spec_info
   -> Mangled.t
