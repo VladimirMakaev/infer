@@ -3178,6 +3178,17 @@ and racerd_ignore_classes =
     "Any method in a class specified here will be ignored by RacerD."
 
 
+and racerd_ignore_procedures =
+  CLOpt.mk_string_opt ~long:"racerd-ignore-procedures"
+    ~in_help:InferCommand.[(Analyze, manual_racerd)]
+    ~meta:"regex"
+    "Regex of procedures that RacerD should treat as having no effect: a call to one contributes \
+     no accesses and no locking to its caller. A procedure is ignored when the regex matches the \
+     start of its qualified name (e.g. $(i,ns::Class::method)) or of its unique identifier. Use it \
+     for handlers that are called from everywhere and whose accesses do not race with the callers, \
+     such as an assertion handler."
+
+
 and reactive =
   CLOpt.mk_bool ~long:"reactive" ~short:'r'
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -5059,6 +5070,8 @@ and racerd_always_report_java = !racerd_always_report_java
 and racerd_guardedby = !racerd_guardedby
 
 and racerd_ignore_classes = RevList.to_list !racerd_ignore_classes |> IString.Set.of_list
+
+and racerd_ignore_procedures = Option.map ~f:regexp !racerd_ignore_procedures
 
 and reactive_mode = !reactive
 
