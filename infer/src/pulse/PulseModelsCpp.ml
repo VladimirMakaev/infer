@@ -3732,6 +3732,66 @@ module AbortIfFieldEquals = struct
             proc $ any_arg $+ any_arg $+ any_arg $+ capt $+...$--> model )
 end
 
+module ReturnConstant = struct
+  (** A reporter that is declared in a header and defined in a library the analysis does not see
+      returns a fresh value, so a guard written as [if (CHECK(c))], which expands to
+      [c ? true : report(...)], cannot be proved to hold and the code it guards is analysed with [c]
+      false. Where the reporter's contract is to return a constant, [value] says so. *)
+  type entry = {procedure: string list; value: int}
+
+  let entry_of_json (json : Yojson.Safe.t) =
+    let error () =
+      L.die UserError
+        "--pulse-model-return-constant: expected objects with a non-empty string field \
+         \"procedure\" and an integer field \"value\", got %s"
+        (Yojson.Safe.to_string json)
+    in
+    match json with
+    | `Assoc fields -> (
+        let procedure =
+          match List.Assoc.find fields ~equal:String.equal "procedure" with
+          | Some (`String s) when not (String.is_empty s) ->
+              AbortIfFieldEquals.split_qualified s
+          | _ ->
+              error ()
+        in
+        match List.Assoc.find fields ~equal:String.equal "value" with
+        | Some (`Int value) when not (List.is_empty procedure) ->
+            {procedure; value}
+        | _ ->
+            error () )
+    | _ ->
+        error ()
+
+
+  let entries () =
+    match Config.pulse_model_return_constant with
+    | `Null ->
+        []
+    | `List entries ->
+        List.map entries ~f:entry_of_json
+    | json ->
+        entry_of_json json |> List.return
+
+
+  let matchers =
+    let open ProcnameDispatcher.Call in
+    List.filter_map (entries ()) ~f:(fun {procedure; value} ->
+        match procedure with
+        | [] ->
+            (* [entry_of_json] rejects empty names *)
+            None
+        | first :: rest ->
+            let desc =
+              Printf.sprintf "%s(), modelled as returning %d due to configuration option"
+                (String.concat ~sep:"::" procedure)
+                value
+            in
+            Some
+              ( List.fold rest ~f:( &:: ) ~init:(-first)
+              &--> lift_model (Basic.return_int ~desc (Int64.of_int value)) ) )
+end
+
 let abort_matchers : matcher list =
   get_cpp_matchers ~model:(fun _ -> Basic.early_exit) Config.pulse_model_abort
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
@@ -4132,6 +4192,7 @@ let simple_matchers =
         Str.string_match r s 0 )
   in
   map_matchers @ thrift_matchers @ condition_variable_matchers @ AbortIfFieldEquals.matchers
+  @ ReturnConstant.matchers
   @ [ -"android" &:: "base" &:: "LogMessage" &:: "LogMessage" $ any_arg $+ any_arg $+ any_arg
       $+ capt_arg_payload $+...$--> log_message_fatal
     ; +BuiltinDecl.(match_builtin __builtin_add_overflow)
