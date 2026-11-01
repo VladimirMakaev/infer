@@ -80,6 +80,11 @@ let placement_new =
     match List.filter actuals ~f:(fun {FuncArg.typ} -> Typ.is_pointer_to_void typ) with
     | [{FuncArg.arg_payload= address, hist}] ->
         let astate = PulseOperations.write_id ret_id (address, Hist.add_event event hist) astate in
+        (* [new (p) T] reuses the storage at [p]: a new object's lifetime begins there, so a
+           destructor that ended the PREVIOUS object's lifetime no longer invalidates it. Without
+           this the new object's own constructor reads as a use-after-delete -- the
+           destroy-then-reconstruct idiom (unifex manual_lifetime, union active-member switches). *)
+        let astate = Basic.begin_cpp_lifetime_in_storage address astate in
         (* Under a null check, an unknown storage is assumed not to be null, or the initialization
            would be skipped. Without one, constraining a storage parameter would make callers that
            pass null infeasible instead of reporting the dereference in the constructor. *)
