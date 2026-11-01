@@ -191,17 +191,7 @@ let storage_field = Fieldname.make PulseOperations.pulse_model_type "__infer_opt
 
 let storage_access = Access.FieldAccess storage_field
 
-let renew_storage address astate =
-  let addresses =
-    AbductiveDomain.reachable_addresses_from
-      ~edge_filter:(function FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
-      (Seq.return (fst address))
-      astate `Post
-  in
-  AbstractValue.Set.fold
-    (fun address astate -> AddressAttributes.begin_cpp_lifetime address astate)
-    addresses astate
-
+let renew_storage address astate = Basic.begin_cpp_lifetime_in_storage (fst address) astate
 
 let lifetime_supported typ =
   match typ.Typ.desc with Tstruct _ -> std_tag "unique_ptr" typ | _ -> true
