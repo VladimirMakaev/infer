@@ -617,3 +617,23 @@ void read_in_callee_after_unknown_call_then_assign_bad() {
   x = t;
   int* p = x.get();
 }
+
+// Two locals of the same name declared on one line, in sibling scopes. They are
+// different variables, and the second one is never initialised.
+void uninit_same_line_same_name_bad() {
+  { int x = dummy_func(0); dummy_func(x); } { int x; dummy_func(x); }
+}
+
+// The same shape with the declarations on separate lines, which always worked.
+void uninit_diff_line_same_name_bad() {
+  { int y = dummy_func(0); dummy_func(y); }
+  {
+    int y;
+    dummy_func(y);
+  }
+}
+
+// Both initialised: nothing to report on either.
+void uninit_same_line_same_name_ok() {
+  { int z = dummy_func(0); dummy_func(z); } { int z = dummy_func(0); dummy_func(z); }
+}
