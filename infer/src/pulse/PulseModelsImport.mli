@@ -155,6 +155,8 @@ module Basic : sig
 
   val free_or_delete : [< `Delete | `Free] -> Invalidation.t -> ValueOrigin.t FuncArg.t -> model
 
+  val begin_cpp_lifetime_in_storage : AbstractValue.t -> AbductiveDomain.t -> AbductiveDomain.t
+
   val alloc_not_null :
        ?desc:string
     -> Attribute.allocator

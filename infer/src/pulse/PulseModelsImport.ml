@@ -342,6 +342,35 @@ module Basic = struct
         (astate |> ok_continue, non_disj)
 
 
+  (** A new object's lifetime begins in the storage at [address], so that storage is REUSED: any
+      [CppDelete] recorded for the object that occupied it before is stale, and must not make the
+      new object's own initialisation read as a use-after-delete.
+
+      Reached along field and array edges only, NEVER through a [Dereference]: what the OLD object
+      pointed AT is not part of this storage and stays invalid, which is what keeps this from
+      becoming a blanket un-invalidation. This is the rule [PulseModelsOptional.renew_storage] has
+      already been applying to [std::optional]; placement new is the general case of it. *)
+  let begin_cpp_lifetime_in_storage address astate =
+    let seeds =
+      (* [address] may be a pointer TO the storage, as it is for [new (p) T]; then the object whose
+         sub-objects were invalidated is one dereference away. Seed both, and take no further
+         [Dereference] below. *)
+      match Memory.find_edge_opt address Dereference astate with
+      | Some (contents, _) ->
+          Seq.cons address (Seq.return contents)
+      | None ->
+          Seq.return address
+    in
+    let storage =
+      AbductiveDomain.reachable_addresses_from
+        ~edge_filter:(function FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
+        seeds astate `Post
+    in
+    AbstractValue.Set.fold
+      (fun address astate -> AddressAttributes.begin_cpp_lifetime address astate)
+      storage astate
+
+
   let free_or_delete operation invalidation
       ({FuncArg.arg_payload= deleted_access_path} as deleted_arg) : model =
    fun ({path; location} as model_data) astate non_disj ->
