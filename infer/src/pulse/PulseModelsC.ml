@@ -611,6 +611,72 @@ include struct
 
   let close fd : model = start_model @@ fun () -> close_fd fd
 
+  (* Which descriptor a [folly::File] took over, remembered on the [File] itself so that
+     [release()] can hand back the same one. A model-only field: folly's [fd_] is written by the
+     out-of-line constructor, which Pulse never sees, so it says nothing about what this [File]
+     holds. Its presence is also the record that this [File] took a descriptor at all, which is
+     what keeps [release()] quiet on a [File] that owns nothing. *)
+  let folly_file_owned_fd =
+    Fieldname.make PulseOperations.pulse_model_type "__infer_model_folly_file_owned_fd"
+
+
+  (* [folly::File(fd, ownsFd)] takes ownership of [fd] when [ownsFd] and closes it in its
+     destructor, so the caller stops owning it. The constructor is declared out of line, so
+     without this the descriptor looks leaked at every early return. Forget the ownership rather
+     than release it: the descriptor stays open and usable for as long as the [File] lives, and
+     the code that prompted this reads it with [fstat] right after constructing one. The transfer
+     needs a value the formula pins to a non-zero constant, which the literal [true], a [const
+     bool] and [1] all are: [ownsFd] defaults to false, and when its value is not known there is
+     nothing to decide on, so the descriptor keeps belonging to the caller and a missing close is
+     still reported. *)
+  let folly_file_from_fd this fd owns_fd : model =
+    start_model
+    @@ fun () ->
+    let* owns = as_constant_int (to_aval owns_fd) in
+    match owns with
+    | Some owns when owns <> 0 ->
+        let fd = to_aval fd in
+        remove_allocation_attr_transitively [fd]
+        @@> write_field ~ref:(to_aval this) folly_file_owned_fd fd
+    | _ ->
+        ret ()
+
+
+  (* [folly::File::release()] returns the descriptor and leaves the [File] holding [-1], so the
+     destructor closes nothing and the caller owns it again. It is declared out of line like the
+     constructor, so nothing gave back the obligation the constructor forgot and a descriptor
+     dropped after [release()] went unreported. Give it back to the very value the constructor
+     took it from, not to a fresh one, so that closing either the returned descriptor or the
+     variable the [File] was built from counts. Leaving [-1] behind matters as much as handing
+     the descriptor over: it is what folly does, it stops a second [release()] handing out the
+     same descriptor again, and while the [File] still pointed at the descriptor it was
+     reachable from a live object and so could not be seen to leak at all. A [File] this model
+     did not see take a descriptor has no such field, and then there is nothing to give back and
+     nothing is claimed: one reached through a reference, one built in another procedure and one
+     moved from all keep their leak unreported, the last because the move constructor does not
+     carry the field over. The obligation also goes back without knowing whether something not
+     modelled here has already discharged it, so [f.close(); f.release();] and a result passed to
+     an opaque callee are reported, as they are without this model. *)
+  let folly_file_release this : model =
+    start_model
+    @@ fun () ->
+    let this = to_aval this in
+    let* owned = is_known_field this folly_file_owned_fd in
+    if not owned then ret ()
+    else
+      let* fd = load_access ~deref:false this (FieldAccess folly_file_owned_fd) in
+      let* held = as_constant_int fd in
+      match held with
+      | Some -1 ->
+          assign_ret @= int (-1)
+      | _ ->
+          let* allocator = file_descriptor_allocator in
+          let* minus_one = int (-1) in
+          allocation allocator fd
+          @@> write_field ~ref:this folly_file_owned_fd minus_one
+          @@> assign_ret fd
+
+
   let unknown_syscall args : model_no_non_disj =
    fun {path; callee_procname; analysis_data= {tenv}; location; ret} astate ->
     let actuals =
@@ -1416,6 +1482,9 @@ let matchers : matcher list =
   ; -"fgetpos" <>$ capt_arg_payload $+ capt_arg $--> fgetpos
   ; -"fgets" <>$ capt_arg_payload $+ any_arg $+ capt_arg_payload $--> fgets
   ; -"fileno" <>$ capt_arg_payload $--> compose1 valid_arg (ignore_arg non_det_ret)
+  ; -"folly" &:: "File" &:: "File" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+    $--> folly_file_from_fd
+  ; -"folly" &:: "File" &:: "release" <>$ capt_arg_payload $--> folly_file_release
   ; -"fopen" <>$ capt_arg_payload $+ capt_arg_payload $--> fopen
   ; -"fprintf" <>$ capt_arg_payload $+ capt_arg_payload $+++$--> fprintf
   ; -"fputc" <>$ capt_arg_payload $+ capt_arg_payload $--> putc
