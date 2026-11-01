@@ -2532,23 +2532,33 @@ module Vector = struct
       astate
 
 
-  let push_back_cpp vector (value : _ FuncArg.t) ~vector_f ~desc : model =
+  (* Build the new element by running its real C++ constructor on a fresh cell and hanging that
+     cell off the array, instead of storing an argument as if it were already the element.
+     [read_pushed_value] ties an argument to the new element only when both are scalars -- its own
+     comment says "Elements of class type would need their constructor" -- so without this a class
+     element is never constructed and whatever the argument owns acquires no owner at all. That is
+     why [emplace_back] into a [vector<unique_ptr<T>>] used to report the new'd object leaked.
+     [args] are the constructor's arguments: one for [push_back], however many for [emplace_back]
+     (none is a default construction). *)
+  let construct_element_in_place vector (args : _ FuncArg.t list) ~vector_f ~desc ~ret ~fallback :
+      model =
    fun ({path; location; callee_procname; analysis_data= {tenv}} as model_data) astate non_disj ->
-    let fallback = lift_model (push_back_common ~value vector ~vector_f:(Some vector_f) ~desc) in
     match element_type callee_procname with
     | Some ({desc= Tstruct class_name} as typ)
       when (not (Tenv.is_trivially_copyable tenv typ))
            && has_destructor_effects tenv class_name
            && has_pointer_members tenv class_name ->
         let pointer_typ = Typ.mk (Tptr (typ, Pk_pointer)) in
-        let source_typ =
+        (* the callee's own formals give the declared parameter types; fall back to the actuals'
+           types when they do not line up *)
+        let source_typs =
           match IRAttributes.load_formal_types callee_procname with
-          | [_; typ] ->
-              typ
+          | _this :: formals when Int.equal (List.length formals) (List.length args) ->
+              formals
           | _ ->
-              value.FuncArg.typ
+              List.map args ~f:(fun (arg : _ FuncArg.t) -> arg.FuncArg.typ)
         in
-        let actuals = [pointer_typ; source_typ] in
+        let actuals = pointer_typ :: source_typs in
         let constructor =
           List.find_map Typ.overloading_resolution ~f:(fun compare ->
               List.find (Tenv.find_cpp_constructor tenv class_name) ~f:(fun proc ->
@@ -2562,13 +2572,62 @@ module Vector = struct
           let ( let<**> ) x f = bind_sat_result non_disj x f in
           let<**> astate, dst = Basic.alloc_value_address typ ~desc model_data astate in
           let fake_exp = Exp.Var (Ident.create_fresh Ident.kprimed) in
-          let args =
-            [ {FuncArg.arg_payload= ValueOrigin.unknown dst; typ= pointer_typ; exp= fake_exp}
-            ; FuncArg.map_payload ~f:ValueOrigin.unknown {value with typ= source_typ} ]
-          in
           let constructor = Option.value_exn constructor in
+          (* An actual the constructor takes BY VALUE has to be read out first. emplace_back's
+             own formals are forwarding references, and overloading_resolution deliberately
+             matches them against a by-value constructor parameter, so handing the reference
+             straight on would store the address of the caller's local in the element -- and
+             returning that field then looks like returning the address of a stack variable. *)
+          let ctor_formals =
+            match IRAttributes.load_formal_types constructor with _this :: fs -> fs | [] -> []
+          in
+          let is_reference (t : Typ.t) =
+            match t.desc with
+            | Tptr (_, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+                true
+            | _ ->
+                false
+          in
+          let<**> astate, typed_rev =
+            match
+              List.fold2 args ctor_formals
+                ~init:(Sat (Ok (astate, [])))
+                ~f:(fun acc (arg : _ FuncArg.t) formal ->
+                  let** astate, acc_args = acc in
+                  Sat
+                    (let* astate, payload, typ =
+                       match arg.FuncArg.typ.Typ.desc with
+                       | Tptr (pointee, (Pk_lvalue_reference | Pk_rvalue_reference))
+                         when not (is_reference formal) ->
+                           let+ astate, v =
+                             PulseOperations.eval_access path Read location arg.FuncArg.arg_payload
+                               Dereference astate
+                           in
+                           (astate, v, pointee)
+                       | _ ->
+                           Ok (astate, arg.FuncArg.arg_payload, formal)
+                     in
+                     Ok
+                       ( astate
+                       , { FuncArg.arg_payload= ValueOrigin.unknown payload
+                         ; typ
+                         ; exp= arg.FuncArg.exp }
+                         :: acc_args ) ) )
+            with
+            | Ok res ->
+                res
+            | Unequal_lengths ->
+                Sat
+                  (Ok
+                     ( astate
+                     , List.rev (List.map args ~f:(FuncArg.map_payload ~f:ValueOrigin.unknown)) ) )
+          in
+          let ctor_args =
+            {FuncArg.arg_payload= ValueOrigin.unknown dst; typ= pointer_typ; exp= fake_exp}
+            :: List.rev typed_rev
+          in
           model_data.dispatch_call_eval_args model_data.analysis_data path model_data.ret
-            (Const (Cfun constructor)) args location CallFlags.default astate non_disj
+            (Const (Cfun constructor)) ctor_args location CallFlags.default astate non_disj
             (Some constructor)
           |> continue_with (fun astate non_disj ->
               let ( let<**> ) x f = bind_sat_result non_disj x f in
@@ -2577,7 +2636,7 @@ module Vector = struct
                 GenericArrayBackedCollection.increase_size path location vector ~desc astate
               in
               let<*> astate =
-                reallocate_unless_reserved path location vector (Some vector_f) ~desc astate
+                reallocate_unless_reserved path location vector vector_f ~desc astate
               in
               let<**> astate, last = last_index path location vector astate in
               let<*> astate, array =
@@ -2586,15 +2645,57 @@ module Vector = struct
               let astate =
                 Memory.add_edge path array (ArrayAccess (StdTyp.void, last)) dst location astate
               in
-              ( Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) vector astate)
+              let ret_value =
+                match ret with
+                | `Vector ->
+                    vector
+                | `Element ->
+                    (* since C++17 the new element is returned by reference *)
+                    (fst dst, Hist.add_call path location desc (snd dst))
+              in
+              ( Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) ret_value astate)
               , non_disj ) )
     | _ ->
         fallback model_data astate non_disj
 
 
+  let push_back_cpp vector (value : _ FuncArg.t) ~vector_f ~desc : model =
+    let fallback = lift_model (push_back_common ~value vector ~vector_f:(Some vector_f) ~desc) in
+    construct_element_in_place vector [value] ~vector_f:(Some vector_f) ~desc ~ret:`Vector ~fallback
+
+
   let push_back vector ~desc = push_back_common vector ~vector_f:None ~desc
 
-  let emplace_back vector args ~desc : model_no_non_disj =
+  (* When the element could not be constructed -- its constructor is not captured, which is the
+     case for [std::unique_ptr], whose pointer-constructor libc++ never exposes to the frontend --
+     the model must not go on to claim that the arguments were dropped. With no model at all Pulse
+     reports nothing here, because an unknown callee may take ownership of a pointer handed to it;
+     a model that summarises the call and silently forgets a pointer argument is strictly LESS
+     sound than having none, and that is what reported the new'd object leaked. Keep such an
+     argument reachable from the vector, which is the criterion the leak check actually uses --
+     the same reasoning [tie_inserted_value] records for the insertions. Only a reference to a
+     pointer is tied: those are the arguments that can carry ownership. *)
+  let tie_unconstructed_args path location vector (args : _ FuncArg.t list) astate =
+    List.fold args ~init:(Sat (Ok astate)) ~f:(fun acc (arg : _ FuncArg.t) ->
+        let** astate = acc in
+        match arg.FuncArg.typ.Typ.desc with
+        | Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))
+          when Typ.is_pointer value_typ ->
+            Sat
+              (let* astate, v =
+                 PulseOperations.eval_access path Read location arg.FuncArg.arg_payload Dereference
+                   astate
+               in
+               let* astate, elem =
+                 GenericArrayBackedCollection.element path location vector
+                   (AbstractValue.mk_fresh ()) astate
+               in
+               PulseOperations.write_deref path location ~ref:elem ~obj:v astate )
+        | _ ->
+            Sat (Ok astate) )
+
+
+  let emplace_back_no_ctor vector args ~desc : model_no_non_disj =
    fun {path; location; callee_procname; ret= ret_id, _} astate ->
     let<*> astate, pushed =
       match args with
@@ -2608,12 +2709,24 @@ module Vector = struct
       reallocate_unless_reserved path location vector (Some EmplaceBack) ~desc astate
     in
     let<**> astate = write_last_element path location vector pushed astate in
+    (* [pushed] is [None] exactly when nothing above tied anything, which for a class element is
+       always *)
+    let<**> astate =
+      if Option.is_none pushed then tie_unconstructed_args path location vector args astate
+      else Sat (Ok astate)
+    in
     (* since C++17 the new element is returned by reference *)
     let<**> astate, last = last_index path location vector astate in
     let<+> astate, (elem, _) =
       GenericArrayBackedCollection.element path location vector last astate
     in
     PulseOperations.write_id ret_id (elem, Hist.single_call path location desc) astate
+
+
+  let emplace_back vector args ~desc : model =
+    let fallback = lift_model (emplace_back_no_ctor vector args ~desc) in
+    construct_element_in_place vector args ~vector_f:(Some EmplaceBack) ~desc ~ret:`Element
+      ~fallback
 
 
   let resize vector (requested : _ FuncArg.t) : model_no_non_disj =
@@ -4181,7 +4294,6 @@ let simple_matchers =
       |> with_non_disj
     ; -"std" &:: "vector" &:: "emplace_back" $ capt_arg_payload
       $++$--> Vector.emplace_back ~desc:"std::vector::emplace_back()"
-      |> with_non_disj
     ; (* the returned iterator is passed as the last argument *)
       -"std" &:: "vector" &:: "erase" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
       $--> Vector.erase ~range:false |> with_non_disj
