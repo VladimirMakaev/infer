@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -52,6 +53,28 @@ void local_map_insert_or_assign_bad() {
 
 void map_emplace_ok(std::map<int, Box*>& m) { m.emplace(1, (Box*)malloc(16)); }
 
+// `emplace_hint` takes the hint first and the entry after it; the hint is an
+// iterator and owns nothing. Either half of the entry can be the owner.
+void map_emplace_hint_ok(std::map<int, Box*>& m) {
+  m.emplace_hint(m.begin(), 1, (Box*)malloc(16));
+}
+
+void map_emplace_hint_key_ok(std::map<Box*, int>& m) {
+  m.emplace_hint(m.begin(), (Box*)malloc(16), 1);
+}
+
+void map_emplace_hint_both_ok(std::map<Box*, Box*>& m) {
+  m.emplace_hint(m.begin(), (Box*)malloc(16), (Box*)malloc(16));
+}
+
+void unordered_map_emplace_hint_ok(std::unordered_map<int, Box*>& m) {
+  m.emplace_hint(m.begin(), 1, (Box*)malloc(16));
+}
+
+void multimap_emplace_hint_ok(std::multimap<int, Box*>& m) {
+  m.emplace_hint(m.begin(), 1, (Box*)malloc(16));
+}
+
 // TRUE POSITIVES: the container is local, so what it owns dies with it.
 void local_emplace_bad() {
   std::set<Box*> s;
@@ -66,6 +89,26 @@ void local_unordered_emplace_bad() {
 void local_map_emplace_bad() {
   std::map<int, Box*> m;
   m.emplace(1, (Box*)malloc(16));
+}
+
+void local_map_emplace_hint_bad() {
+  std::map<int, Box*> m;
+  m.emplace_hint(m.begin(), 1, (Box*)malloc(16));
+}
+
+void local_map_emplace_hint_key_bad() {
+  std::map<Box*, int> m;
+  m.emplace_hint(m.begin(), (Box*)malloc(16), 1);
+}
+
+void local_map_emplace_hint_both_bad() {
+  std::map<Box*, Box*> m;
+  m.emplace_hint(m.begin(), (Box*)malloc(16), (Box*)malloc(16));
+}
+
+void local_multimap_emplace_hint_bad() {
+  std::multimap<int, Box*> m;
+  m.emplace_hint(m.begin(), 1, (Box*)malloc(16));
 }
 
 // The size is tracked, so the container is no longer empty after an emplace.
