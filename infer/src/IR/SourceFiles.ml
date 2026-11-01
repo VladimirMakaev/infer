@@ -92,7 +92,6 @@ let add ?textual source_file cfg tenv integer_type_widths =
             if (Procdesc.get_attributes new_pdesc).changed then
               DBWriter.delete_attributes ~proc_uid:(Procname.to_unique_id pname) ) ) ;
   let tenv = Tenv.normalize tenv in
-  Cfg.store source_file cfg ;
   (* None of these three columns can be left out of the row, so when one does not fit the file is
      recorded with that column emptied rather than not recorded at all: a file Infer knows about
      and has partial data for is worth more than a file it has never heard of. *)
@@ -128,7 +127,13 @@ let add ?textual source_file cfg tenv integer_type_widths =
       | Some s ->
           Sqlite3.Data.TEXT s
       | None ->
-          Sqlite3.Data.NULL )
+          Sqlite3.Data.NULL ) ;
+  (* The procedures go in only once the file they belong to is recorded. Each of them is
+     attributed to this file, so storing them first leaves every one of them without a type
+     environment if the capture of a large file dies in between, and the analysis of a procedure
+     whose file it cannot find is a fatal error that costs the whole run its results. This order
+     instead leaves a file some of whose procedures have no body, which is not an error. *)
+  Cfg.store source_file cfg
 
 
 (** Retrieve the textual SIL stored for [source_file], if any. Returns [None] when the file was
