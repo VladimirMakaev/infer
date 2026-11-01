@@ -890,9 +890,9 @@ struct PtrWrapper {
   PtrWrapper(int* q) : p(q) {}
 };
 
-// the element is constructed by the constructor of its class, which is not
-// called
-void FP_emplace_back_new_ptr_into_object_ok(std::vector<PtrWrapper>& vec) {
+// the element is constructed by the constructor of its class, which
+// emplace_back now dispatches
+void emplace_back_new_ptr_into_object_ok(std::vector<PtrWrapper>& vec) {
   int* p = new int(0);
   vec.emplace_back(p);
 }
