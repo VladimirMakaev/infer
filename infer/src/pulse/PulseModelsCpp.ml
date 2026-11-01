@@ -1644,6 +1644,18 @@ module Vector = struct
         lift_model (destroy_storage vector) model_data astate non_disj )
 
 
+  (* A position into a vector is an integer, and the position [end()] stands for is tied to the
+     positions of the elements by the arithmetic a loop does on them: after
+     [for (auto &x : v) {}] over one element the state holds [end = begin + 1]. That position is
+     kept in the vector, so leaving it alone across a reallocation makes the equation relate the
+     positions of the NEW buffer to the positions of the old one, and the first element of the
+     new buffer comes out equal to the first element of the old one, which the reallocation has
+     just invalidated. The positions belong to the buffer, so [end()] is refreshed with it. *)
+  let havoc_past_the_end path location vector trace astate =
+    PulseOperations.havoc_deref_field path location vector GenericArrayBackedCollection.last_field
+      trace astate
+
+
   let reallocate_internal_array path trace vector (vector_f : Invalidation.std_vector_function)
       location astate =
     let* astate, array_address =
@@ -1675,6 +1687,7 @@ module Vector = struct
           GenericArrayBackedCollection.access
     >>= PulseOperations.havoc_deref_field path location vector GenericArrayBackedCollection.field
           trace
+    >>= havoc_past_the_end path location vector trace
 
 
   let shallow_copy_init_list path location this init_list ~desc astate =
