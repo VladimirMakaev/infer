@@ -5325,7 +5325,36 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
              ~clang_pointer:stmt_info.Clang_ast_t.si_pointer )
     in
     let trans_state' = {trans_state with var_exp_typ} in
-    instruction trans_state' stmt
+    let res_trans = instruction trans_state' stmt in
+    (* A literal that is a prvalue is a value, and in C++ it always is: [&(int){1}] is C only,
+       where the literal is an lvalue and a use as a value carries its own [LValueToRValue] cast.
+       Without this the parent of [(int){1} << 0], or of the vector literal an SSE intrinsic
+       returns, gets the address of the temporary holding it. *)
+    let is_prvalue =
+      match expr_info.Clang_ast_t.ei_value_kind with `RValue -> true | `LValue | `XValue -> false
+    in
+    let holds_by_value (typ : Typ.t) =
+      match typ.desc with
+      | Tint _ | Tfloat _ | Tptr _ ->
+          true
+      | Tvoid ->
+          (* vector types have no SIL type of their own; their elements are written like an
+             array's and their value is read back the same way *)
+          CType.is_vector_type expr_info.Clang_ast_t.ei_qual_type
+      | _ ->
+          false
+    in
+    match res_trans.return with
+    | return_exp, return_typ when is_prvalue && holds_by_value return_typ ->
+        let sil_loc =
+          CLocation.location_of_stmt_info trans_state.context.translation_unit_context.source_file
+            stmt_info
+        in
+        let deref_instr, deref_exp = dereference_var_sil (return_exp, return_typ) sil_loc in
+        let control = {res_trans.control with instrs= res_trans.control.instrs @ [deref_instr]} in
+        {res_trans with control; return= (deref_exp, return_typ)}
+    | _ ->
+        res_trans
 
 
   and cxxDynamicCastExpr_trans trans_state stmt_info stmts cast_qual_type =
