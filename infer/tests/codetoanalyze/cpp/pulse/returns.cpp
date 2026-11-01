@@ -118,6 +118,32 @@ S* return_static_local_inner_scope_ok(bool b) {
 
 int* return_formal_pointer_ok(int* formal) { return formal; }
 
+enum class Lane : unsigned { kZero = 0, kOne = 1 };
+
+unsigned return_shifted_braced_scalar_ok(bool b) {
+  const Lane lane = b ? Lane::kZero : Lane::kOne;
+  return unsigned{1} << static_cast<unsigned>(lane);
+}
+
+int read_shifted_braced_scalar_ok() {
+  int* p = nullptr;
+  if ((unsigned{1} << unsigned{0}) != 1) {
+    // unreachable: a braced one shifted by a braced zero is one
+    return *p;
+  }
+  return 0;
+}
+
+using IntPtr = int*;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-stack-address"
+int* return_braced_address_of_local_bad() {
+  int x = 3;
+  return IntPtr{&x};
+}
+#pragma clang diagnostic pop
+
 // this *could* be ok depending on what the caller does
 int* return_deleted_ok() {
   int* x = new int;
