@@ -7,6 +7,10 @@
       "struct": "conditional_abort::LogStream", "field": "level", "value": 1 },
     { "procedure": "conditional_abort_arg::LogMessage::LogMessage", "arg": 1, "value": 3 }
   ],
+  "pulse-model-return-constant": [
+    { "procedure": "soft_verify::reportAndReturnFalse", "value": 0 },
+    { "procedure": "soft_verify::Reporter::report", "value": 0 }
+  ],
   "pulse-model-cheap-copy-type":  "my_proj::CheapToCopy",
   "pulse-model-returns-copy-pattern": "ns::creates_copy",
   "pulse-model-return-nonnull": "Handle::get",
