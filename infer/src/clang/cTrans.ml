@@ -99,10 +99,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     else f trans_state e
 
 
-  let exec_with_node_creation node_name ~f trans_state stmt =
-    let res_trans = f trans_state stmt in
+  (** give the instructions left pending by [res_trans] a node of their own *)
+  let node_creation_to_parent node_name trans_state stmt_info res_trans =
     if not (List.is_empty res_trans.control.instrs) then
-      let stmt_info, _ = Clang_ast_proj.get_stmt_tuple stmt in
       let stmt_info' = {stmt_info with Clang_ast_t.si_pointer= CAst_utils.get_fresh_pointer ()} in
       let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info' in
       let sil_loc =
@@ -111,6 +110,12 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       in
       PriorityNode.compute_result_to_parent trans_state_pri sil_loc node_name stmt_info' res_trans
     else res_trans
+
+
+  let exec_with_node_creation node_name ~f trans_state stmt =
+    let res_trans = f trans_state stmt in
+    let stmt_info, _ = Clang_ast_proj.get_stmt_tuple stmt in
+    node_creation_to_parent node_name trans_state stmt_info res_trans
 
 
   (* This is the standard way of dealing with self:Class or a call [a class]. We translate it as
@@ -5885,12 +5890,75 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       {result with control= {result.control with cxx_temporary_markers_set= []}}
 
 
+  (** Initialise the object the ramp function of a coroutine returns, in the slot the caller reads
+      it from. This is the assignment half of [returnStmt_trans]: it must not jump to the exit node
+      because the body of the coroutine still has to run. *)
+  and coroutineReturnObject_trans trans_state stmt_info return_value =
+    let context = trans_state.context in
+    let procdesc = context.CContext.procdesc in
+    let sil_loc =
+      CLocation.location_of_stmt_info context.CContext.translation_unit_context.source_file
+        stmt_info
+    in
+    let trans_state_pri = PriorityNode.try_claim_priority_node trans_state stmt_info in
+    let ret_exp, ret_typ, var_control =
+      match context.CContext.return_param_typ with
+      | Some ret_param_typ ->
+          let pvar =
+            Pvar.mk
+              (Mangled.from_string CFrontend_config.return_param)
+              (Procdesc.get_proc_name procdesc)
+          in
+          let id = Ident.create_fresh Ident.knormal in
+          let instr = Sil.Load {id; e= Exp.Lvar pvar; typ= ret_param_typ; loc= sil_loc} in
+          let ret_typ = match ret_param_typ.desc with Typ.Tptr (t, _) -> t | _ -> assert false in
+          (Exp.Var id, ret_typ, Some {empty_control with instrs= [instr]})
+      | None ->
+          (Exp.Lvar (Procdesc.get_ret_var procdesc), Procdesc.get_ret_type procdesc, None)
+    in
+    let res_trans_value =
+      instruction
+        {trans_state_pri with succ_nodes= []; var_exp_typ= Some (ret_exp, ret_typ)}
+        return_value
+    in
+    let store_control =
+      (* [get_return_object()] usually writes its result through [ret_exp] itself *)
+      if List.exists res_trans_value.control.initd_exps ~f:(Exp.equal ret_exp) then empty_control
+      else
+        let sil_expr, _ = res_trans_value.return in
+        { empty_control with
+          instrs= [Sil.Store {e1= ret_exp; typ= ret_typ; e2= sil_expr; loc= sil_loc}] }
+    in
+    let var_control =
+      Option.map var_control ~f:(fun control ->
+          (* force node creation so that the load lands before the value is computed *)
+          let trans_state = PriorityNode.force_claim_priority_node trans_state_pri stmt_info in
+          PriorityNode.compute_control_to_parent trans_state sil_loc ReturnStmt stmt_info control )
+    in
+    PriorityNode.compute_controls_to_parent trans_state_pri sil_loc ReturnStmt stmt_info
+      (Option.to_list var_control @ [res_trans_value.control; store_control])
+    |> mk_trans_result res_trans_value.return
+
+
   and coroutineBodyStmt_trans trans_state stmt_info body_ptr promise_ptr return_value =
     let source_range = stmt_info.Clang_ast_t.si_source_range in
     let body = CAst_utils.get_stmt_exn body_ptr source_range in
     let promise = CAst_utils.get_stmt_exn promise_ptr source_range in
-    exec_with_node_creation Procdesc.Node.DefineBody trans_state ~f:instruction
-      (`CompoundStmt (stmt_info, [promise; body; `ReturnStmt (stmt_info, [return_value])]))
+    (* C++ creates the return object before the body runs and hands it to the
+       caller when the coroutine first suspends or completes. Translating it as a return statement
+       placed after the body left it unreachable as soon as the body ended in [co_return], so the
+       caller never received it and everything the promise owned looked unreachable. *)
+    let coroutine_ramp trans_state =
+      let control, returns =
+        exec_trans_instrs trans_state
+          [ get_clang_stmt_trans Procdesc.Node.CompoundStmt promise
+          ; (fun trans_state -> coroutineReturnObject_trans trans_state stmt_info return_value)
+          ; get_clang_stmt_trans Procdesc.Node.CompoundStmt body ]
+      in
+      mk_trans_result (last_or_mk_fresh_void_exp_typ returns) control
+    in
+    coroutine_ramp trans_state
+    |> node_creation_to_parent Procdesc.Node.DefineBody trans_state stmt_info
 
 
   and coreturnStmt_trans trans_state stmt_info operand_opt promise_call_opt =
@@ -5927,7 +5995,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           (call_function_with_args Procdesc.Node.ReturnStmt BuiltinDecl.__builtin_cxx_co_return
              trans_state stmt_info StdTyp.void args ) )
       ~mk_second:(fun trans_state stmt_info ->
-        returnStmt_trans trans_state stmt_info [`ReturnStmt (stmt_info, [])] )
+        (* a plain [return;]: the object the caller gets was already stored in the return slot
+           before the body ran, so returning a value here would overwrite it with a fresh one *)
+        returnStmt_trans trans_state stmt_info [] )
       ~mk_return:(fun ~fst ~snd:_ -> fst.return)
 
 
