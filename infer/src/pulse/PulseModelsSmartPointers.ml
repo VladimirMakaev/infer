@@ -1125,6 +1125,26 @@ module WeakPtr = struct
       ~alive:(share_ownership path location ~result:this ~desc)
 end
 
+module EnableSharedFromThis = struct
+  (* [shared_from_this()] returns a [shared_ptr] that owns the object, and since C++17 throws
+     [std::bad_weak_ptr] rather than returning an empty one when no [shared_ptr] owns it. A path
+     that returns therefore has an owner already, so the count is above one: giving the result a
+     count of one instead would make destroying it free an object its other owners still hold. *)
+  let shared_from_this this result ~desc : model_no_non_disj =
+   fun {path; location} astate ->
+    let<**> astate = PulseArithmetic.prune_positive (fst this) astate in
+    let<*> astate, _ = write_value path location result ~value:this ~desc astate in
+    let control =
+      (AbstractValue.mk_fresh (), Hist.add_call path location desc ValueHistory.epoch)
+    in
+    let<**> astate = PulseArithmetic.and_positive (fst control) astate in
+    let count = (AbstractValue.mk_fresh (), Hist.add_call path location desc ValueHistory.epoch) in
+    let<*> astate = PulseOperations.write_deref path location ~ref:control ~obj:count astate in
+    let<**> astate = PulseArithmetic.prune_gt_one (fst count) astate in
+    let<+> astate, _ = SharedPtr.write_count path location result ~value:control ~desc astate in
+    astate
+end
+
 module UniquePtr = struct
   (** what the deleter of a [unique_ptr] does with a non-null pointer *)
   type deleter_kind =
@@ -1625,6 +1645,11 @@ let matchers : matcher list =
     |> with_non_disj
   ; -"std" &:: "reinterpret_pointer_cast" $ capt_arg_payload $+ capt_arg
     $--> SharedPtr.pointer_cast ~desc:"std::static_pointer_cast"
+    |> with_non_disj
+  ; -"std" &:: "enable_shared_from_this" &:: "shared_from_this" $ capt_arg_payload
+    $+ capt_arg_payload
+    $--> EnableSharedFromThis.shared_from_this
+           ~desc:"std::enable_shared_from_this::shared_from_this()"
     |> with_non_disj ]
   @
   (* matchers for weak_ptr and for its libstdc++ base class *)

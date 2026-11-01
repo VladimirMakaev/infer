@@ -429,3 +429,24 @@ int value_then_get_pointer_ok() {
   int x = foo.value();
   return x + *foo.get_pointer();
 }
+
+struct Owned : std::enable_shared_from_this<Owned> {
+  int x = 0;
+};
+
+// empty exactly when the pointer is null, as a null-check helper is
+folly::Optional<std::shared_ptr<Owned>> nullcheck(std::shared_ptr<Owned> p) {
+  if (p == nullptr) {
+    return folly::none;
+  }
+  return folly::Optional<std::shared_ptr<Owned>>(p);
+}
+
+int shared_from_this_nullcheck_ok(Owned* owned) {
+  return nullcheck(owned->shared_from_this()).value()->x;
+}
+
+int nullcheck_null_bad() {
+  std::shared_ptr<Owned> empty;
+  return nullcheck(empty).value()->x;
+}
