@@ -144,6 +144,29 @@ int* return_braced_address_of_local_bad() {
 }
 #pragma clang diagnostic pop
 
+typedef float float4 __attribute__((ext_vector_type(4)));
+
+// a compound literal is a prvalue in C++, so its value is what the parent gets
+int return_shifted_compound_literal_ok() { return (int){1} << 0; }
+
+long double return_added_compound_literal_ok() {
+  return (long double){1.0L} + 0.0L;
+}
+
+// the shape an SSE set intrinsic expands to
+float4 return_vector_compound_literal_ok(float w) {
+  return __extension__(float4){w, 0.0f, 0.0f, 0.0f};
+}
+
+int read_shifted_compound_literal_ok() {
+  int* p = nullptr;
+  if (((int){1} << 0) != 1) {
+    // unreachable: a compound literal of one shifted by nothing is one
+    return *p;
+  }
+  return 0;
+}
+
 // this *could* be ok depending on what the caller does
 int* return_deleted_ok() {
   int* x = new int;
