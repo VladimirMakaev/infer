@@ -842,9 +842,27 @@ include struct
 
   (* apart from the check of [fd], the call is treated as unknown, e.g. to havoc the buffers that it
      writes to *)
-  let use_fd fd args : model =
+  let use_fd_dsl fd args = check_fd_not_closed (FuncArg.arg_payload fd) @@> unknown_call (fd :: args)
+
+  let use_fd fd args : model = start_model @@ fun () -> use_fd_dsl fd args
+
+  (* [F_DUPFD] is 0 wherever it is defined; [F_DUPFD_CLOEXEC] is 1030 on Linux and 67 on Darwin and
+     the BSDs. These two return a descriptor of their own, so the result is not a function of the
+     arguments: two calls hand back two different descriptors, and closing both is not a double
+     close. The other commands read or set flags, and leaving them alone keeps two reads of the
+     same flags equal to each other. *)
+  let returns_new_descriptor = function 0 | 67 | 1030 -> true | _ -> false
+
+  let fcntl fd (cmd : _ FuncArg.t) args : model =
     start_model
-    @@ fun () -> check_fd_not_closed (FuncArg.arg_payload fd) @@> unknown_call (fd :: args)
+    @@ fun () ->
+    let* cmd_value = as_constant_int (to_aval cmd.FuncArg.arg_payload) in
+    let use = use_fd_dsl fd (cmd :: args) in
+    match cmd_value with
+    | Some command when returns_new_descriptor command ->
+        use @@> assign_ret @= fresh ()
+    | _ ->
+        use
 
 
   let fd_pair fds : model =
@@ -1386,8 +1404,7 @@ let matchers : matcher list =
   ; -"eventfd" <>$ any_arg $+ any_arg $--> open_
   ; -"explicit_bzero" <>$ capt_arg_payload $+ capt_exp $--> bzero
   ; -"fclose" <>$ capt_arg $--> fclose
-  ; ( -"fcntl" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg
-    $++$--> fun fd cmd args -> use_fd fd (cmd :: args) )
+  ; -"fcntl" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg $++$--> fcntl
   ; (-"fdatasync" <>$ capt_arg_of_prim_typ StdTyp.int $--> fun fd -> use_fd fd [])
   ; -"fdopen" <>$ capt_arg_payload_of_prim_typ StdTyp.int $+ capt_arg_payload $--> fdopen
   ; -"fdopendir" <>$ capt_arg_payload_of_prim_typ StdTyp.int $--> fdopendir
