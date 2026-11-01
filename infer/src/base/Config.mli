@@ -786,6 +786,8 @@ val racerd_guardedby : bool
 
 val racerd_ignore_classes : IString.Set.t
 
+val racerd_ignore_procedures : Str.regexp option
+
 val reactive_mode : bool
 
 val reactive_capture : bool

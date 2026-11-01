@@ -759,8 +759,19 @@ let class_is_ignored_by_racerd class_name =
   IString.Set.mem (Typ.Name.name class_name) Config.racerd_ignore_classes
 
 
+(* a procedure named by [--racerd-ignore-procedures]; matched like Pulse's skip list, against the
+   qualified name or the unique identifier *)
+let proc_name_is_ignored_by_racerd =
+  let matches regex callee =
+    Str.string_match regex (Procname.to_unique_id callee) 0
+    || Str.string_match regex (Procname.to_string callee) 0
+  in
+  fun callee -> Option.exists Config.racerd_ignore_procedures ~f:(fun r -> matches r callee)
+
+
 let proc_is_ignored_by_racerd callee =
-  Procname.get_class_type_name callee |> Option.exists ~f:class_is_ignored_by_racerd
+  proc_name_is_ignored_by_racerd callee
+  || Procname.get_class_type_name callee |> Option.exists ~f:class_is_ignored_by_racerd
 
 
 let is_kotlin_coroutine_generated classname =
