@@ -3770,8 +3770,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         |> Option.exists ~f:(fun (_, _, {Clang_ast_t.ei_qual_type}) ->
             CType.is_vector_type ei_qual_type )
       in
+      let init_expr_typ = CType_decl.qual_type_to_sil_type tenv ei_qual_type in
       let all_res_trans =
-        let init_expr_typ = CType_decl.qual_type_to_sil_type tenv ei_qual_type in
         match init_expr_typ.Typ.desc with
         | Tarray {elt} ->
             initListExpr_array_trans trans_state_pri init_stmt_info stmts var_exp elt
@@ -3801,9 +3801,22 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                 in
                 [mk_trans_result (var_exp, var_typ) control] )
       in
+      (* the value of a list of a type SIL holds by value, [T{x}], is the value it initializes, not
+         the address of the temporary holding it: [T{1} << n] shifts a one, not an address. A
+         caller that passed a destination reads the value out of it itself. *)
+      let all_res_trans, return =
+        match init_expr_typ.Typ.desc with
+        | (Tint _ | Tfloat _ | Tptr _) when Option.is_none trans_state.var_exp_typ ->
+            let deref_instr, deref_exp = dereference_var_sil (var_exp, var_typ) sil_loc in
+            ( all_res_trans
+              @ [mk_trans_result (deref_exp, var_typ) {empty_control with instrs= [deref_instr]}]
+            , (deref_exp, var_typ) )
+        | _ ->
+            (all_res_trans, (var_exp, var_typ))
+      in
       let res_trans =
-        PriorityNode.compute_results_to_parent trans_state_pri sil_loc InitListExp stmt_info
-          ~return:(var_exp, var_typ) all_res_trans
+        PriorityNode.compute_results_to_parent trans_state_pri sil_loc InitListExp stmt_info ~return
+          all_res_trans
       in
       {res_trans with control= {res_trans.control with initd_exps= [var_exp]}}
 
