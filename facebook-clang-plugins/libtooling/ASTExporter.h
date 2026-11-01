@@ -2003,6 +2003,7 @@ int ASTExporter<ATDWriter>::VarDeclTupleSize() {
 //@atd   ~is_static : bool;
 //@atd   ~is_static_local : bool;
 //@atd   ~is_static_data_member : bool;
+//@atd   ~is_thread_local : bool;
 //@atd   ~is_constexpr : bool;
 //@atd   ~is_init_ice : bool;
 //@atd   ?init_expr : stmt option;
@@ -2019,6 +2020,8 @@ void ASTExporter<ATDWriter>::dumpVarDeclInfo(const VarDecl *D) {
   }
   bool IsStaticLocal = D->isStaticLocal(); // static function variables
   bool IsStaticDataMember = D->isStaticDataMember();
+  // a thread-local variable is private to its thread, so accesses to it cannot race
+  bool IsThreadLocal = D->getTLSKind() != VarDecl::TLS_None;
   bool IsConstexpr = D->isConstexpr();
   bool HasInit = D->hasInit();
   const Expr *initExpr = D->getInit();
@@ -2030,14 +2033,16 @@ void ASTExporter<ATDWriter>::dumpVarDeclInfo(const VarDecl *D) {
   bool isInitExprCXX11ConstantExpr = false;
   ObjectScope Scope(OF,
                     IsGlobal + IsExtern + IsStatic + IsStaticLocal +
-                        IsStaticDataMember + IsConstexpr + IsInitICE + HasInit +
-                        HasParmIndex + isInitExprCXX11ConstantExpr);
+                        IsStaticDataMember + IsThreadLocal + IsConstexpr +
+                        IsInitICE + HasInit + HasParmIndex +
+                        isInitExprCXX11ConstantExpr);
 
   OF.emitFlag("is_global", IsGlobal);
   OF.emitFlag("is_extern", IsExtern);
   OF.emitFlag("is_static", IsStatic);
   OF.emitFlag("is_static_local", IsStaticLocal);
   OF.emitFlag("is_static_data_member", IsStaticDataMember);
+  OF.emitFlag("is_thread_local", IsThreadLocal);
   OF.emitFlag("is_constexpr", IsConstexpr);
   OF.emitFlag("is_init_ice", IsInitICE);
   if (HasInit) {
