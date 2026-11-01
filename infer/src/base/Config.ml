@@ -2453,6 +2453,17 @@ and pulse_model_abort_if_field_equals =
       "value": 3} makes a log message constructed at the fatal level exit.|}
 
 
+and pulse_model_return_constant =
+  CLOpt.mk_json ~long:"pulse-model-return-constant"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    {|Functions whose contract is to return a constant, for example an error reporter that always
+      returns false so that it can be written inside a condition. A list of objects
+      {"procedure": "ns::report", "value": 0}: a call to ns::report, whatever its arguments,
+      returns that integer. Without this, a reporter defined in a library the analysis does not
+      see returns a fresh value, and a guard written as `if (CHECK(c))`, which expands to
+      `c ? true : report(...)`, cannot be proved to hold. The configuration is empty by default.|}
+
+
 and pulse_force_continue =
   CLOpt.mk_bool ~long:"pulse-force-continue" ~default:true
     "The code coming after a function call is not analyzed if the callee has no summary of type \
@@ -4794,6 +4805,8 @@ and pulse_final_types_are_exact = !pulse_final_types_are_exact
 and pulse_force_continue = !pulse_force_continue
 
 and pulse_model_abort_if_field_equals = !pulse_model_abort_if_field_equals
+
+and pulse_model_return_constant = !pulse_model_return_constant
 
 and pulse_non_disj_bottom_after_exit = !pulse_non_disj_bottom_after_exit
 
