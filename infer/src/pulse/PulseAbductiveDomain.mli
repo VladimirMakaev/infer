@@ -391,6 +391,11 @@ val apply_unknown_effect :
     everything reachable from the address, then havoc all the edges starting from the address
     passing [havoc_filter] (by default everything passes the filter) *)
 
+val transfer_ownership : AbstractValue.t -> t -> t
+(** release this procedure from the obligation to free anything reachable from the address, and do
+    nothing else. The dual of [apply_unknown_effect] for a callee that adopts what it is given
+    without necessarily touching it: no havoc, no initialisation, no write *)
+
 val overwrite_contents :
   ?havoc_filter:(AbstractValue.t -> bool) -> ValueHistory.t -> AbstractValue.t -> t -> t
 (** mark the address and the addresses reachable from it through field and array accesses with

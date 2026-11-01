@@ -160,6 +160,36 @@ let is_const_version_available tenv pname =
           List.exists ~f:(is_const_version pname_method) methods ) )
 
 
+(** Classes whose BY-VALUE parameter is an ownership transfer by the type system alone: the callee's
+    parameter object owns what it holds and is destroyed with the callee's frame, so whatever the
+    callee does -- including nothing at all -- the caller is no longer the owner. This is a
+    statement about the parameter's type, not about the callee's behaviour, which is why it holds
+    for a callee with no body. [std::shared_ptr] belongs to the same family but its Pulse model
+    already releases the caller, so listing it here would change nothing. *)
+let transfers_ownership_by_value = QualifiedCppName.Match.of_fuzzy_qual_names ["std::unique_ptr"]
+
+(** Is the formal at [index] an owning class taken BY VALUE?
+
+    The formal TYPE alone cannot say: the frontend gives a by-value [std::unique_ptr<T>] parameter
+    the type [std::unique_ptr<T>&], exactly like an lvalue reference parameter. [reference_formals]
+    is the frontend's own record of which formals really are references, so index membership settles
+    it -- the same discriminator [PulseModelsSmartPointers] already uses for by-value constructor
+    parameters. Requiring [Pk_lvalue_reference] on top of that keeps out the two shapes that are
+    pointers to a [unique_ptr] rather than one taken by value: a [unique_ptr<T>*] parameter, and the
+    [this] of a [unique_ptr] method, both [Pk_pointer]. An rvalue reference is [Pk_rvalue_reference]
+    and is excluded by the same test: the caller keeps the object and destroys it. Without the
+    callee's attributes we cannot tell, and say no. *)
+let is_by_value_owning_formal callee_attrs index formal_typ_opt =
+  Option.exists formal_typ_opt ~f:(fun (typ : Typ.t) ->
+      match typ.desc with
+      | Tptr ({desc= Tstruct (CppClass {name})}, Pk_lvalue_reference) ->
+          QualifiedCppName.Match.match_qualifiers transfers_ownership_by_value name
+      | _ ->
+          false )
+  && Option.exists callee_attrs ~f:(fun (attrs : ProcAttributes.t) ->
+      not (List.mem attrs.ProcAttributes.reference_formals index ~equal:Int.equal) )
+
+
 let matches_iter =
   QualifiedCppName.Match.of_fuzzy_qual_names
     [ "std::__detail::_Node_iterator"
@@ -231,7 +261,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
   (* set to [false] if we think the procedure called does not behave "purely", i.e. return the same
      value for the same inputs *)
   let is_pure = ref true in
-  let should_havoc actual_typ formal_typ_opt =
+  let callee_attrs = lazy (Option.bind callee_pname_opt ~f:IRAttributes.load) in
+  let should_havoc ~index actual_typ formal_typ_opt =
     match actual_typ.Typ.desc with
     | _ when not Config.pulse_havoc_arguments ->
         `DoNotHavoc
@@ -246,6 +277,11 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
         `DoNotHavoc
     | Tptr _ when not (is_ptr_to_const formal_typ_opt) ->
         AbductiveDomain.should_havoc_if_unknown ()
+    (* Everything below was [`DoNotHavoc] and stays un-havoc'd; the only thing that changes is who
+       is left owning what the argument reaches. *)
+    | (Tstruct (CppClass _) | Tptr ({desc= Tstruct (CppClass _)}, _))
+      when is_by_value_owning_formal (Lazy.force callee_attrs) index formal_typ_opt ->
+        `ShouldTransferOwnership
     | _ ->
         `DoNotHavoc
   in
@@ -258,7 +294,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
        in
        AbductiveDomain.reachable_addresses_from roots astate0 `Pre )
   in
-  let havoc_actual_if_ptr ((actual, _), actual_typ) formal_opt astate =
+  let havoc_actual_if_ptr ~index ((actual, _), actual_typ) formal_opt astate =
     let fold_on_reachable_from_arg astate f =
       let reachable_from_arg =
         AbductiveDomain.reachable_addresses_from (Seq.return actual) astate0 `Post
@@ -266,7 +302,15 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
       AbstractValue.Set.fold f reachable_from_arg astate
     in
     (* We should not havoc when the corresponding formal is a pointer to const *)
-    match should_havoc actual_typ (Option.map ~f:snd formal_opt) with
+    match should_havoc ~index actual_typ (Option.map ~f:snd formal_opt) with
+    | `ShouldTransferOwnership ->
+        (* The callee is left owning everything the argument reaches, so this procedure no longer
+           has to release it. Nothing else changes: the values are not havoc'd and no [WrittenTo]
+           is recorded, because taking ownership of a pointer is not writing through it -- that
+           distinction is the whole reason this is not [`ShouldHavoc]. *)
+        fold_on_reachable_from_arg astate AddressAttributes.remove_allocation_attr
+        |> AddressAttributes.add_all actual
+             (Attributes.singleton (OwnershipTransferred (reason, hist)))
     | `ShouldHavoc ->
         is_pure := false ;
         (* this will deallocate anything reachable from the [actual] and havoc the values pointed to
@@ -390,8 +434,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
         astate
   in
   let havoc_actuals_without_typ_info astate =
-    List.fold actuals ~init:astate ~f:(fun astate actual_typ ->
-        havoc_actual_if_ptr actual_typ None astate )
+    List.foldi actuals ~init:astate ~f:(fun index astate actual_typ ->
+        havoc_actual_if_ptr ~index actual_typ None astate )
   in
   let forget_file_descriptors_owned_by_result astate =
     (* an object returned by the callee may own the descriptors passed to it, as with
@@ -428,19 +472,19 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
         (* when the callee is an unknown constructor, havoc the first arg (the constructed object)
          only *)
         let formal_opt = Option.bind formals_opt ~f:List.hd in
-        havoc_actual_if_ptr actual_typ formal_opt astate
+        havoc_actual_if_ptr ~index:0 actual_typ formal_opt astate
     | _, None ->
         havoc_actuals_without_typ_info astate
     | _, Some formals -> (
         let actuals = trim_actuals_if_var_arg callee_pname_opt ~actuals ~formals in
         match
-          List.fold2 actuals formals ~init:astate ~f:(fun astate actual_typ formal ->
-              havoc_actual_if_ptr actual_typ (Some formal) astate )
+          List.fold2 actuals formals ~init:(0, astate) ~f:(fun (index, astate) actual_typ formal ->
+              (index + 1, havoc_actual_if_ptr ~index actual_typ (Some formal) astate) )
         with
         | Unequal_lengths ->
             print_arity_mismatch_message callee_pname_opt ~formals ~actuals ;
             havoc_actuals_without_typ_info astate
-        | Ok result ->
+        | Ok (_, result) ->
             result ) )
   |> forget_file_descriptors_owned_by_result |> forget_file_descriptors_owned_by_callee
   |> add_skipped_proc

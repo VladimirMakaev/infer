@@ -1180,6 +1180,13 @@ let apply_unknown_effects call_state =
         (* havoc only fields that haven't been havoc'd already during the call *)
         not (Option.equal AbstractValue.equal post_value pre_value)
   in
+  let transfer_ownership addr_callee attrs astate =
+    (let* _call, _hist = Attributes.get_ownership_transferred attrs in
+     let+ addr_caller, _ = to_caller_value call_state (CanonValue.downcast addr_callee) in
+     L.d_printfln "transferring the ownership of %a@\n" AbstractValue.pp addr_caller ;
+     AbductiveDomain.transfer_ownership addr_caller astate )
+    |> Option.value ~default:astate
+  in
   let overwrite_contents addr_callee attrs astate =
     (let* hist = Attributes.get_contents_overwritten attrs in
      let+ addr_caller, _ = to_caller_value call_state (CanonValue.downcast addr_callee) in
@@ -1205,6 +1212,7 @@ let apply_unknown_effects call_state =
          L.d_printfln "@]" ;
          astate )
         |> Option.value ~default:astate
+        |> transfer_ownership addr_callee attrs
         |> overwrite_contents addr_callee attrs )
       (AbductiveDomain.Summary.get_post call_state.callee_summary).attrs call_state.astate
   in

@@ -274,6 +274,15 @@ module Attribute = struct
     | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
     | StdVectorCapacity of IntLit.t option
     | AbsentFromContainer
+    (* LAST ON PURPOSE: [to_rank] is the constructor's position, and a summary serialises its
+       attributes in rank order, so inserting anywhere else renumbers existing attributes and
+       rewrites every summary in the corpus without changing a thing. *)
+    | OwnershipTransferred of CallEvent.t * ValueHistory.t
+      (* [v -> OwnershipTransferred (call, hist)] records that [call] took over the
+         obligation to release everything reachable from [v], so the procedure holding
+         this attribute no longer has to. Unlike [UnknownEffect] it says nothing about
+         the VALUES reachable from [v]: a callee can adopt a pointer it only ever reads,
+         so the contents are not havoc'd and no write is recorded. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -341,6 +350,8 @@ module Attribute = struct
   let returned_from_unknown = Variants.returnedfromunknown.rank
 
   let static_type_rank = Variants.statictype.rank
+
+  let ownership_transferred_rank = Variants.ownershiptransferred.rank
 
   let std_moved_rank = Variants.stdmoved.rank
 
@@ -475,6 +486,8 @@ module Attribute = struct
         F.fprintf f "TaintedSanitized%a" TaintSanitizedSet.pp taint_sanitized
     | Uninitialized typ ->
         F.fprintf f "Uninitialized(%a)" UninitializedTyp.pp typ
+    | OwnershipTransferred (call, hist) ->
+        F.fprintf f "OwnershipTransferred(@[%a,@ %a)@]" CallEvent.pp call ValueHistory.pp hist
     | UnknownEffect (call, hist) ->
         F.fprintf f "UnknownEffect(@[%a,@ %a)@]" CallEvent.pp call ValueHistory.pp hist
     | UnreachableAt location ->
@@ -533,6 +546,7 @@ module Attribute = struct
     | Tainted _
     | TaintSanitized _
     | Uninitialized _
+    | OwnershipTransferred _
     | UnknownEffect _
     | UnreachableAt _
     | WrittenTo _ ->
@@ -586,6 +600,7 @@ module Attribute = struct
     | Tainted _
     | TaintSanitized _
     | Uninitialized _
+    | OwnershipTransferred _
     | UnknownEffect _
     | WrittenTo _ ->
         true
@@ -639,6 +654,7 @@ module Attribute = struct
     | StdVectorReserve
     | TaintSanitized _
     | Uninitialized _
+    | OwnershipTransferred _
     | UnknownEffect _
     | UnreachableAt _
     | UsedAsBranchCond _
@@ -725,6 +741,8 @@ module Attribute = struct
             ; trace= add_call_to_trace trace }
         in
         TaintSanitized (TaintSanitizedSet.map add_call_to_taint_sanitized taint_sanitized)
+    | OwnershipTransferred (call, hist) ->
+        OwnershipTransferred (call, add_call_to_history hist)
     | UnknownEffect (call, hist) ->
         UnknownEffect (call, add_call_to_history hist)
     | StdVectorErased trace ->
@@ -888,6 +906,7 @@ module Attribute = struct
       | Tainted _
       | TaintSanitized _
       | Uninitialized _
+      | OwnershipTransferred _
       | UnknownEffect _
       | UnreachableAt _
       | UsedAsBranchCond _
@@ -1192,6 +1211,11 @@ module Attributes = struct
   let get_unknown_effect =
     get_by_rank Attribute.unknown_effect_rank ~dest:(function[@warning "-partial-match"]
         | UnknownEffect (call, hist) -> (call, hist) )
+
+
+  let get_ownership_transferred =
+    get_by_rank Attribute.ownership_transferred_rank ~dest:(function[@warning "-partial-match"]
+        | OwnershipTransferred (call, hist) -> (call, hist) )
 
 
   let get_contents_overwritten =
