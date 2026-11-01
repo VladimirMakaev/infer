@@ -30,7 +30,7 @@ digraph cfg {
 "init_in_binop#init_list#834825007.7adaa67964536570_2" [label="2: Exit init_list::init_in_binop \n  " color=yellow style=filled]
 	
 
-"init_in_binop#init_list#834825007.7adaa67964536570_3" [label="3:  BinaryOperatorStmt: Assign \n   n$0=*&x:int [line 52, column 34]\n  *&0$?%__sil_tmpSIL_init_list__n$1:int=0 [line 52, column 42]\n  *&x:int=(-n$0 & ~&0$?%__sil_tmpSIL_init_list__n$1) [line 52, column 29]\n " shape="box"]
+"init_in_binop#init_list#834825007.7adaa67964536570_3" [label="3:  BinaryOperatorStmt: Assign \n   n$0=*&x:int [line 52, column 34]\n  *&0$?%__sil_tmpSIL_init_list__n$1:int=0 [line 52, column 42]\n  n$2=*&0$?%__sil_tmpSIL_init_list__n$1:int [line 52, column 42]\n  *&x:int=(-n$0 & ~n$2) [line 52, column 29]\n " shape="box"]
 	
 
 	 "init_in_binop#init_list#834825007.7adaa67964536570_3" -> "init_in_binop#init_list#834825007.7adaa67964536570_2" ;
