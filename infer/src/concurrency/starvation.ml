@@ -40,7 +40,15 @@ let get_escaped_formals proc_desc =
           formal_typ pvar |> Option.map ~f:(fun typ -> (pvar, typ)) ) )
   in
   let is_method_of callee (_, typ) =
-    Option.equal Typ.Name.equal (Procname.get_class_type_name callee) (Typ.name (Typ.strip_ptr typ))
+    (* The first actual of a direct call is not a receiver in general: a free function or a static
+       method has none, so the formal found there can have any type, and a by-value one is not a
+       pointer. Only a pointer to the callee's class can be the receiver of a method of it, so
+       decide on the pointee instead of assuming there is one. *)
+    match (typ : Typ.t) with
+    | {desc= Tptr (pointee, _)} ->
+        Option.equal Typ.Name.equal (Procname.get_class_type_name callee) (Typ.name pointee)
+    | _ ->
+        false
   in
   let add_formals ?(keep = fun _ -> false) escaped exp =
     formals_in exp
