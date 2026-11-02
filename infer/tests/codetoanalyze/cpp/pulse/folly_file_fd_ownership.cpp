@@ -19,8 +19,11 @@ class File {
  public:
   constexpr File() noexcept : fd_(-1), ownsFd_(false) {}
   explicit File(int fd, bool ownsFd = false) noexcept;
+  File(File&&) noexcept;
   ~File();
 
+  File& operator=(File&&);
+  void close();
   int release() noexcept;
 
  private:
@@ -115,6 +118,92 @@ int plain_open_bad(const char* path) {
   if (fd < 0) {
     return -1;
   }
+  return 0;
+}
+
+// close() closes the descriptor and leaves -1 behind, so the release() that follows hands
+// nothing back and there is no obligation left to drop
+int close_then_release_ok(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  file.close();
+  (void)file.release();
+  return 0;
+}
+
+// close() on its own closes it too
+int close_only_ok(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  file.close();
+  return 0;
+}
+
+// TRUE POSITIVE: the descriptor moves to the destination, whose release() hands it back; the
+// result is dropped, so it leaks
+int moved_then_release_leak_bad(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  folly::File moved(static_cast<folly::File&&>(file));
+  (void)moved.release();
+  return 0;
+}
+
+// the destination closes it, so nothing leaks
+int moved_then_close_ok(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  folly::File moved(static_cast<folly::File&&>(file));
+  moved.close();
+  return 0;
+}
+
+// the destination's destructor closes it: silent before and after
+int moved_and_kept_ok(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  folly::File moved(static_cast<folly::File&&>(file));
+  return use_fd(fd);
+}
+
+// TRUE POSITIVE: move ASSIGNMENT carries the descriptor over the same way
+int move_assigned_then_release_leak_bad(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  folly::File other;
+  other = static_cast<folly::File&&>(file);
+  (void)other.release();
+  return 0;
+}
+
+// TRUE POSITIVE: moving a File onto itself does nothing, so it still owns the descriptor and
+// the release() hands it back
+int self_move_assigned_then_release_leak_bad(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  folly::File file(fd, true);
+  file = static_cast<folly::File&&>(file);
+  (void)file.release();
   return 0;
 }
 
