@@ -446,7 +446,11 @@ module SharedPtr = struct
             Basic.free_or_delete `Delete invalidation (mk_fake_arg value pointer_typ) model_data
               astate non_disj
       | None ->
-          L.die InternalError "Cannot find template arguments"
+          (* the element type comes from the capture, which may not have it; leaving the object
+             alive loses a use-after-free but costs no more than the call to an uncaptured
+             destructor would *)
+          L.internal_error "Cannot find template arguments@." ;
+          (Basic.ok_continue astate, non_disj)
     in
     let ref_count_one, non_disj =
       bind_sat_result non_disj
@@ -875,79 +879,96 @@ module SharedPtr = struct
             Ok (astate, args) )
 
 
+  (** [make_shared] builds the object in place, so it needs the types of the arguments it forwards
+      to the constructor, and it takes them from the formals recorded for the instantiation it is
+      called on. A model is selected by the callee's name alone, so this one can be reached with no
+      signature to read: a capture that did not run to the end leaves calls to procedures whose row
+      was never written, and a declaration Infer never saw has no formals either. Such a call is no
+      different from a call to a procedure that was not captured, so make it one. Failing instead
+      costs every file of the capture its results, not just the one holding the call. *)
   let make_shared (args : (AbstractValue.t * ValueHistory.t) FuncArg.t list) ~desc : model =
    fun ({callee_procname; path; location} as model_data) astate non_disj ->
     let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
     let ( let<**> ) x f = bind_sat_result non_disj x f in
-    let this, args_without_this, actuals =
-      match
-        ( args |> List.last
-        , args |> List.drop_last
-        , IRAttributes.load_formal_types callee_procname |> List.drop_last )
-      with
-      | Some this, Some args_without_this, Some formals ->
-          (this, args_without_this, formals)
-      | _ ->
-          L.die InternalError "Not enough arguments to call make_shared"
-    in
-    let typ =
+    let formals = IRAttributes.load_formal_types callee_procname in
+    let unknown_call () = lift_model (Basic.skipped_known_call args) model_data astate non_disj in
+    match (List.last args, List.drop_last args, List.drop_last formals) with
+    | Some this, Some args_without_this, Some actuals
+      when Int.equal (List.length actuals) (List.length args_without_this) -> (
       match (Typ.strip_ptr this.typ).desc with
-      | Typ.Tstruct (CppClass {template_spec_info= Template {args= TType t :: _}}) ->
-          t
-      | _ ->
-          L.die InternalError "Cannot find template arguments of make_shared"
-    in
-    let this = this.arg_payload in
-    let<**> astate = assign_count path location this ~constant:IntLit.one ~desc astate in
-    match typ.desc with
-    | Tstruct class_name ->
-        (* assign the value pointer to the field of the shared_ptr *)
-        let<**> astate, value_address = Basic.alloc_value_address ~desc typ model_data astate in
-        let<*> astate, _ = write_value path location this ~value:value_address ~desc astate in
-        let typ = Typ.mk (Tptr (typ, Typ.Pk_pointer)) in
-        (* dereferences the actual arguments if they are primitive types.
-           In fact, when primitive types are passed in a function call, the frontend seems to dereference them.
-           We have to simulate this part when we call the constructor.
-        *)
-        let<*> astate, args_without_this =
-          PulseResult.list_fold (List.rev args_without_this) ~init:(astate, [])
-            ~f:(fun (astate, rev_func_args) (FuncArg.{exp; typ; arg_payload= value} as arg) ->
-              let+ astate, new_payload =
-                PulseOperations.eval_access path Read location value Dereference astate
+      | Typ.Tstruct (CppClass {template_spec_info= Template {args= TType typ :: _}}) -> (
+          let this = this.arg_payload in
+          let<**> astate = assign_count path location this ~constant:IntLit.one ~desc astate in
+          match typ.desc with
+          | Tstruct class_name ->
+              (* assign the value pointer to the field of the shared_ptr *)
+              let<**> astate, value_address =
+                Basic.alloc_value_address ~desc typ model_data astate
               in
-              match typ.desc with
-              | Tptr ({Typ.desc= Tstruct _}, _) ->
-                  (astate, arg :: rev_func_args)
-              | _ ->
-                  (astate, {FuncArg.exp; arg_payload= new_payload; typ} :: rev_func_args) )
-        in
-        (* We need an expression corresponding to the value of the argument we pass to
-           the constructor. See e.g. the comment on [mk_fake_arg] as well. *)
-        let fake_exp = Exp.Var (Ident.create_fresh Ident.kprimed) in
-        let args = {FuncArg.typ; exp= fake_exp; arg_payload= value_address} :: args_without_this in
-        let args = List.map args ~f:(FuncArg.map_payload ~f:ValueOrigin.unknown) in
-        (* create the list of types of the actual arguments of the constructor
-           Note that these types are the formal arguments of make_shared *)
-        let actuals = typ :: actuals in
-        let<*> astate, args = copy_by_value_parameters model_data class_name actuals args astate in
-        Basic.call_constructor class_name actuals args fake_exp model_data astate non_disj
-    | _ -> (
-        L.d_printfln "std::make_shared called on non-class type, assuming primitive type" ;
-        match args_without_this with
-        | [] ->
-            (* assign the value pointer to the field of the shared_ptr *)
-            let<**> astate, value_address = Basic.alloc_value_address ~desc typ model_data astate in
-            let<*> astate, _ = write_value path location this ~value:value_address ~desc astate in
-            let<**> astate =
-              assign_constant path location ~ref:value_address ~constant:IntLit.zero ~desc astate
-            in
-            (Basic.ok_continue astate, non_disj)
-        | first_arg :: _ ->
-            let<**> astate, address =
-              Basic.deep_copy path location ~value:first_arg.arg_payload ~desc astate
-            in
-            let<*> astate, _ = write_value path location this ~value:address ~desc astate in
-            (Basic.ok_continue astate, non_disj) )
+              let<*> astate, _ = write_value path location this ~value:value_address ~desc astate in
+              let typ = Typ.mk (Tptr (typ, Typ.Pk_pointer)) in
+              (* dereferences the actual arguments if they are primitive types. In fact, when
+                 primitive types are passed in a function call, the frontend seems to dereference
+                 them. We have to simulate this part when we call the constructor. *)
+              let<*> astate, args_without_this =
+                PulseResult.list_fold (List.rev args_without_this) ~init:(astate, [])
+                  ~f:(fun (astate, rev_func_args) (FuncArg.{exp; typ; arg_payload= value} as arg) ->
+                    let+ astate, new_payload =
+                      PulseOperations.eval_access path Read location value Dereference astate
+                    in
+                    match typ.desc with
+                    | Tptr ({Typ.desc= Tstruct _}, _) ->
+                        (astate, arg :: rev_func_args)
+                    | _ ->
+                        (astate, {FuncArg.exp; arg_payload= new_payload; typ} :: rev_func_args) )
+              in
+              (* We need an expression corresponding to the value of the argument we pass to the
+                 constructor. See e.g. the comment on [mk_fake_arg] as well. *)
+              let fake_exp = Exp.Var (Ident.create_fresh Ident.kprimed) in
+              let args =
+                {FuncArg.typ; exp= fake_exp; arg_payload= value_address} :: args_without_this
+              in
+              let args = List.map args ~f:(FuncArg.map_payload ~f:ValueOrigin.unknown) in
+              (* create the list of types of the actual arguments of the constructor. Note that
+                 these types are the formal arguments of make_shared *)
+              let actuals = typ :: actuals in
+              let<*> astate, args =
+                copy_by_value_parameters model_data class_name actuals args astate
+              in
+              Basic.call_constructor class_name actuals args fake_exp model_data astate non_disj
+          | _ -> (
+              L.d_printfln "std::make_shared called on non-class type, assuming primitive type" ;
+              match args_without_this with
+              | [] ->
+                  (* assign the value pointer to the field of the shared_ptr *)
+                  let<**> astate, value_address =
+                    Basic.alloc_value_address ~desc typ model_data astate
+                  in
+                  let<*> astate, _ =
+                    write_value path location this ~value:value_address ~desc astate
+                  in
+                  let<**> astate =
+                    assign_constant path location ~ref:value_address ~constant:IntLit.zero ~desc
+                      astate
+                  in
+                  (Basic.ok_continue astate, non_disj)
+              | first_arg :: _ ->
+                  let<**> astate, address =
+                    Basic.deep_copy path location ~value:first_arg.arg_payload ~desc astate
+                  in
+                  let<*> astate, _ = write_value path location this ~value:address ~desc astate in
+                  (Basic.ok_continue astate, non_disj) ) )
+      | _ ->
+          L.internal_error
+            "Cannot find the template arguments of %a; treating it as an unknown call@\n"
+            Procname.pp callee_procname ;
+          unknown_call () )
+    | _ ->
+        L.internal_error
+          "%a is called with %d argument(s) and the capture records %d formal type(s) for it, so \
+           the types it forwards to the constructor are not known; treating it as an unknown call@\n"
+          Procname.pp callee_procname (List.length args) (List.length formals) ;
+        unknown_call ()
 
 
   let pointer_cast src tgt ~desc = copy_move_constructor tgt src ~desc
