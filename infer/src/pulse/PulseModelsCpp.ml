@@ -1456,6 +1456,16 @@ module ErrorCode = struct
     SatUnsat.to_list is_error @ SatUnsat.to_list is_success
 end
 
+(** whether destroying a value of this class runs anything: a destructor the program wrote, or one
+    the compiler generated for members that have one. A class without destructor effects releases
+    nothing, so a container of them reclaims nothing when it dies. *)
+let has_destructor_effects tenv class_name =
+  Tenv.find_cpp_destructor tenv class_name
+  |> Option.exists ~f:(fun proc ->
+      Option.exists (IRAttributes.load proc) ~f:(fun (attrs : ProcAttributes.t) ->
+          attrs.is_defined || not attrs.is_cpp_implicit ) )
+
+
 module Vector = struct
   (* This is a lower bound, not an exact capacity. Only concrete bounds are retained: symbolic
      growth keeps the existing reserved-vector approximation without adding summary preconditions. *)
@@ -1550,13 +1560,6 @@ module Vector = struct
                     false ) )
     in
     visit Typ.Name.Set.empty class_name
-
-
-  let has_destructor_effects tenv class_name =
-    Tenv.find_cpp_destructor tenv class_name
-    |> Option.exists ~f:(fun proc ->
-        Option.exists (IRAttributes.load proc) ~f:(fun (attrs : ProcAttributes.t) ->
-            attrs.is_defined || not attrs.is_cpp_implicit ) )
 
 
   let continue_with f (outcomes, non_disj) =
