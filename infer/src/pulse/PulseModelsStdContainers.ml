@@ -1141,8 +1141,10 @@ let is_move_constructor callee_procname =
 
 
 (** a node container moved from another one takes over its elements, as [std::vector]'s constructor
-    already does. Without this a container returned by value, or one holding another, loses what its
-    elements own and the owner looks leaked in the caller. *)
+    already does, and leaves the source empty. Without the transfer a container returned by value,
+    or one holding another, loses what its elements own and the owner looks leaked in the caller;
+    without emptying the source, destroying the moved-from container invalidates the elements the
+    destination now owns. *)
 let move_constructor ~desc this other : model_no_non_disj =
  fun {path; location} astate ->
   let<*> astate, other_array =
@@ -1153,10 +1155,20 @@ let move_constructor ~desc this other : model_no_non_disj =
     PulseOperations.write_deref_field path location ~ref:this Collection.size_field ~obj:other_size
       astate
   in
-  let<+> astate =
+  let<*> astate =
     PulseOperations.write_deref_field path location ~ref:this Collection.field
       ~obj:(fst other_array, Hist.add_call path location desc (snd other_array))
       astate
+  in
+  (* the elements belong to [this] now: leave [other] empty, as [std::vector] does, so that
+     destroying it does not invalidate what [this] holds *)
+  let<*> astate =
+    PulseOperations.havoc_deref_field path location other Collection.field
+      (Hist.single_call path location desc)
+      astate
+  in
+  let<++> astate =
+    Collection.assign_size_constant path location other ~constant:IntLit.zero ~desc astate
   in
   astate
 
