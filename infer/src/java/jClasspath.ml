@@ -115,6 +115,40 @@ let read_modules paths =
       if String.is_suffix path ~suffix then read_modules_1 path else [path] )
 
 
+(* The module image of the JDK that provides [jimage], which [read_modules] needs anyway. *)
+let jdk_modules () =
+  let open IOption.Let_syntax in
+  let* path = Sys.getenv "PATH" in
+  List.find_map (String.split path ~on:':') ~f:(fun dir ->
+      if String.is_empty dir then None
+      else
+        let modules = dir ^/ Filename.parent_dir_name ^/ "lib" ^/ "modules" in
+        (* [modules] has to be the image itself. A directory of that name -- the one Linux keeps
+           its kernel modules in sits next to the [jimage] a distribution installs -- would
+           otherwise end the search here, and the JDK further along the path never be tried. *)
+        match (ISys.file_exists (dir ^/ "jimage"), ISys.is_file modules) with
+        | true, `Yes ->
+            Some modules
+        | _ ->
+            None )
+
+
+(* Whether a classpath can resolve the platform classes that models match on. *)
+let has_platform_classes classpath =
+  let channel = Javalib.class_path classpath in
+  let found =
+    match
+      Utils.suppress_stderr2 Javalib.get_class channel (JBasics.make_cn "java.io.Closeable")
+    with
+    | _ ->
+        true
+    | exception _ ->
+        false
+  in
+  Javalib.close_class_path channel ;
+  found
+
+
 let load_from_verbose_output =
   let class_filename_re =
     Printf.sprintf
@@ -234,14 +268,31 @@ let search_sources sources =
 let load_from_arguments ?classpath:compiler_classpath classes_out_path sources =
   let roots, classes = search_classes classes_out_path in
   let split cp_option = Option.value_map ~f:split_classpath ~default:[] cp_option in
-  let classpath =
+  let paths =
     (* order follows https://docs.oracle.com/javase/7/docs/technotes/tools/windows/classpath.html.
        [compiler_classpath] is what the compiler itself was given: without it a capture that does
        not go through javac's verbose output, such as a Kotlin one, cannot resolve any library
        class, and records it in the type environment as a supertype-less dummy instead. *)
     split Config.bootclasspath @ split Config.classpath @ split compiler_classpath
     @ IString.Set.elements roots
-    |> classpath_of_paths
+  in
+  (* a module image is not an archive javalib can read, so a caller that points at one on the
+     classpath was silently getting nothing from it. Unpack it, as the capture that runs the
+     compiler does with the image the compiler's search path names. *)
+  let paths = if Config.java_read_modules then read_modules paths else paths in
+  let classpath = classpath_of_paths paths in
+  (* [load_from_verbose_output] learns where the platform classes live from the compiler's own
+     search path, which names the JDK's module image. A capture built from arguments has no such
+     output, and a build system usually passes only the libraries its target compiles against. The
+     platform classes are then placeholders with no supertypes, which silently switches off every
+     model that matches on a supertype, [close()] releasing a resource among them. Fall back to
+     the JDK's own module image, after everything the caller gave us so an explicit platform jar
+     still wins. *)
+  let classpath =
+    if Config.java_read_modules && not (has_platform_classes classpath) then
+      Option.value_map (jdk_modules ()) ~default:classpath ~f:(fun modules ->
+          classpath_of_paths (paths @ read_modules [modules]) )
+    else classpath
   in
   {classpath_channel= Javalib.class_path classpath; sources= search_sources sources; classes}
 
