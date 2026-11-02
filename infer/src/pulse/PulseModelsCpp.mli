@@ -14,6 +14,10 @@ val abort_matchers : matcher list
 
 val matchers : matcher list
 
+val has_destructor_effects : Tenv.t -> Typ.Name.t -> bool
+(** whether destroying a value of this class runs anything, so that something it owns is reclaimed
+    with it *)
+
 module InitializerList : sig
   val is_type : Typ.t -> bool
 
