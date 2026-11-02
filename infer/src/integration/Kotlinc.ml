@@ -64,8 +64,32 @@ let kotlin_sources_from_args args =
   !source_files
 
 
+(* The classpath kotlinc was given. Unlike javac, kotlinc is not run with a flag that reports the
+   library classes it loaded, so this is the only way the Java frontend learns where to find
+   them; without it every library class becomes a dummy entry with no supertypes. *)
+let kotlin_classpath_from_args args =
+  let rec find = function
+    | ("-cp" | "-classpath") :: classpath :: _ ->
+        Some (String.strip ~drop:(fun char -> Char.equal char '"') classpath)
+    | _ :: rest ->
+        find rest
+    | [] ->
+        None
+  in
+  let expanded =
+    List.concat_map args ~f:(fun arg ->
+        match String.chop_prefix ~prefix:"@" arg with
+        | None ->
+            [arg]
+        | Some arg_file ->
+            In_channel.read_lines arg_file )
+  in
+  find expanded
+
+
 let capture ~prog ~args =
   compile prog args ;
   if not (InferCommand.equal Config.command Compile) then
     let sources = kotlin_sources_from_args args in
-    JMain.from_arguments Config.javac_classes_out ~sources
+    let classpath = kotlin_classpath_from_args args in
+    JMain.from_arguments ?classpath Config.javac_classes_out ~sources
