@@ -10,6 +10,7 @@
 // exclusion at all, so the guard must not make the data it returns look protected.
 
 #include <mutex>
+#include <shared_mutex>
 
 namespace folly {
 
@@ -113,6 +114,20 @@ class ProtectedHolder {
  private:
   std::mutex mutex_;
   int value_;
+};
+
+// A mutex of the standard library that the lock models know is a real lock, so the guard
+// counts and the unsynchronised read is a race.
+class SharedTimedMutexHolder {
+ public:
+  void set_ok(int v) {
+    auto locked = data_.wlock();
+    data_.datum_.value = v;
+  }
+  int get_bad() { return data_.datum_.value; }
+
+ private:
+  folly::Synchronized<Data, std::shared_timed_mutex> data_;
 };
 
 } // namespace synchronized_null_mutex
