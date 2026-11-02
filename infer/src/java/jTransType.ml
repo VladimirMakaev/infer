@@ -246,16 +246,26 @@ and get_class_struct_typ =
   in
   fun program tenv cn ->
     let name = typename_of_classname cn in
-    match Tenv.lookup tenv name with
-    | Some struct_typ ->
+    (* A dummy entry only records that a class was referenced, not what it is: it has no
+       supertypes. Such entries are left behind by a capture that could not resolve the class, for
+       instance a Kotlin capture, which hands javalib no classpath for library classes. Keeping one
+       in preference to the real class would leave the type environment without the class
+       hierarchy, which silently turns off every model that matches on a supertype. So a dummy is
+       refilled as soon as a capture can resolve the class, rather than returned as is. *)
+    let lookup_result = Tenv.lookup tenv name in
+    match lookup_result with
+    | Some ({Struct.dummy= false} as struct_typ) ->
         struct_typ
-    | None when JBasics.ClassSet.mem cn !seen ->
-        Tenv.mk_struct ~dummy:true tenv name
-    | None -> (
+    | _ when JBasics.ClassSet.mem cn !seen ->
+        (* already being resolved further up the recursion, or unresolvable: stop here *)
+        Option.value_or_thunk lookup_result ~default:(fun () ->
+            Tenv.mk_struct ~dummy:true tenv name )
+    | _ -> (
         seen := JBasics.ClassSet.add cn !seen ;
         match JProgramDesc.lookup_node cn program with
         | None ->
-            Tenv.mk_struct ~dummy:true tenv name
+            Option.value_or_thunk lookup_result ~default:(fun () ->
+                Tenv.mk_struct ~dummy:true tenv name )
         | Some (Javalib.JInterface jinterface as node) ->
             let statics, _ = get_all_fields program tenv cn in
             let supers = create_super_list program tenv jinterface.Javalib.i_interfaces in
