@@ -170,6 +170,13 @@ let invalidate (address, history) invalidation location memory =
   add_one address (Attribute.Invalid (invalidation, Immediate {location; history})) memory
 
 
+let absent_from_container address memory = add_one address Attribute.AbsentFromContainer memory
+
+let is_absent_from_container address memory =
+  Graph.find_opt address memory
+  |> Option.exists ~f:(fun attrs -> Attributes.mem Attribute.AbsentFromContainer attrs)
+
+
 let always_reachable address memory = add_one address Attribute.AlwaysReachable memory
 
 let allocate allocator address location memory =
@@ -465,6 +472,10 @@ module type S = sig
   val add : key -> Attributes.t -> t -> t
 
   val allocate : Attribute.allocator -> key -> Location.t -> t -> t
+
+  val absent_from_container : key -> t -> t
+
+  val is_absent_from_container : key -> t -> bool
 
   val always_reachable : key -> t -> t
 
