@@ -599,10 +599,10 @@ let destructor this container ~desc : model_no_non_disj =
     addresses astate
 
 
-(** What one argument of an insertion stores, read through its reference: a scalar directly, and
-    both halves of a pair, since an entry of a map-like container is a pair and EITHER half can be
-    an owner. [const Key] makes the key object const, not whatever it points to, so a
-    [std::map<Owner*, int>] owns through its key. *)
+(** What one argument of an insertion stores, read through its reference: a scalar directly, both
+    halves of a pair, since an entry of a map-like container is a pair and EITHER half can be an
+    owner, and any other object as a whole. [const Key] makes the key object const, not whatever it
+    points to, so a [std::map<Owner*, int>] owns through its key. *)
 let inserted_owners_of_arg path location (arg : _ FuncArg.t) astate =
   let is_scalar typ = Typ.is_int typ || Typ.is_pointer typ in
   match arg with
@@ -631,6 +631,17 @@ let inserted_owners_of_arg path location (arg : _ FuncArg.t) astate =
       let* astate, first = read_half astate "first" in
       let+ astate, second = read_half astate "second" in
       (astate, [first; second])
+  | { FuncArg.arg_payload
+    ; typ= {Typ.desc= Tptr ({desc= Tstruct _}, (Pk_lvalue_reference | Pk_rvalue_reference))} } ->
+      (* An object the model cannot take apart: [std::unique_ptr] and the other owning wrappers,
+         which is what a map of owners is emplaced from. Tie the object itself -- its address,
+         since that is what its fields hang off, unlike a scalar, whose value is behind the
+         reference -- so that what it owns stays reachable from the container. Dropping it instead
+         leaves that memory reachable from nothing and reports it leaked in the caller, which an
+         unmodelled insertion never did: the unknown effect of the call lets the callee take
+         ownership. A model that summarises the call and silently forgets a retained owner is
+         strictly less sound than having no model at all. *)
+      Ok (astate, [arg_payload])
   | _ ->
       Ok (astate, [])
 
