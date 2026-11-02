@@ -652,11 +652,10 @@ include struct
      same descriptor again, and while the [File] still pointed at the descriptor it was
      reachable from a live object and so could not be seen to leak at all. A [File] this model
      did not see take a descriptor has no such field, and then there is nothing to give back and
-     nothing is claimed: one reached through a reference, one built in another procedure and one
-     moved from all keep their leak unreported, the last because the move constructor does not
-     carry the field over. The obligation also goes back without knowing whether something not
-     modelled here has already discharged it, so [f.close(); f.release();] and a result passed to
-     an opaque callee are reported, as they are without this model. *)
+     nothing is claimed: one reached through a reference and one built in another procedure keep
+     their leak unreported. The obligation also goes back without knowing whether something not
+     modelled here has already discharged it, so a result passed to an opaque callee is reported,
+     as it is without this model. *)
   let folly_file_release this : model =
     start_model
     @@ fun () ->
@@ -675,6 +674,89 @@ include struct
           allocation allocator fd
           @@> write_field ~ref:this folly_file_owned_fd minus_one
           @@> assign_ret fd
+
+
+  (* Close a descriptor a [folly::File] is holding. The same thing [close] does to a raw one,
+     without its return value: [folly::File::close()] returns nothing. *)
+  let discharge_tracked_fd fd =
+    let fd_origin = ValueOrigin.unknown fd in
+    check_fd_not_released fd_origin
+    @@> disj
+          [ prune_lt_int fd IntLit.zero
+          ; (let* {callee_procname} = get_data in
+             release_fd (FClose callee_procname) fd_origin ) ]
+
+
+  (* The descriptor this [File] is holding right now, or [None] when it is holding none: either
+     this model never saw it take one, or a previous [release()] or [close()] left the [-1]
+     behind. Keeping the two apart is what stops a second call claiming anything. *)
+  let folly_file_held_fd this =
+    let* owned = is_known_field this folly_file_owned_fd in
+    if not owned then ret None
+    else
+      let* fd = load_access ~deref:false this (FieldAccess folly_file_owned_fd) in
+      let* held = as_constant_int fd in
+      match held with Some -1 -> ret None | _ -> ret (Some fd)
+
+
+  (* [folly::File::close()] closes the descriptor and leaves the [File] holding [-1]. Without it
+     the model still believed the [File] held the descriptor, so a later [release()] handed the
+     obligation back and a descriptor that had in fact been closed was reported as leaked. Leave
+     the same [-1] behind as [release()] does, so a [release()] after a [close()] hands out
+     nothing and a second [close()] closes nothing. *)
+  let folly_file_close this : model =
+    start_model
+    @@ fun () ->
+    let this = to_aval this in
+    let* held = folly_file_held_fd this in
+    match held with
+    | None ->
+        ret ()
+    | Some fd ->
+        let* minus_one = int (-1) in
+        discharge_tracked_fd fd @@> write_field ~ref:this folly_file_owned_fd minus_one
+
+
+  (* Whether two [File]s are the same object, so that the self-move guards below match folly's. *)
+  let folly_file_same_object this other =
+    exec_pure_operation (fun astate ->
+        let canon aval = (AbductiveDomain.CanonValue.canon' astate (fst aval) :> AbstractValue.t) in
+        AbstractValue.equal (canon this) (canon other) )
+
+
+  (* A moved-from [folly::File] gives up its descriptor, so the obligation has to travel with it:
+     the destination owns it and the source is left holding [-1]. Without this the field stayed
+     on the source, the destination's [release()] found nothing to give back, and a leak after
+     the move went unreported. Move ASSIGNMENT also closes whatever the destination was already
+     holding, as folly does; on construction there is no field yet and that step does nothing.
+     A [File] moved onto itself keeps its descriptor: folly's [operator=] does nothing when the
+     two are the same object, and without this guard the model closed the descriptor and then
+     moved it back from a source it had just emptied. *)
+  let folly_file_move_dsl this other =
+    let* self = folly_file_same_object this other in
+    if self then ret ()
+    else
+      let* overwritten = folly_file_held_fd this in
+      let* () = match overwritten with None -> ret () | Some fd -> discharge_tracked_fd fd in
+      let* moved = folly_file_held_fd other in
+      match moved with
+      | None ->
+          ret ()
+      | Some fd ->
+          let* minus_one = int (-1) in
+          write_field ~ref:this folly_file_owned_fd fd
+          @@> write_field ~ref:other folly_file_owned_fd minus_one
+
+
+  let folly_file_move_construct this other : model =
+    start_model @@ fun () -> folly_file_move_dsl (to_aval this) (to_aval other)
+
+
+  let folly_file_move_assign this other : model =
+    start_model
+    @@ fun () ->
+    let this = to_aval this in
+    folly_file_move_dsl this (to_aval other) @@> assign_ret this
 
 
   let unknown_syscall args : model_no_non_disj =
@@ -1482,8 +1564,13 @@ let matchers : matcher list =
   ; -"fgetpos" <>$ capt_arg_payload $+ capt_arg $--> fgetpos
   ; -"fgets" <>$ capt_arg_payload $+ any_arg $+ capt_arg_payload $--> fgets
   ; -"fileno" <>$ capt_arg_payload $--> compose1 valid_arg (ignore_arg non_det_ret)
+  ; -"folly" &:: "File" &:: "File" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> folly_file_move_construct
   ; -"folly" &:: "File" &:: "File" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
     $--> folly_file_from_fd
+  ; -"folly" &:: "File" &:: "close" <>$ capt_arg_payload $--> folly_file_close
+  ; -"folly" &:: "File" &:: "operator=" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> folly_file_move_assign
   ; -"folly" &:: "File" &:: "release" <>$ capt_arg_payload $--> folly_file_release
   ; -"fopen" <>$ capt_arg_payload $+ capt_arg_payload $--> fopen
   ; -"fprintf" <>$ capt_arg_payload $+ capt_arg_payload $+++$--> fprintf
