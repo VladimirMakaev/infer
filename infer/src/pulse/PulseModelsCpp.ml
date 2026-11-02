@@ -2691,26 +2691,42 @@ module Vector = struct
      a model that summarises the call and silently forgets a pointer argument is strictly LESS
      sound than having none, and that is what reported the new'd object leaked. Keep such an
      argument reachable from the vector, which is the criterion the leak check actually uses --
-     the same reasoning [tie_inserted_value] records for the insertions. Only a reference to a
-     pointer is tied: those are the arguments that can carry ownership. *)
+     the same reasoning [tie_inserted_value] records for the insertions. A reference to a pointer
+     and a reference to an object are tied: those are the arguments that can carry ownership, an
+     object through the owning wrapper it is or holds. *)
   let tie_unconstructed_args path location vector (args : _ FuncArg.t list) astate =
     List.fold args ~init:(Sat (Ok astate)) ~f:(fun acc (arg : _ FuncArg.t) ->
         let** astate = acc in
-        match arg.FuncArg.typ.Typ.desc with
-        | Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))
-          when Typ.is_pointer value_typ ->
+        (* a scalar's value is behind the reference; an object's fields hang off its address, so
+           that address is what has to be tied *)
+        let tied =
+          match arg.FuncArg.typ.Typ.desc with
+          | Tptr (value_typ, (Pk_lvalue_reference | Pk_rvalue_reference))
+            when Typ.is_pointer value_typ ->
+              Some `Dereference
+          | Tptr ({desc= Tstruct _}, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+              Some `Object
+          | _ ->
+              None
+        in
+        match tied with
+        | None ->
+            Sat (Ok astate)
+        | Some tied ->
             Sat
               (let* astate, v =
-                 PulseOperations.eval_access path Read location arg.FuncArg.arg_payload Dereference
-                   astate
+                 match tied with
+                 | `Dereference ->
+                     PulseOperations.eval_access path Read location arg.FuncArg.arg_payload
+                       Dereference astate
+                 | `Object ->
+                     Ok (astate, arg.FuncArg.arg_payload)
                in
                let* astate, elem =
                  GenericArrayBackedCollection.element path location vector
                    (AbstractValue.mk_fresh ()) astate
                in
-               PulseOperations.write_deref path location ~ref:elem ~obj:v astate )
-        | _ ->
-            Sat (Ok astate) )
+               PulseOperations.write_deref path location ~ref:elem ~obj:v astate ) )
 
 
   let emplace_back_no_ctor vector args ~desc : model_no_non_disj =
