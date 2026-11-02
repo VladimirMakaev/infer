@@ -39,11 +39,8 @@ abstract class UnknownCode {
     InferTaint.inferSensitiveSink(buffer)
   }
 
-  // The taint through StringBuffer.append in propagateFootprint is only picked up while
-  // java.lang.StringBuffer is unresolved and the call is therefore unknown. Once the type
-  // environment has the class, the flow is lost in the callee's summary.
-  fun FN_callPropagateFootprintBad() {
-    propagateFootprint(InferTaint.inferSecretSource() as String)
+  fun callPropagateFootprintBad() {
+    propagateFootprint(InferTaint.inferSecretStringSource())
   }
 
   fun propagateTaint(param: String): String? {
@@ -51,9 +48,8 @@ abstract class UnknownCode {
     return nativeMethod2(param, i) as String?
   }
 
-  // Same limitation as FN_callPropagateFootprintBad.
-  fun FN_callPropagateThenPropagateFootprintBad() {
-    val source = InferTaint.inferSecretSource() as String
+  fun callPropagateThenPropagateFootprintBad() {
+    val source = InferTaint.inferSecretStringSource()
     propagateFootprint(propagateTaint(source))
   }
 

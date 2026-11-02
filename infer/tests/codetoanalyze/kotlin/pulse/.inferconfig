@@ -2,6 +2,7 @@
   "force-delete-results-dir": true,
   "pulse-taint-sources": [
     { "procedure": "inferSecretSource", "kinds": ["Simple"] },
+    { "procedure": "inferSecretStringSource", "kinds": ["Simple"] },
     { "class_names": ["codetoanalyze.kotlin.pulse.InferBaseSource"],
       "method_return_type_names": ["java.lang.String"],
       "kinds": ["Simple"]
