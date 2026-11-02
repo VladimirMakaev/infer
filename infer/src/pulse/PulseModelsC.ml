@@ -620,6 +620,55 @@ include struct
     Fieldname.make PulseOperations.pulse_model_type "__infer_model_folly_file_owned_fd"
 
 
+  (* folly's own fields. [fd()] and [explicit operator bool()] are inline and read [fd_], but
+     every member that sets it is declared out of line, so when a model stands in for one it is
+     the only thing that can write it. Writing only this model's own bookkeeping leaves [fd_]
+     uninitialized, and those two inline reads are then reported as reads of an uninitialized
+     value -- which the unknown call each model replaced never caused, an unknown callee
+     initializing everything it can reach. The fields are named through the callee's own class so
+     that they are the ones the frontend produced. *)
+  let folly_file_fields =
+    let* {callee_procname} = get_data in
+    match Procname.get_class_type_name callee_procname with
+    | Some class_name ->
+        ret (Some (Fieldname.make class_name "fd_", Fieldname.make class_name "ownsFd_"))
+    | None ->
+        ret None
+
+
+  (* Leave [this] holding what folly would leave it holding. [owns_fd] is [None] where folly
+     writes [false] and the call carries no argument for it. *)
+  let folly_file_write_fields this ~fd ~owns_fd =
+    let* fields = folly_file_fields in
+    match fields with
+    | None ->
+        ret ()
+    | Some (fd_field, owns_field) ->
+        let* owns_fd = match owns_fd with Some owns -> ret owns | None -> int 0 in
+        write_field ~ref:this fd_field fd @@> write_field ~ref:this owns_field owns_fd
+
+
+  (* [fd_] after a member that gives the descriptor up: folly leaves [-1] behind, and so does the
+     bookkeeping below, so keep the two saying the same thing. *)
+  let folly_file_write_closed_fields this =
+    let* minus_one = int (-1) in
+    folly_file_write_fields this ~fd:minus_one ~owns_fd:None
+
+
+  (* Whether this constructor is one that takes a descriptor, from the callee's own formals rather
+     than from the shape of the call: [File(int, bool)] and [File(const char*, int, mode_t)] both
+     arrive with three payloads, and [File(File&&)] and a [File(int)] whose defaulted [ownsFd] the
+     frontend dropped both arrive with two. Taking a [const char*] for a descriptor would store a
+     pointer in [fd_] and drop its allocation. *)
+  let folly_file_ctor_takes_fd =
+    let* {callee_procname} = get_data in
+    match IRAttributes.load_formal_types callee_procname with
+    | _this :: first :: _ ->
+        ret (Typ.is_int first)
+    | _ ->
+        ret false
+
+
   (* [folly::File(fd, ownsFd)] takes ownership of [fd] when [ownsFd] and closes it in its
      destructor, so the caller stops owning it. The constructor is declared out of line, so
      without this the descriptor looks leaked at every early return. Forget the ownership rather
@@ -628,18 +677,34 @@ include struct
      needs a value the formula pins to a non-zero constant, which the literal [true], a [const
      bool] and [1] all are: [ownsFd] defaults to false, and when its value is not known there is
      nothing to decide on, so the descriptor keeps belonging to the caller and a missing close is
-     still reported. *)
+     still reported. Whether or not ownership moves, the fields are written: that is what the
+     constructor does, and the [File] is read through [fd()] and [operator bool()] right after. *)
   let folly_file_from_fd this fd owns_fd : model =
     start_model
     @@ fun () ->
-    let* owns = as_constant_int (to_aval owns_fd) in
-    match owns with
-    | Some owns when owns <> 0 ->
-        let fd = to_aval fd in
-        remove_allocation_attr_transitively [fd]
-        @@> write_field ~ref:(to_aval this) folly_file_owned_fd fd
-    | _ ->
-        ret ()
+    let* takes_fd = folly_file_ctor_takes_fd in
+    if not takes_fd then ret ()
+    else
+      let this = to_aval this in
+      let fd = to_aval fd in
+      let owns_fd = to_aval owns_fd in
+      let* owns = as_constant_int owns_fd in
+      match owns with
+      | Some owns when owns <> 0 ->
+          (* the [File] holds this very descriptor, and the ownership has just left the caller,
+             so there is nothing on it left for anything to release *)
+          remove_allocation_attr_transitively [fd]
+          @@> write_field ~ref:this folly_file_owned_fd fd
+          @@> folly_file_write_fields this ~fd ~owns_fd:(Some owns_fd)
+      | _ ->
+          (* The descriptor stays the caller's, so give [fd_] a value of its own instead of the
+             caller's descriptor. [~File()] is declared out of line as well, so an unknown call
+             stands in for it, and an unknown callee may release whatever it can reach: pointing
+             [fd_] at the caller's descriptor would hand it that one, and the leak the caller
+             really does have would stop being reported. Nothing here needs [fd_] to be the
+             caller's descriptor, only for it not to be uninitialized. *)
+          let* opaque = fresh () in
+          folly_file_write_fields this ~fd:opaque ~owns_fd:(Some owns_fd)
 
 
   (* [folly::File::release()] returns the descriptor and leaves the [File] holding [-1], so the
@@ -660,6 +725,8 @@ include struct
     start_model
     @@ fun () ->
     let this = to_aval this in
+    (* folly leaves [fd_ = -1] and [ownsFd_ = false] whether or not this model was watching *)
+    let* () = folly_file_write_closed_fields this in
     let* owned = is_known_field this folly_file_owned_fd in
     if not owned then ret ()
     else
@@ -709,6 +776,7 @@ include struct
     @@ fun () ->
     let this = to_aval this in
     let* held = folly_file_held_fd this in
+    let* () = folly_file_write_closed_fields this in
     match held with
     | None ->
         ret ()
@@ -732,6 +800,26 @@ include struct
      A [File] moved onto itself keeps its descriptor: folly's [operator=] does nothing when the
      two are the same object, and without this guard the model closed the descriptor and then
      moved it back from a source it had just emptied. *)
+  (* Carry folly's own fields to the destination and leave the source closed, as folly's move
+     does. A field the analysis has no value for is replaced by a fresh one rather than read:
+     reading it would put a "must be initialized" obligation on the source onto every caller,
+     and all that is needed here is that the destination's [fd_] is not left uninitialized. *)
+  let folly_file_move_fields this other =
+    let* fields = folly_file_fields in
+    match fields with
+    | None ->
+        ret ()
+    | Some (fd_field, owns_field) ->
+        let carry field =
+          let* known = is_known_field other field in
+          let* v = if known then load_access ~deref:false other (FieldAccess field) else fresh () in
+          write_field ~ref:this field v
+        in
+        let* () = carry fd_field in
+        let* () = carry owns_field in
+        folly_file_write_closed_fields other
+
+
   let folly_file_move_dsl this other =
     let* self = folly_file_same_object this other in
     if self then ret ()
@@ -739,6 +827,7 @@ include struct
       let* overwritten = folly_file_held_fd this in
       let* () = match overwritten with None -> ret () | Some fd -> discharge_tracked_fd fd in
       let* moved = folly_file_held_fd other in
+      let* () = folly_file_move_fields this other in
       match moved with
       | None ->
           ret ()
@@ -748,8 +837,19 @@ include struct
           @@> write_field ~ref:other folly_file_owned_fd minus_one
 
 
+  (* Two payloads is either [File(File&&)] or a [File(int fd)] whose defaulted [ownsFd] the
+     frontend dropped; the callee's formals tell them apart. folly does not take ownership
+     without [ownsFd], so the second only has fields to write -- but write them it must, for the
+     same reason the two-argument constructor does, and with a value of their own for the same
+     reason it uses one when it does not take the descriptor. *)
   let folly_file_move_construct this other : model =
-    start_model @@ fun () -> folly_file_move_dsl (to_aval this) (to_aval other)
+    start_model
+    @@ fun () ->
+    let* takes_fd = folly_file_ctor_takes_fd in
+    if takes_fd then
+      let* opaque = fresh () in
+      folly_file_write_fields (to_aval this) ~fd:opaque ~owns_fd:None
+    else folly_file_move_dsl (to_aval this) (to_aval other)
 
 
   let folly_file_move_assign this other : model =
