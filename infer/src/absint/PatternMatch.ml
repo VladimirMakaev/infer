@@ -183,6 +183,52 @@ module Java = struct
 
   let implements_kotlin_intrinsics = implements "kotlin.jvm.internal.Intrinsics"
 
+  (** The compiler-generated classes a Kotlin coroutine's state machine lives in: kotlinc turns a
+      suspending lambda into a [SuspendLambda] subclass and a suspending function into a
+      [ContinuationImpl] one, both under [BaseContinuationImpl]. Matched by name at every level
+      rather than with [implements], which only looks at supertypes the type environment has: all of
+      these are declared in kotlin-stdlib, which a capture need not have translated, so a tenv
+      matcher would silently never fire on the subclass that matters. *)
+  let kotlin_continuation_classes =
+    [ "kotlin.coroutines.jvm.internal.BaseContinuationImpl"
+    ; "kotlin.coroutines.jvm.internal.ContinuationImpl"
+    ; "kotlin.coroutines.jvm.internal.RestrictedContinuationImpl"
+    ; "kotlin.coroutines.jvm.internal.SuspendLambda"
+    ; "kotlin.coroutines.jvm.internal.RestrictedSuspendLambda" ]
+
+
+  let is_kotlin_coroutine_continuation tenv typename =
+    Tenv.mem_supers tenv typename ~f:(fun name _struct_opt ->
+        List.mem kotlin_continuation_classes (Typ.Name.name name) ~equal:String.equal )
+
+
+  (** The state kotlinc generates on a continuation: the resumption counter [label], the pending
+      [result], and the slots that values live across a suspension are spilled into, named by JVM
+      type letter and index -- [L$0] for a reference, [I$0] for an int, [J$0] for a long, and so on.
+      Values the lambda captured are named [$x] after their source name, and the outer-class
+      reference is [this$0], so neither shape is matched here. *)
+  let is_kotlin_continuation_state_field fieldname =
+    let name = Fieldname.get_field_name fieldname in
+    String.equal name "label" || String.equal name "result"
+    ||
+    (* a spill slot, matched without allocating: this runs on every field access the analysis
+       sees, so it must not split the string to find out that it is not one *)
+    let length = String.length name in
+    length > 2
+    && String.contains "LIJFDZBCS" name.[0]
+    && Char.equal name.[1] '$'
+    &&
+    let rec is_index i = i >= length || (Char.is_digit name.[i] && is_index (i + 1)) in
+    is_index 2
+
+
+  (** Holds of a field that is part of a coroutine's state machine rather than of the program's own
+      state. Resumptions of one continuation are serialised, so this state is confined to whichever
+      thread is running the coroutine at the time. *)
+  let is_kotlin_continuation_state tenv typename fieldname =
+    is_kotlin_continuation_state_field fieldname && is_kotlin_coroutine_continuation tenv typename
+
+
   (** Checks if the class name is a Java exception *)
   let is_throwable tenv typename = is_subtype_of_str tenv typename "java.lang.Throwable"
 
