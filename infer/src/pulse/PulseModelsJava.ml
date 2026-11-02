@@ -309,8 +309,10 @@ module Resource = struct
 
   let inputstream_resource_usage_modeled_do_not_throws = StringSet.of_list ["mark"; "markSupported"]
 
+  (* [readLine] is [BufferedReader]'s most common read. Left unknown, it makes Pulse stop tracking
+     the reader, so a reader that is never closed after a [readLine] is not reported. *)
   let reader_resource_usage_modeled_throws_IOException =
-    StringSet.of_list ["read"; "ready"; "reset"; "skip"]
+    StringSet.of_list ["read"; "readLine"; "ready"; "reset"; "skip"]
 
 
   let reader_resource_usage_modeled_do_not_throws = StringSet.of_list ["mark"; "markSupported"]
