@@ -231,12 +231,16 @@ let search_sources sources =
         initial_map sourcepath
 
 
-let load_from_arguments classes_out_path sources =
+let load_from_arguments ?classpath:compiler_classpath classes_out_path sources =
   let roots, classes = search_classes classes_out_path in
   let split cp_option = Option.value_map ~f:split_classpath ~default:[] cp_option in
   let classpath =
-    (* order follows https://docs.oracle.com/javase/7/docs/technotes/tools/windows/classpath.html *)
-    split Config.bootclasspath @ split Config.classpath @ IString.Set.elements roots
+    (* order follows https://docs.oracle.com/javase/7/docs/technotes/tools/windows/classpath.html.
+       [compiler_classpath] is what the compiler itself was given: without it a capture that does
+       not go through javac's verbose output, such as a Kotlin one, cannot resolve any library
+       class, and records it in the type environment as a supertype-less dummy instead. *)
+    split Config.bootclasspath @ split Config.classpath @ split compiler_classpath
+    @ IString.Set.elements roots
     |> classpath_of_paths
   in
   {classpath_channel= Javalib.class_path classpath; sources= search_sources sources; classes}
@@ -244,15 +248,15 @@ let load_from_arguments classes_out_path sources =
 
 type source =
   | FromVerboseOut of {verbose_out_file: string}
-  | FromArguments of {path: string; sources: string list}
+  | FromArguments of {path: string; sources: string list; classpath: string option}
 
 let with_classpath ~f source =
   let classpath =
     match source with
     | FromVerboseOut {verbose_out_file} ->
         load_from_verbose_output verbose_out_file
-    | FromArguments {path; sources} ->
-        load_from_arguments path sources
+    | FromArguments {path; sources; classpath} ->
+        load_from_arguments ?classpath path sources
   in
   if IString.Map.is_empty classpath.sources then
     L.user_warning "No Java source code loaded. Analyzing JAR/WAR files directly" ;
