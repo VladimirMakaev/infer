@@ -214,7 +214,12 @@ int self_move_assigned_then_release_leak_bad(const char* path) {
 }
 
 // fd_ is written by the out-of-line constructor, which the model stands in for, so the inline
-// fd() and operator bool() below must not read an uninitialized value.
+// fd() and operator bool() must not read an uninitialized value.
+//
+// WHAT PINS THAT is the group below this one, where the File crosses a procedure boundary. The
+// same-procedure cases here were silent even before the constructor model wrote fd_, so on
+// their own they would let a revert of that write through; they are kept because they are the
+// shapes the report was filed about, not because they test anything.
 int reads_the_fd_through_the_file_ok(const char* path) {
   const int fd = ::open(path, O_RDONLY);
   if (fd < 0) {
@@ -281,9 +286,69 @@ int reads_the_fd_after_move_ok(const char* path) {
   return file ? seen : seen;
 }
 
+// THE CASES THAT PIN THE fd_ WRITE.
+//
+// A File constructed in ANOTHER procedure is what the production report was really about: the
+// callee's summary carries whatever the constructor model left, and the caller's read of fd_ is
+// then checked against it. Construct and read in one procedure and nothing is reported either
+// way, which is why the group above pins nothing. Every case below reported
+// "`this.fd_` is read without initialization" before the constructor model wrote fd_, and is
+// silent now; revert that write and each one comes back.
+
+// the shape the production code has: a helper that opens a descriptor and hands back an owning
+// File, whose caller asks whether it is open and reads it
+folly::File openDirectory(const char* path) {
+  return folly::File(::open(path, O_RDONLY | O_DIRECTORY), /*ownsFd=*/true);
+}
+
+int reads_a_returned_file_ok(const char* path) {
+  const folly::File tree = openDirectory(path);
+  if (!tree) {
+    return -1;
+  }
+  return use_fd(tree.fd());
+}
+
+// both reads in one condition, as the production code writes it
+int reads_a_returned_file_in_a_condition_ok(const char* path) {
+  const folly::File tree = openDirectory(path);
+  if (!tree || use_fd(tree.fd()) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+// the read happens one procedure further down, through a reference
+int inspect_the_file(const folly::File& file) {
+  if (!file) {
+    return -1;
+  }
+  return use_fd(file.fd());
+}
+
+int reads_a_returned_file_by_reference_ok(const char* path) {
+  const folly::File project = openDirectory(path);
+  return inspect_the_file(project);
+}
+
+// the same across a boundary for a File that does NOT own its descriptor, which takes the
+// other branch of the model: the caller keeps the descriptor and closes it
+folly::File borrowDescriptor(int fd) { return folly::File(fd); }
+
+int reads_a_returned_borrowed_file_ok(const char* path) {
+  const int fd = ::open(path, O_RDONLY);
+  if (fd < 0) {
+    return -1;
+  }
+  const folly::File file = borrowDescriptor(fd);
+  const int seen = file ? use_fd(file.fd()) : -2;
+  ::close(fd);
+  return seen;
+}
+
 // CONTROL: a field a translated constructor really does leave uninitialized is still reported
-// through the same kind of inline accessor, so this is not blanket initialization of whatever a
-// model touches.
+// through the same kind of inline accessor, on both sides of this change, so this is not
+// blanket initialization of whatever a model touches.
 struct NotAFile {
   int fd_;
   int flags_ = 0;
