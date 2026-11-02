@@ -351,16 +351,7 @@ module Basic = struct
       becoming a blanket un-invalidation. This is the rule [PulseModelsOptional.renew_storage] has
       already been applying to [std::optional]; placement new is the general case of it. *)
   let begin_cpp_lifetime_in_storage address astate =
-    let seeds =
-      (* [address] may be a pointer TO the storage, as it is for [new (p) T]; then the object whose
-         sub-objects were invalidated is one dereference away. Seed both, and take no further
-         [Dereference] below. *)
-      match Memory.find_edge_opt address Dereference astate with
-      | Some (contents, _) ->
-          Seq.cons address (Seq.return contents)
-      | None ->
-          Seq.return address
-    in
+    let seeds = Seq.return address in
     let storage =
       AbductiveDomain.reachable_addresses_from
         ~edge_filter:(function FieldAccess _ | ArrayAccess _ -> true | Dereference -> false)
