@@ -1765,6 +1765,42 @@ void copy_ends_before_source_moved_bad(const std::string& x) {
   use_string(other);
 }
 
+void modify_string_arg(std::string arg) { arg.push_back('a'); }
+
+// moving into the intermediate would leave `info.hash` empty for the move below
+void intermediate_copy_of_field_then_field_moved_ok(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  modify_string_arg(info.hash);
+  std::string other(std::move(info.hash));
+  use_string(other);
+}
+
+// moving the whole owner takes the copy's source with it
+void intermediate_copy_of_field_then_owner_moved_ok(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  modify_string_arg(info.hash);
+  NameAndHash other(std::move(info));
+  use_name_and_hash(other);
+}
+
+// the move is of a sibling field, so the copy's source is still unused after it
+void intermediate_copy_of_field_then_other_field_moved_bad(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  modify_string_arg(info.hash);
+  std::string other(std::move(info.name));
+  use_string(other);
+}
+
+// nothing reads the source after the copy, so the copy really is unnecessary
+void intermediate_copy_of_field_unused_bad(const std::string& h) {
+  NameAndHash info;
+  info.hash = h;
+  modify_string_arg(info.hash);
+}
+
 class Text {
  public:
   Text(const Text& other);

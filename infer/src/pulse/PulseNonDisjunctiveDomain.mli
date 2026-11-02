@@ -98,6 +98,11 @@ val mark_intermediates_with_shared_source :
 (** Do not report intermediate copies whose source object is also used by another argument of the
     same call. Addresses are evaluated in the state before applying the callee. *)
 
+val mark_intermediate_with_moved_source : Var.t -> t -> t
+(** Do not report the intermediate copy held by this variable: the object its source was copied from
+    is moved from after the copy, so moving at the copy would empty the source before the later move
+    reads it. *)
+
 val add_field : Fieldname.t -> source_addr_opt:AbstractValue.t option -> copy_spec_t -> t -> t
 
 val add_parameter : Var.t -> parameter_spec_t -> t -> t

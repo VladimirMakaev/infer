@@ -327,7 +327,8 @@ module IntraDomElt = struct
     ; stores: Stores.t
     ; passed_to: PassedTo.t
     ; reached_end: ReachedEnd.t
-    ; shared_intermediates: SharedIntermediates.t }
+    ; shared_intermediates: SharedIntermediates.t
+    ; intermediates_with_moved_source: SharedIntermediates.t }
   [@@deriving abstract_domain]
 
   let pp fmt
@@ -342,16 +343,18 @@ module IntraDomElt = struct
       ; loads
       ; passed_to
       ; reached_end
-      ; shared_intermediates } =
+      ; shared_intermediates
+      ; intermediates_with_moved_source } =
     F.fprintf fmt
       "@[@[copy map: %a@],@ @[parameter map: %a@],@ @[destructor checked: %a@],@ @[captured: \
        %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@],@ @[shared \
-       intermediates: %a@],@ @[closure captures: %a@],@ @[escaped sources: %a@],@ @[escaped \
-       copies: %a@]@]"
+       intermediates: %a@],@ @[intermediates with moved source: %a@],@ @[closure captures: %a@],@ \
+       @[escaped sources: %a@],@ @[escaped copies: %a@]@]"
       CopyMap.pp copy_map ParameterMap.pp parameter_map DestructorChecked.pp destructor_checked
       Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to ReachedEnd.pp
-      reached_end SharedIntermediates.pp shared_intermediates ClosureCaptures.pp closure_captures
-      CapturedSources.pp escaped_sources EscapedCopies.pp escaped_copies
+      reached_end SharedIntermediates.pp shared_intermediates SharedIntermediates.pp
+      intermediates_with_moved_source ClosureCaptures.pp closure_captures CapturedSources.pp
+      escaped_sources EscapedCopies.pp escaped_copies
 
 
   let bottom =
@@ -367,7 +370,8 @@ module IntraDomElt = struct
     ; stores= Stores.bottom
     ; passed_to= PassedTo.bottom
     ; reached_end= ReachedEnd.empty
-    ; shared_intermediates= SharedIntermediates.empty }
+    ; shared_intermediates= SharedIntermediates.empty
+    ; intermediates_with_moved_source= SharedIntermediates.empty }
 
 
   let is_bottom
@@ -383,9 +387,11 @@ module IntraDomElt = struct
       ; stores
       ; passed_to
       ; reached_end
-      ; shared_intermediates } =
+      ; shared_intermediates
+      ; intermediates_with_moved_source } =
     CopyMap.is_bottom copy_map && ReachedEnd.is_bottom reached_end
     && SharedIntermediates.is_bottom shared_intermediates
+    && SharedIntermediates.is_bottom intermediates_with_moved_source
     && ParameterMap.is_bottom parameter_map
     && DestructorChecked.is_bottom destructor_checked
     && Captured.is_bottom captured && Locked.is_bottom locked && Loads.is_bottom loads
@@ -544,7 +550,8 @@ module IntraDomElt = struct
   let is_captured_by_ref_var ~ref_captures pvar = List.mem ref_captures pvar ~equal:Pvar.equal
 
   let get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts
-      ({copy_map; captured; reached_end; shared_intermediates} as astate_n) =
+      ( {copy_map; captured; reached_end; shared_intermediates; intermediates_with_moved_source} as
+        astate_n ) =
     let modified =
       CopyMap.fold
         (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
@@ -565,6 +572,13 @@ module IntraDomElt = struct
             acc
         | IntoIntermediate {copied_var}, _
           when SharedIntermediates.mem copied_var shared_intermediates ->
+            acc
+        | IntoIntermediate {copied_var}, _
+          when SharedIntermediates.mem copied_var intermediates_with_moved_source ->
+            (* The source is moved from after this copy, so the copy is what the later move has
+               left to move: replacing it with a move would empty the source before then. This is
+               checked before the "source is never used later" rule below, which only sees whole
+               variables and so cannot tell that a field of the source was moved out of. *)
             acc
         | (IntoVar _ | IntoIntermediate _), Copied _
           when has_dropped_disjuncts && not (ReachedEnd.mem copy_var reached_end) ->
@@ -701,6 +715,12 @@ module IntraDomElt = struct
                 shared_intermediates=
                   SharedIntermediates.add copied_var astate_n.shared_intermediates }
             else astate_n ) )
+
+
+  let mark_intermediate_with_moved_source copied_var astate_n =
+    { astate_n with
+      intermediates_with_moved_source=
+        SharedIntermediates.add copied_var astate_n.intermediates_with_moved_source }
 
 
   let add_field copied_field ~source_addr_opt res astate_n =
@@ -1003,6 +1023,10 @@ module IntraDom = struct
     map (IntraDomElt.mark_intermediates_with_shared_source actuals astate)
 
 
+  let mark_intermediate_with_moved_source copied_var =
+    map (IntraDomElt.mark_intermediate_with_moved_source copied_var)
+
+
   let add_field copied_field ~source_addr_opt res =
     map (IntraDomElt.add_field copied_field ~source_addr_opt res)
 
@@ -1232,6 +1256,10 @@ let has_intermediate_copies {intra} = IntraDom.has_intermediate_copies intra
 
 let mark_intermediates_with_shared_source actuals astate =
   map_intra (IntraDom.mark_intermediates_with_shared_source actuals astate)
+
+
+let mark_intermediate_with_moved_source copied_var =
+  map_intra (IntraDom.mark_intermediate_with_moved_source copied_var)
 
 
 let add_field copied_field ~source_addr_opt res =
