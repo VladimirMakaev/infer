@@ -86,6 +86,16 @@ module Java : sig
   val implements_kotlin_intrinsics : Tenv.t -> string -> bool
   (** Check whether class implements [kotlin.jvm.internal.Intrinsics] *)
 
+  val is_kotlin_coroutine_continuation : Tenv.t -> Typ.Name.t -> bool
+  (** Check whether the class is one of the continuation classes kotlinc generates for a suspending
+      lambda or function *)
+
+  val is_kotlin_continuation_state : Tenv.t -> Typ.Name.t -> Fieldname.t -> bool
+  (** [is_kotlin_continuation_state tenv typename fieldname] holds when the field is part of a
+      Kotlin coroutine's compiler-generated state machine ([label], [result], or a spill slot such
+      as [L$0]) rather than state the program declared. Resumptions of one continuation are
+      serialised, so such a field is confined to the thread currently running the coroutine. *)
+
   val implements_lang : string -> Tenv.t -> string -> bool
   (** Check whether class implements a Java's lang *)
 

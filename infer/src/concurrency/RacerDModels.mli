@@ -50,6 +50,11 @@ val is_marked_thread_safe : Procname.t -> Tenv.t -> bool
 val is_safe_access : 'a MemoryAccess.t -> HilExp.AccessExpression.t -> Tenv.t -> bool
 (** check if an access to a field is thread-confined, or whether the field is volatile *)
 
+val is_continuation_state_access : 'a MemoryAccess.t -> HilExp.AccessExpression.t -> Tenv.t -> bool
+(** check if an access is to a Kotlin coroutine's compiler-generated state machine, whose
+    resumptions are serialised. Only the slot itself is confined: an access made through one is
+    still an access to the program's own state, and callers should keep walking into it. *)
+
 val should_flag_interface_call : Tenv.t -> HilExp.t list -> CallFlags.t -> Procname.t -> bool
 (** should an interface call be flagged as potentially non-thread safe? *)
 
