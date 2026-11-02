@@ -270,6 +270,10 @@ module AddressAttributes : sig
   (** Add "Uninitialized" attributes when a variable is declared or a memory is allocated by malloc.
   *)
 
+  val absent_from_container : AbstractValue.t -> t -> t
+
+  val is_absent_from_container : AbstractValue.t -> t -> bool
+
   val always_reachable : AbstractValue.t -> t -> t
 
   val allocate : Attribute.allocator -> AbstractValue.t -> Location.t -> t -> t

@@ -210,6 +210,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   match attr with
   | Attribute.StdVectorCapacity _ ->
       Some (Attribute.StdVectorCapacity None)
+  | AbsentFromContainer
   | AlwaysReachable
   (* maybe we want to be more forgiving, at least we get a closure to call even if it comes from
      just one branch? *)
@@ -275,6 +276,7 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
           None
   in
   match (attr1, attr2) with
+  | AbsentFromContainer, AbsentFromContainer
   | AlwaysReachable, AlwaysReachable
   | CSharpResourceReleased, CSharpResourceReleased
   | DictContainConstKeys, DictContainConstKeys
