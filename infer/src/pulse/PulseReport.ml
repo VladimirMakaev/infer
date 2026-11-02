@@ -230,8 +230,15 @@ let with_specialization analysis_data specialization ~f =
           if scope.exposed then List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
           result
       | exception exn ->
+          (* Same condition as the completed path. An analysis can be abandoned for a reason that
+             has nothing to do with this procedure -- the scheduler raises
+             [RestartSchedulerException.ProcnameAlreadyLocked] when another worker has taken the
+             procedure, and the analysis is simply redone -- and reporting the pending issues of a
+             scope that never finished makes the result depend on which worker got there first.
+             What the finished analysis would not have reported, an abandoned one must not report
+             either. *)
           let backtrace = Stdlib.Printexc.get_raw_backtrace () in
-          List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
+          if scope.exposed then List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
           Stdlib.Printexc.raise_with_backtrace exn backtrace )
 
 
