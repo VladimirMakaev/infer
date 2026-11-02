@@ -193,6 +193,15 @@ end = struct
           recursive
 
 
+  (** the classes we have a lock model for, including the ones [--lock-model] adds *)
+  let is_known_lock_type =
+    let lock_classnames =
+      List.fold lock_models ~init:IString.Set.empty ~f:(fun acc {classname} ->
+          if String.is_empty classname then acc else IString.Set.add classname acc )
+    in
+    fun qname -> IString.Set.mem (QualifiedCppName.to_qual_string qname) lock_classnames
+
+
   let mk_matcher methods =
     let matcher = QualifiedCppName.Match.of_fuzzy_qual_names methods in
     fun pname -> QualifiedCppName.Match.match_qualifiers matcher (Procname.get_qualifiers pname)
@@ -293,6 +302,33 @@ end = struct
     , make ~f:get_guard_unlock
     , make ~f:get_guard_lock
     , make_trylock ~f:get_guard_trylock )
+
+
+  (** [folly::LockedPtr] is a guard for a [folly::Synchronized] whatever its mutex, but a
+      [Synchronized] whose mutex provides no mutual exclusion locks nothing, so treating it as a
+      lock makes the data it guards look protected. Take the effect from the mutex instead: keep the
+      built-in guard only when the mutex is a type we have a lock model for, and otherwise leave the
+      call to the constructor and destructor summaries, which is how a guard that is not built in is
+      handled anyway. The mutex is the second template argument of the [Synchronized] the guard is
+      instantiated with; when it cannot be read, keep the guard. *)
+  let is_locked_ptr_of_unmodelled_mutex pname =
+    let mutex_is_unmodelled (mutex : Typ.name) =
+      match mutex with
+      | CppClass {name} | CStruct name | CUnion name ->
+          not (is_known_lock_type name)
+      | _ ->
+          false
+    in
+    match Procname.get_class_type_name pname with
+    | Some (CppClass {name; template_spec_info= Template {args= TType {desc= Tstruct sync} :: _}})
+      when String.equal (QualifiedCppName.to_qual_string name) "folly::LockedPtr" -> (
+      match Typ.Name.get_template_spec_info sync with
+      | Some (Template {args= _ :: TType {desc= Tstruct mutex} :: _}) ->
+          mutex_is_unmodelled mutex
+      | _ ->
+          false )
+    | _ ->
+        false
 
 
   let is_scoped_lock_constructor = mk_matcher ["std::scoped_lock::scoped_lock"]
@@ -428,6 +464,7 @@ end = struct
     else if is_unlock pname then make_unlock pname fst_arg
     else if is_trylock pname then make_trylock pname fst_arg
     else if is_zero_trylock pname then make_zero_trylock pname fst_arg
+    else if is_locked_ptr_of_unmodelled_mutex pname then get_capability_lock_effect pname actuals
     else if is_scoped_lock_constructor pname then make_scoped_lock_construct actuals
     else if is_guard_constructor pname then make_guard_construct pname actuals
     else if is_guard_lock pname then make_guard_lock pname actuals
