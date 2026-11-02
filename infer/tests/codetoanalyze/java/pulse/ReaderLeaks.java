@@ -69,7 +69,7 @@ public class ReaderLeaks {
     }
   }
 
-  public void FN_tryWithBufferReaderWrapperBad(File file) throws IOException {
+  public void tryWithBufferReaderWrapperBad(File file) throws IOException {
     try (InputStreamReader inputStreamReader = new InputStreamReader(new FileInputStream(file))) {
       BufferedReader reader = new BufferedReader(inputStreamReader);
       ignore(reader.readLine());
