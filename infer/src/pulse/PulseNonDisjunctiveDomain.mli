@@ -98,6 +98,10 @@ val mark_intermediates_with_shared_source :
 (** Do not report intermediate copies whose source object is also used by another argument of the
     same call. Addresses are evaluated in the state before applying the callee. *)
 
+val record_suspension : Location.t -> Timestamp.t -> t -> t
+(** Note that the procedure suspends here, so anything it only borrows may hold a different value
+    when it resumes. *)
+
 val mark_intermediate_with_moved_source : Var.t -> t -> t
 (** Do not report the intermediate copy held by this variable: the object its source was copied from
     is moved from after the copy, so moving at the copy would empty the source before the later move
