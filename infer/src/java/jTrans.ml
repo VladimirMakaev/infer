@@ -369,16 +369,36 @@ let trans_access : _ -> ProcAttributes.access = function
       Protected
 
 
-let rec construct_formals mangled_typs annots =
+let rec construct_formals_aux mangled_typs annots =
   match (mangled_typs, annots) with
   | (mangled, typ) :: mangled_typs, _ when Mangled.equal mangled JConfig.this ->
-      (mangled, typ, Annot.Item.empty) :: construct_formals mangled_typs annots
+      (mangled, typ, Annot.Item.empty) :: construct_formals_aux mangled_typs annots
   | (mangled, typ) :: mangled_typs, annot :: annots ->
-      (mangled, typ, annot) :: construct_formals mangled_typs annots
+      (mangled, typ, annot) :: construct_formals_aux mangled_typs annots
   | _, [] ->
       List.map mangled_typs ~f:(fun (mangled, typ) -> (mangled, typ, Annot.Item.empty))
   | [], _ ->
       []
+
+
+(* RuntimeInvisibleParameterAnnotations is indexed against the SOURCE parameter list, which omits
+   the leading synthetic parameters the descriptor carries: the outer instance of an inner class,
+   and the name and ordinal of an enum constructor. Zipping from the front then puts every
+   annotation on the wrong parameter, so a nullable one picks up its neighbour's @NotNull and the
+   synthetic default-arguments constructor, which passes null for a defaulted nullable, is
+   reported as passing null where non-null was expected. Align the annotations with the end of
+   the list instead, which is what the reflection API does with the same attribute. *)
+let construct_formals mangled_typs annots =
+  let formals_count =
+    List.count mangled_typs ~f:(fun (mangled, _) -> not (Mangled.equal mangled JConfig.this))
+  in
+  let annots_count = List.length annots in
+  let annots =
+    if annots_count < formals_count then
+      List.init (formals_count - annots_count) ~f:(fun _ -> Annot.Item.empty) @ annots
+    else annots
+  in
+  construct_formals_aux mangled_typs annots
 
 
 let create_callee_attributes tenv program cn ms procname =
