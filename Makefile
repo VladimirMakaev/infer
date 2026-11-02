@@ -343,6 +343,7 @@ DIRECT_TESTS += \
 ifneq ($(KOTLINC), no)
 DIRECT_TESTS += \
   kotlin_annotreach \
+  kotlin_jar-capture \
   kotlin_pulse \
   kotlin_racerd \
   kotlin_resources \
