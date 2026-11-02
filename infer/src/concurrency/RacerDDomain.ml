@@ -800,6 +800,7 @@ let add_access tenv formals loc ~is_write (astate : t) exp =
         if
           (not (MemoryAccess.is_field_or_array_access access))
           || RacerDModels.is_safe_access access prefix_path tenv
+          || RacerDModels.is_continuation_state_access access prefix_path tenv
         then add_field_accesses prefix_path' acc access_list
         else
           let is_write = is_write && List.is_empty access_list in
