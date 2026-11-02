@@ -570,6 +570,10 @@ module Internal = struct
       map_post_attrs ~f:(BaseAddressAttributes.invalidate address invalidation location) astate
 
 
+    let absent_from_container address astate =
+      map_post_attrs astate ~f:(BaseAddressAttributes.absent_from_container address)
+
+
     let always_reachable address astate =
       map_post_attrs astate ~f:(BaseAddressAttributes.always_reachable address)
 
@@ -3110,6 +3114,15 @@ module AddressAttributes = struct
     if Language.curr_language_is Clang then
       set_uninitialized tenv timestamp (canon_pointer_source' astate src) typ location astate
     else astate
+
+
+  let absent_from_container v astate =
+    SafeAttributes.absent_from_container (CanonValue.canon' astate v) astate
+
+
+  let is_absent_from_container v astate =
+    BaseAddressAttributes.is_absent_from_container (CanonValue.canon' astate v)
+      (astate.post :> BaseDomain.t).attrs
 
 
   let always_reachable v astate =

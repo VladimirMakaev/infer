@@ -610,6 +610,9 @@ module Collection = struct
     in
     let hist = Hist.single_event event in
     let astate = PulseOperations.write_id ret_id (not_found_val, hist) astate in
+    (* this null is the model's own assumption that the key is absent, not a value the program
+       produced; record that so a Kotlin non-null assertion can be believed against it *)
+    let astate = AddressAttributes.absent_from_container not_found_val astate in
     PulseOperations.invalidate path
       (StackAddress (Var.of_id ret_id, hist))
       location (ConstantDereference IntLit.zero)
@@ -767,6 +770,20 @@ module Optional = struct
     @@ fun () ->
     let* value = load_access this (FieldAccess internal_value) in
     assign_ret value
+end
+
+module KotlinIntrinsics = struct
+  (* `x!!`, `x as T` and an implicit platform-type coercion all compile to the same
+     Intrinsics.checkNotNull, so the call alone says nothing about where the value came from.
+     Believe the assertion only against a null a container model invented for a key it assumed
+     absent: a null the program really produced -- a literal, or one returned by an analysed
+     method -- is left alone, so Java-to-Kotlin null flows still report. *)
+  let check_not_null (address, _) : model_no_non_disj =
+   fun _ astate ->
+    if AddressAttributes.is_absent_from_container address astate then
+      let<++> astate = PulseArithmetic.prune_positive address astate in
+      astate
+    else Basic.ok_continue astate
 end
 
 module Preconditions = struct
@@ -1159,6 +1176,8 @@ let matchers : matcher list =
        [throwNpe] and [throwJavaNpe] are the pre-1.4 compilation of those same two constructs and
        are left out for the same reason; no kotlinc in the test suite emits them. [checkHasClass]
        is not a null check at all -- it takes class names and throws ClassNotFoundException. *)
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "checkNotNull" $ capt_arg_payload
+    $+...$--> KotlinIntrinsics.check_not_null |> with_non_disj
   ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUninitializedPropertyAccessException"
     &--> Basic.early_exit |> with_non_disj
   ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUninitializedProperty" &--> Basic.early_exit

@@ -31,6 +31,10 @@ module type S = sig
 
   val allocate : Attribute.allocator -> key -> Location.t -> t -> t
 
+  val absent_from_container : key -> t -> t
+
+  val is_absent_from_container : key -> t -> bool
+
   val always_reachable : key -> t -> t
 
   val java_resource_release : key -> t -> t

@@ -273,6 +273,7 @@ module Attribute = struct
     | WrittenTo of Timestamp.t * Trace.t
     | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
     | StdVectorCapacity of IntLit.t option
+    | AbsentFromContainer
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -376,6 +377,8 @@ module Attribute = struct
         F.fprintf f "Allocated%a"
           (Trace.pp ~pp_immediate:(pp_string_if_debug (F.asprintf "(%a)" pp_allocator allocator)))
           trace
+    | AbsentFromContainer ->
+        F.pp_print_string f "AbsentFromContainer"
     | AlwaysReachable ->
         F.pp_print_string f "AlwaysReachable"
     | Closure pname ->
@@ -497,6 +500,7 @@ module Attribute = struct
     | UsedAsBranchCond _ ->
         true
     | Invalid _
+    | AbsentFromContainer
     | Allocated _
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
@@ -548,6 +552,7 @@ module Attribute = struct
     | UnreachableAt _
     | UsedAsBranchCond _ ->
         false
+    | AbsentFromContainer
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | Allocated _
@@ -597,6 +602,7 @@ module Attribute = struct
           TaintedSet.filter (fun {intra_procedural_only} -> not intra_procedural_only) tainted
         in
         if TaintedSet.is_empty tainted' then None else Some (Tainted tainted')
+    | AbsentFromContainer
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | Allocated _
@@ -730,7 +736,8 @@ module Attribute = struct
           proc_name
     | UsedAsBranchCond (pname, location, trace) ->
         UsedAsBranchCond (pname, location, add_call_to_trace trace)
-    | ( AddressOfCppTemporary _
+    | ( AbsentFromContainer
+      | AddressOfCppTemporary _
       | AddressOfStackVariable _
       | AlwaysReachable
       | Closure _
@@ -844,7 +851,8 @@ module Attribute = struct
         L.die InternalError "Unexpected attribute %a." pp attr
     | TaintSanitized set when TaintSanitizedSet.is_empty set ->
         L.die InternalError "Unexpected attribute %a." pp attr
-    | ( AddressOfCppTemporary _
+    | ( AbsentFromContainer
+      | AddressOfCppTemporary _
       | AddressOfStackVariable _
       | Allocated _
       | AlwaysReachable

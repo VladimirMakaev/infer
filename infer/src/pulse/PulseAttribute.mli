@@ -199,6 +199,11 @@ type t =
   | WrittenTo of Timestamp.t * Trace.t
   | LastLookupValue of {key: lookup_key; first_key: lookup_key option; known_present: bool}
   | StdVectorCapacity of IntLit.t option
+  | AbsentFromContainer
+      (** the value a container model invented for a key or element it assumed absent, rather than
+          one the program produced. Deliberately LAST: attribute ranks come from Variants.to_rank,
+          i.e. from constructor position, so inserting anywhere else renumbers every existing
+          attribute and rewrites every summary on disk. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
