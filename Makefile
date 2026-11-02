@@ -304,6 +304,7 @@ BUILD_SYSTEMS_TESTS += \
   differential_skip_duplicated_types_on_filenames \
   differential_skip_duplicated_types_on_filenames_with_renamings \
   gradle \
+  java_classpath_without_platform \
   java_source_parser \
   javac \
   resource_leak_exception_lines \
