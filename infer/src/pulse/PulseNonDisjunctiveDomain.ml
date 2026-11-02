@@ -328,7 +328,8 @@ module IntraDomElt = struct
     ; passed_to: PassedTo.t
     ; reached_end: ReachedEnd.t
     ; shared_intermediates: SharedIntermediates.t
-    ; intermediates_with_moved_source: SharedIntermediates.t }
+    ; intermediates_with_moved_source: SharedIntermediates.t
+    ; suspensions: TrackedLoc.t }
   [@@deriving abstract_domain]
 
   let pp fmt
@@ -344,17 +345,18 @@ module IntraDomElt = struct
       ; passed_to
       ; reached_end
       ; shared_intermediates
-      ; intermediates_with_moved_source } =
+      ; intermediates_with_moved_source
+      ; suspensions } =
     F.fprintf fmt
       "@[@[copy map: %a@],@ @[parameter map: %a@],@ @[destructor checked: %a@],@ @[captured: \
        %a@],@ @[locked: %a@],@ @[loads: %a@],@ @[passed to: %a@],@ @[reached end: %a@],@ @[shared \
        intermediates: %a@],@ @[intermediates with moved source: %a@],@ @[closure captures: %a@],@ \
-       @[escaped sources: %a@],@ @[escaped copies: %a@]@]"
+       @[escaped sources: %a@],@ @[escaped copies: %a@],@ @[suspensions: %a@]@]"
       CopyMap.pp copy_map ParameterMap.pp parameter_map DestructorChecked.pp destructor_checked
       Captured.pp captured Locked.pp locked Loads.pp loads PassedTo.pp passed_to ReachedEnd.pp
       reached_end SharedIntermediates.pp shared_intermediates SharedIntermediates.pp
       intermediates_with_moved_source ClosureCaptures.pp closure_captures CapturedSources.pp
-      escaped_sources EscapedCopies.pp escaped_copies
+      escaped_sources EscapedCopies.pp escaped_copies TrackedLoc.pp suspensions
 
 
   let bottom =
@@ -371,7 +373,8 @@ module IntraDomElt = struct
     ; passed_to= PassedTo.bottom
     ; reached_end= ReachedEnd.empty
     ; shared_intermediates= SharedIntermediates.empty
-    ; intermediates_with_moved_source= SharedIntermediates.empty }
+    ; intermediates_with_moved_source= SharedIntermediates.empty
+    ; suspensions= TrackedLoc.bottom }
 
 
   let is_bottom
@@ -388,8 +391,10 @@ module IntraDomElt = struct
       ; passed_to
       ; reached_end
       ; shared_intermediates
-      ; intermediates_with_moved_source } =
-    CopyMap.is_bottom copy_map && ReachedEnd.is_bottom reached_end
+      ; intermediates_with_moved_source
+      ; suspensions } =
+    TrackedLoc.is_bottom suspensions && CopyMap.is_bottom copy_map
+    && ReachedEnd.is_bottom reached_end
     && SharedIntermediates.is_bottom shared_intermediates
     && SharedIntermediates.is_bottom intermediates_with_moved_source
     && ParameterMap.is_bottom parameter_map
@@ -550,13 +555,33 @@ module IntraDomElt = struct
   let is_captured_by_ref_var ~ref_captures pvar = List.mem ref_captures pvar ~equal:Pvar.equal
 
   let get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts
-      ( {copy_map; captured; reached_end; shared_intermediates; intermediates_with_moved_source} as
-        astate_n ) =
+      ( { copy_map
+        ; captured
+        ; reached_end
+        ; shared_intermediates
+        ; intermediates_with_moved_source
+        ; suspensions } as astate_n ) =
     let modified =
       CopyMap.fold
         (fun CopyVar.{copied_into} (copy_spec : CopySpec.t) acc ->
           match copy_spec with Modified _ -> CopiedSet.add copied_into acc | Copied _ -> acc )
         copy_map CopiedSet.empty
+    in
+    (* Does [var] get read after [ts]? A plain load counts, and so does being handed to a call --
+       but not to its own destructor, which a coroutine frame runs after the suspension for every
+       variable it holds and which would otherwise make every such variable look read. *)
+    let is_read_after (ts : Timestamp.t) var =
+      let after = TrackedLoc.exists (fun _ t -> (ts :> int) < (t :> int)) in
+      after (Loads.get_loaded_locations var astate_n.loads)
+      || CalleesWithLoc.exists
+           (fun callee tracked_loc ->
+             ( match (callee : CalleeWithUnknown.t) with
+               | V {callee} ->
+                   not (Procname.is_destructor callee)
+               | Unknown ->
+                   true )
+             && after tracked_loc )
+           (PassedTo.find var astate_n.passed_to)
     in
     let is_captured copy_into =
       match (copy_into : Attribute.CopiedInto.t) with
@@ -627,6 +652,21 @@ module IntraDomElt = struct
               (* if source var is never used later on, we can still suggest removing the copy even though the copy is modified *)
               (copied_into, source_typ, source_opt, node, location, copied_location, from) :: acc
             else acc
+        | IntoVar {copied_var}, Copied {source_opt= Some (PVar pvar, _); timestamp= copied_timestamp}
+          when is_lvalue_ref_param ~ref_formals pvar
+               && TrackedLoc.exists
+                    (fun _ suspended ->
+                      (copied_timestamp :> int) < (suspended :> int)
+                      && is_read_after suspended copied_var )
+                    suspensions ->
+            (* The copy is of something the caller only lent this frame, the frame suspends while
+               holding it, and it reads the copy after resuming. The advice is to bind a reference
+               instead, but the caller is free to change the object while the coroutine is
+               suspended, so that reference would read a value the copy was taken to preserve.
+               Each condition is load-bearing: a synchronous function cannot be interrupted, a
+               source the frame owns cannot change under it, and a copy that is not read after the
+               suspension could have been a reference after all. *)
+            acc
         | _, Copied {node; location; copied_location; source_typ; source_opt; from} ->
             (copied_into, source_typ, source_opt, node, location, copied_location, from) :: acc
         | _, Modified _ ->
@@ -715,6 +755,12 @@ module IntraDomElt = struct
                 shared_intermediates=
                   SharedIntermediates.add copied_var astate_n.shared_intermediates }
             else astate_n ) )
+
+
+  (* A suspension point: the coroutine gives control back to its caller here, so anything the
+     frame only borrows may be a different value when it resumes. *)
+  let record_suspension loc timestamp astate_n =
+    {astate_n with suspensions= TrackedLoc.add loc timestamp astate_n.suspensions}
 
 
   let mark_intermediate_with_moved_source copied_var astate_n =
@@ -1027,6 +1073,8 @@ module IntraDom = struct
     map (IntraDomElt.mark_intermediate_with_moved_source copied_var)
 
 
+  let record_suspension loc timestamp = map (IntraDomElt.record_suspension loc timestamp)
+
   let add_field copied_field ~source_addr_opt res =
     map (IntraDomElt.add_field copied_field ~source_addr_opt res)
 
@@ -1261,6 +1309,8 @@ let mark_intermediates_with_shared_source actuals astate =
 let mark_intermediate_with_moved_source copied_var =
   map_intra (IntraDom.mark_intermediate_with_moved_source copied_var)
 
+
+let record_suspension loc timestamp = map_intra (IntraDom.record_suspension loc timestamp)
 
 let add_field copied_field ~source_addr_opt res =
   map_intra (IntraDom.add_field copied_field ~source_addr_opt res)

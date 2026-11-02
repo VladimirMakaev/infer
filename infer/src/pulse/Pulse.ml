@@ -2347,6 +2347,13 @@ module PulseTransferFunctions = struct
           in
           let astate_n = NonDisjDomain.set_passed_to loc timestamp call_exp actuals astate_n in
           let astate_n =
+            match (call_exp : Exp.t) with
+            | Const (Cfun callee) when Procname.equal callee BuiltinDecl.__builtin_cxx_co_await ->
+                NonDisjDomain.record_suspension loc timestamp astate_n
+            | _ ->
+                astate_n
+          in
+          let astate_n =
             List.fold actuals ~init:astate_n ~f:(fun astate_n (exp, _) ->
                 NonDisjDomain.set_captured_variables exp astate_n )
           in
