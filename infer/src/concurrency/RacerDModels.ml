@@ -543,6 +543,18 @@ let is_safe_access (access : 'a MemoryAccess.t) prefix_exp tenv =
       false
 
 
+(* Deliberately NOT folded into [is_safe_access], which [should_flag_interface_call] also
+   consults: a safe receiver there means one fewer unannotated-interface-call access, and the
+   object a spill slot points at is the program's, not the coroutine's. *)
+let is_continuation_state_access (access : 'a MemoryAccess.t) prefix_exp tenv =
+  match (access, HilExp.AccessExpression.get_typ prefix_exp tenv) with
+  | ( MemoryAccess.FieldAccess fieldname
+    , Some ({Typ.desc= Tstruct typename} | {desc= Tptr ({desc= Tstruct typename}, _)}) ) ->
+      PatternMatch.Java.is_kotlin_continuation_state tenv typename fieldname
+  | _ ->
+      false
+
+
 let is_builder_class tname = String.is_suffix ~suffix:"$Builder" (Typ.Name.to_string tname)
 
 let is_builder_method java_pname = is_builder_class (Procname.Java.get_class_type_name java_pname)
