@@ -20,6 +20,10 @@ object InferTaint {
     return object_undefined()
   }
 
+  fun inferSecretStringSource(): String {
+    return "secret"
+  }
+
   fun inferSensitiveSink(iMightBeTainted: Any?) {}
 
   fun inferUniversalSanitizer(iMightBeTainted: Any): Any {
