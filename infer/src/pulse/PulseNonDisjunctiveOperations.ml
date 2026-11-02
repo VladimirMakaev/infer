@@ -818,7 +818,13 @@ let mark_copies_of_moved_sources path location pname actuals (astate_n, astate) 
                   ~copied_into ~source_addr_opt:(Some source)
                   ~is_modified:(fun _ _ -> true)
                   astate_n
-            | Some (IntoVar _ | IntoIntermediate _ | IntoField _) | None ->
+            | Some (IntoIntermediate {copied_var}) ->
+                (* An intermediate is gone by the time the source is moved, so there is no live
+                   copy to mark modified; record it instead, so that the advice to move at the
+                   copy is withheld. Matching on the moved addresses keeps this per field: moving
+                   a sibling field does not reach this source. *)
+                NonDisjDomain.mark_intermediate_with_moved_source copied_var astate_n
+            | Some (IntoVar _ | IntoField _) | None ->
                 astate_n )
           moved_objects astate_n
       in
