@@ -139,6 +139,14 @@ end = struct
       ; trylock= ["attemptRead"; "attemptWrite"]
       ; unlock= ["release"] }
     in
+    (* a timed mutex's primary interface is its bounded try-locks *)
+    let timed = {def with trylock= ["try_lock_for"; "try_lock_until"] @ def.trylock} in
+    let shd_timed =
+      { shd with
+        trylock=
+          ["try_lock_for"; "try_lock_until"; "try_lock_shared_for"; "try_lock_shared_until"]
+          @ shd.trylock }
+    in
     let lock_type = {c_rec with recursive= Some false} in
     let config_locks = lock_model_cfg_of_yojson Config.lock_model in
     [ {c_rec with lock= ["pthread_mutex_lock"]; unlock= ["pthread_mutex_unlock"]}
@@ -152,10 +160,16 @@ end = struct
     ; {def with classname= "apache::thrift::concurrency::Mutex"; trylock= "timedlock" :: def.trylock}
     ; {rwm with classname= "apache::thrift::concurrency::NoStarveReadWriteMutex"}
     ; {rwm with classname= "apache::thrift::concurrency::ReadWriteMutex"}
-    ; {shd with classname= "boost::shared_mutex"}
+    ; {shd_timed with classname= "boost::shared_mutex"}
+    ; { shd_timed with
+        classname= "boost::upgrade_mutex"
+      ; lock= "lock_upgrade" :: shd_timed.lock
+      ; trylock= "try_lock_upgrade" :: shd_timed.trylock
+      ; unlock= "unlock_upgrade" :: shd_timed.unlock }
     ; {def with classname= "boost::mutex"}
     ; {def with classname= "boost::recursive_mutex"; recursive= Some true}
-    ; {def with classname= "boost::recursive_timed_mutex"; recursive= Some true}
+    ; {timed with classname= "boost::timed_mutex"}
+    ; {timed with classname= "boost::recursive_timed_mutex"; recursive= Some true}
     ; {def with classname= "folly::detail::distributed_mutex::DistributedMutex"}
     ; {def with classname= "folly::MicroSpinLock"}
     ; {shd with classname= "folly::RWSpinLock"}
@@ -164,9 +178,10 @@ end = struct
     ; {def with classname= "folly::SpinLock"}
     ; {def with classname= "std::mutex"}
     ; {def with classname= "std::recursive_mutex"; recursive= Some true}
-    ; {def with classname= "std::recursive_timed_mutex"; recursive= Some true}
+    ; {timed with classname= "std::recursive_timed_mutex"; recursive= Some true}
     ; {shd with classname= "std::shared_mutex"}
-    ; {def with classname= "std::timed_mutex"} ]
+    ; {shd_timed with classname= "std::shared_timed_mutex"}
+    ; {timed with classname= "std::timed_mutex"} ]
     @ config_locks
 
 
