@@ -415,6 +415,14 @@ let containers : (string * Invalidation.std_container) list =
   ; ("unordered_set", UnorderedSet) ]
 
 
+(* the containers whose element is a [std::pair] of a key and a mapped value *)
+let is_map_like : Invalidation.std_container -> bool = function
+  | Map | Multimap | UnorderedMap | UnorderedMultimap ->
+      true
+  | Deque | List | Multiset | Set | UnorderedMultiset | UnorderedSet ->
+      false
+
+
 (* like the name matchers of [ProcnameDispatcher], ignore the template arguments that the frontend
    appends to some names *)
 let strip_template_args name = String.lsplit2 name ~on:'<' |> Option.value_map ~f:fst ~default:name
@@ -578,12 +586,67 @@ let deque_insertion deque_f ~ret ~desc this args : model_no_non_disj =
   astate
 
 
+(** The types an element of the container is made of: the key and the mapped value of a map-like
+    container, whose element is a pair, the element type itself for every other container. *)
+let element_component_types container callee_procname =
+  match Procname.get_class_type_name callee_procname with
+  | Some (CppClass {template_spec_info= Template {args= TType key_t :: rest}}) -> (
+    match rest with
+    | Typ.TType value_t :: _ when is_map_like container ->
+        [key_t; value_t]
+    | _ ->
+        [key_t] )
+  | _ ->
+      []
+
+
+(** Whether destroying the container reclaims everything its elements hold: every part of an element
+    that can hold memory is an object whose destructor runs, and at least one of them does
+    something. A raw pointer frees nothing when it dies -- that is exactly the leak the destructor
+    model is there to find -- so one anywhere in the element answers no; an integer holds nothing
+    either way. *)
+let elements_reclaim_what_they_hold tenv container callee_procname =
+  let components = element_component_types container callee_procname in
+  let destroys (typ : Typ.t) =
+    match typ.desc with
+    | Tstruct class_name ->
+        PulseModelsCpp.has_destructor_effects tenv class_name
+    | _ ->
+        false
+  in
+  let holds_nothing (typ : Typ.t) = match typ.desc with Tptr _ | Tstruct _ -> false | _ -> true in
+  List.exists components ~f:destroys
+  && List.for_all components ~f:(fun typ -> destroys typ || holds_nothing typ)
+
+
+(** Destroying a container destroys its elements, and the destructor of an element is what reclaims
+    whatever that element holds: a [std::unique_ptr], a [std::string], a JSON value that frees a
+    pointer held in a union by its type tag. This model cannot run those destructors, there being no
+    bound on the number of elements, but it must not claim the opposite either. Invalidating the
+    elements while leaving the allocation on what they hold does claim it: the memory loses its last
+    root when the container dies and is reported leaked, a leak the program does not have. An
+    unmodelled destructor never reported one: the unknown effect of such a call deallocates
+    everything reachable from the container, an unknown callee being free to release it. Take that
+    effect here too, for a container whose elements reclaim what they hold, and record it as an
+    unknown effect so that a caller applies it to what IT can reach. That last part is what the
+    common case needs: a container is usually destroyed inside the destructor of whatever holds it,
+    where none of its elements are known yet. A container of raw pointers reclaims nothing and gets
+    none of this, so it still reports the leak, which is what invalidating the elements is for. *)
+let reclaim_destroyed_elements tenv container callee_procname path location ~desc array astate =
+  if not (elements_reclaim_what_they_hold tenv container callee_procname) then astate
+  else
+    let hist = Hist.single_call path location desc in
+    AbductiveDomain.apply_unknown_effect hist (fst array) astate
+    |> AddressAttributes.add_all (fst array)
+         (Attributes.singleton (Attribute.UnknownEffect (CallEvent.Call callee_procname, hist)))
+
+
 (** A node-based container owns its elements, so destroying it invalidates them. Without this a
     value tied to an element stays reachable for ever, and a local container holding the only owner
     of an allocation no longer looks like a leak. [std::vector] has had this since its [~vector]
     model; this brings the node-based containers to the same footing. *)
 let destructor this container ~desc : model_no_non_disj =
- fun {path; location} astate ->
+ fun {path; location; callee_procname; analysis_data= {tenv}} astate ->
   let cause = Invalidation.StdContainer (container, Destructor) in
   let<+> astate, array = Collection.eval path NoAccess location this astate in
   let addresses =
@@ -592,11 +655,16 @@ let destructor this container ~desc : model_no_non_disj =
       (Seq.return (fst array))
       astate `Post
   in
-  ignore desc ;
-  AbstractValue.Set.fold
-    (fun addr astate ->
-      PulseOperations.invalidate path UntraceableAccess location cause (addr, snd array) astate )
-    addresses astate
+  (* invalidate first: the unknown effect havocs the edges to the elements, but a use-after-death
+     is reported against the element address an iterator already holds, which keeps its
+     invalidation *)
+  let astate =
+    AbstractValue.Set.fold
+      (fun addr astate ->
+        PulseOperations.invalidate path UntraceableAccess location cause (addr, snd array) astate )
+      addresses astate
+  in
+  reclaim_destroyed_elements tenv container callee_procname path location ~desc array astate
 
 
 (** What one argument of an insertion stores, read through its reference: a scalar directly, both
@@ -1276,12 +1344,6 @@ let matchers : matcher list =
   (* the element of these is the value itself, so a one-argument [emplace] is an [insert]; the
      associative containers build a pair instead, and a multi-argument [emplace] builds the element
      from all of them, so neither is matched below *)
-  let is_map_like : Invalidation.std_container -> bool = function
-    | Map | Multimap | UnorderedMap | UnorderedMultimap ->
-        true
-    | Deque | List | Multiset | Set | UnorderedMultiset | UnorderedSet ->
-        false
-  in
   let is_set_like : Invalidation.std_container -> bool = function
     | Multiset | Set | UnorderedMultiset | UnorderedSet ->
         true
