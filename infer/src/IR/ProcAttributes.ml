@@ -111,6 +111,7 @@ type t =
         (** returns false if the declaration exists in code and true if it was created implicitly by
             the compiler *)
   ; is_defined: bool  (** true if the procedure is defined, and not just declared *)
+  ; is_native: bool  (** the procedure is a Java native method *)
   ; is_java_synchronized_method: bool  (** the procedure is a Java synchronized method *)
   ; is_csharp_synchronized_method: bool  (** the procedure is a C# synchronized method *)
   ; is_async: bool
@@ -207,6 +208,7 @@ let default translation_unit proc_name =
   ; is_cpp_deleted= false
   ; is_cpp_implicit= false
   ; is_defined= false
+  ; is_native= false
   ; is_java_synchronized_method= false
   ; is_csharp_synchronized_method= false
   ; is_async= false
@@ -264,6 +266,7 @@ let pp f
      ; is_cpp_deleted
      ; is_cpp_implicit
      ; is_defined
+     ; is_native
      ; is_java_synchronized_method
      ; is_csharp_synchronized_method
      ; is_async
@@ -336,6 +339,7 @@ let pp f
   pp_bool_default ~default:default.is_cpp_deleted "is_deleted" is_cpp_deleted f () ;
   pp_bool_default ~default:default.is_cpp_implicit "is_cpp_implicit" is_cpp_implicit f () ;
   pp_bool_default ~default:default.is_defined "is_defined" is_defined f () ;
+  pp_bool_default ~default:default.is_native "is_native" is_native f () ;
   pp_bool_default ~default:default.is_java_synchronized_method "is_java_synchronized_method"
     is_java_synchronized_method f () ;
   pp_bool_default ~default:default.is_csharp_synchronized_method "is_csharp_synchronized_method"

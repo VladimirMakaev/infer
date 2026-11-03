@@ -494,6 +494,7 @@ let create_native_procdesc source_file program icfg cm proc_name =
         ProcAttributes.access= trans_access cm.Javalib.cm_access
       ; exceptions= List.map ~f:JBasics.cn_name cm.Javalib.cm_exceptions
       ; formals
+      ; is_native= true
       ; is_bridge_method= cm.Javalib.cm_bridge
       ; is_synthetic_method= cm.Javalib.cm_synthetic
       ; ret_type= JTransType.return_type program tenv ms
