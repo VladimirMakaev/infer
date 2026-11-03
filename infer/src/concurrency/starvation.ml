@@ -424,7 +424,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         ; get_mainLooper_summary
         ; get_callee_summary ]
       |> Option.map ~f:(fun summary ->
-          let subst = Lock.make_subst ~guard_lock:(Domain.get_guard_lock astate) formals actuals in
+          let subst =
+            Lock.make_normalised_subst tenv ~guard_lock:(Domain.get_guard_lock astate) formals
+              actuals
+          in
           let callsite = CallSite.make callee loc in
           Domain.integrate_summary ?release_held_locks ~tenv ~procname ~lhs ~subst formals callsite
             astate summary
@@ -468,7 +471,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     in
     let lock_in_caller lock =
       let guard_lock = Domain.get_guard_lock astate in
-      Domain.Lock.(apply_subst (make_subst ~guard_lock formals actuals) lock)
+      Domain.Lock.(apply_subst (make_normalised_subst tenv ~guard_lock formals actuals) lock)
     in
     let destructor_releases_one_lock (obj : HilExp.t) =
       match obj with
@@ -686,7 +689,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         analysis_data ) _ _ instr =
     let open ConcurrencyModels in
     let open StarvationModels in
-    let get_lock_path = Domain.Lock.make formals in
+    let get_lock_path = Domain.Lock.make_normalised tenv formals in
     let procname = Procdesc.get_proc_name proc_desc in
     let is_java = Procname.is_java procname in
     let do_lock locks loc astate =
