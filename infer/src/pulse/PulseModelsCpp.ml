@@ -2897,16 +2897,30 @@ module Vector = struct
         in
         astate
     | None ->
-        (* the returned iterator is at the erased position, unless that position is the one of
-       [begin()] and was invalidated above as the element at index 0 *)
+        (* The erased position has no index here, which is what happens whenever the iterator
+           reaches [erase] as a parameter instead of being built in the same procedure. Returning
+           [position] itself would hand back an address in the array this model has just
+           invalidated, so a caller applying the summary sees the result of [erase] as already
+           invalid, even though it is a valid position in the new array. Point into the collection
+           at an unknown index, as the branch above does once the index is known. *)
         if
           AddressAttributes.find_opt `Post position astate
           |> Option.exists ~f:(fun attrs -> Attributes.get_invalid attrs |> Option.is_some)
         then vector_begin ~desc vector iter model_data astate
         else
+          (* Hand back a fresh position rather than [position] itself, which is one of the
+             caller's elements and so is invalidated along with the rest of the old array when
+             the summary is applied. Keep it ordered at or after the erased position, so that an
+             iterator the caller proved to be before the erase is still provably before this
+             one, which is what [is_before_position] needs when there is no index to compare. *)
+          let new_position = AbstractValue.mk_fresh () in
+          let<**> astate =
+            PulseArithmetic.prune_binop ~negated:false Ge (AbstractValueOperand new_position)
+              (AbstractValueOperand position) astate
+          in
           let<+> astate =
             GenericArrayBackedCollection.Iterator.point_at path location event ~collection:vector
-              ~iter ~position astate
+              ~iter ~position:new_position astate
           in
           astate
 
