@@ -3076,6 +3076,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     in
     (* The exporter proves coverage of the value domain, not just the named enumerators. *)
     let is_all_enum_values_covered = switch_stmt_info.Clang_ast_t.ssi_is_all_enum_values_covered in
+    let is_all_enum_cases_covered = switch_stmt_info.Clang_ast_t.ssi_is_all_enum_cases_covered in
     let link_up_switch_cases (curr_succ_nodes, is_last_case) case =
       L.debug Capture Verbose "switch: curr_succ_nodes=[%a], linking case %a@\n"
         (Pp.semicolon_seq Procdesc.Node.pp)
@@ -3103,9 +3104,17 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               (* return only the true branch as next roots because the false branch is infeasible *)
               [true_prune_node]
             else
+              let if_kind =
+                if is_last_case && is_all_enum_cases_covered then
+                  (* a default would have come first and cleared [is_last_case], so the program
+                     named every enumerator and wrote no edge out of the switch itself: this one is
+                     the frontend's, taken only by a value outside the enumeration *)
+                  Sil.Ik_switch_exhaustive_fallback
+                else Sil.Ik_switch
+              in
               let false_prune_node =
                 create_prune_node context.procdesc ~branch:false ~negate_cond:true sil_eq_cond
-                  res_trans_case_const.control.instrs sil_loc Sil.Ik_switch
+                  res_trans_case_const.control.instrs sil_loc if_kind
               in
               Procdesc.node_set_succs context.procdesc false_prune_node ~normal:curr_succ_nodes
                 ~exn:[] ;

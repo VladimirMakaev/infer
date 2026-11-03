@@ -213,7 +213,7 @@ digraph cfg {
 	
 
 	 "fixed_implicit#533290486240849704.291618c523014140_8" -> "fixed_implicit#533290486240849704.291618c523014140_6" ;
-"fixed_implicit#533290486240849704.291618c523014140_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 47, column 5]\n " shape="invhouse"]
+"fixed_implicit#533290486240849704.291618c523014140_9" [label="9: Prune (false branch, exhaustive switch fallback) \n   PRUNE(!(n$1 == 1), false); [line 47, column 5]\n " shape="invhouse"]
 	
 
 	 "fixed_implicit#533290486240849704.291618c523014140_9" -> "fixed_implicit#533290486240849704.291618c523014140_3" ;
@@ -364,7 +364,7 @@ digraph cfg {
 	
 
 	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_8" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_6" ;
-"scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 1), false); [line 19, column 5]\n " shape="invhouse"]
+"scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" [label="9: Prune (false branch, exhaustive switch fallback) \n   PRUNE(!(n$1 == 1), false); [line 19, column 5]\n " shape="invhouse"]
 	
 
 	 "scoped_implicit#62077020453441753.47260c3cdce1a8d4_9" -> "scoped_implicit#62077020453441753.47260c3cdce1a8d4_3" ;
@@ -576,7 +576,7 @@ digraph cfg {
 	
 
 	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_8" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_6" ;
-"sparse_implicit#27697611093924942.15d6157bbf875cd5_9" [label="9: Prune (false branch, switch) \n   PRUNE(!(n$1 == 2), false); [line 75, column 5]\n " shape="invhouse"]
+"sparse_implicit#27697611093924942.15d6157bbf875cd5_9" [label="9: Prune (false branch, exhaustive switch fallback) \n   PRUNE(!(n$1 == 2), false); [line 75, column 5]\n " shape="invhouse"]
 	
 
 	 "sparse_implicit#27697611093924942.15d6157bbf875cd5_9" -> "sparse_implicit#27697611093924942.15d6157bbf875cd5_3" ;
@@ -621,7 +621,7 @@ digraph cfg {
 	
 
 	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_7" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_6" ;
-"zero_only_implicit#18079435760268.1da0340e3a3754bc_8" [label="8: Prune (false branch, switch) \n   PRUNE(!(n$1 == 0), false); [line 169, column 5]\n " shape="invhouse"]
+"zero_only_implicit#18079435760268.1da0340e3a3754bc_8" [label="8: Prune (false branch, exhaustive switch fallback) \n   PRUNE(!(n$1 == 0), false); [line 169, column 5]\n " shape="invhouse"]
 	
 
 	 "zero_only_implicit#18079435760268.1da0340e3a3754bc_8" -> "zero_only_implicit#18079435760268.1da0340e3a3754bc_3" ;
