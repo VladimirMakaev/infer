@@ -138,4 +138,67 @@ class RecursiveSelf {
   RecursiveMutex mLock;
 };
 
+// NOT COVERED, and not coverable by anything in this commit. A guard held as a MEMBER of
+// another class locks for that object's lifetime, and the enclosing class is ordinary C++ with
+// no thread-safety attribute of its own -- so there is no attribute to believe. The guard the
+// constructor creates lives in the guard_map, and summary_of_astate deliberately unlocks every
+// guarded lock before building the summary ("Interprocedural handling of guards is not
+// implemented"), so the constructor's summary is empty and a caller never holds the lock.
+// Closing this needs guards to survive a summary, which is a different change; it is a common
+// shape in large codebases and is tracked on its own.
+class MemberHeldGuard {
+ public:
+  explicit MemberHeldGuard(Mutex& m) : guard_(m) {}
+
+ private:
+  Guard<Mutex> guard_;
+};
+
+class FN_MemberHeldInversion {
+ public:
+  void FN_forward_bad() {
+    MemberHeldGuard a(mConn);
+    MemberHeldGuard b(mBuf);
+    work();
+  }
+
+  void FN_reverse_bad() {
+    MemberHeldGuard a(mBuf);
+    MemberHeldGuard b(mConn);
+    work();
+  }
+
+ private:
+  Mutex mConn, mBuf;
+};
+
+// CONTROL for the one above: a wrapper that takes the lock ITSELF rather than through a member
+// guard is recorded, so what the fixture above pins is the member-held guard and nothing else.
+class ExplicitWrapper {
+ public:
+  explicit ExplicitWrapper(Mutex& m) : m_(m) { m_.lock(); }
+  ~ExplicitWrapper() { m_.unlock(); }
+
+ private:
+  Mutex& m_;
+};
+
+class ExplicitWrapperInversion {
+ public:
+  void forward_bad() {
+    ExplicitWrapper a(mConn);
+    ExplicitWrapper b(mBuf);
+    work();
+  }
+
+  void reverse_bad() {
+    ExplicitWrapper a(mBuf);
+    ExplicitWrapper b(mConn);
+    work();
+  }
+
+ private:
+  Mutex mConn, mBuf;
+};
+
 } // namespace scoped_capability
