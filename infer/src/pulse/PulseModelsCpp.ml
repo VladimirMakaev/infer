@@ -1517,12 +1517,40 @@ module Vector = struct
                Q.compare size Q.zero > 0 ) )
 
 
+  (* The container models keep folly's own storage -- [impl_.b_], [impl_.e_], [impl_.z_] --
+     entirely out of the abstract state, representing the vector by [__infer_backing_array] and
+     [__infer_size] instead. A constructor model therefore leaves that storage with no value at
+     all. While every member is modelled that is invisible, because no real body ever reads it;
+     [reserve] is not modelled, so folly's body runs and Pulse reports [impl_.z_] as read
+     without initialization.
+     Record that the constructor initialised the object's own storage. The walk is the exact
+     inverse of the one that marked it uninitialized in the first place
+     ([set_uninitialized] -> [fold_pointer_targets] over the declared type), so it reaches the
+     same nested cells; an edge walk does not, because the cells need not be linked from [this]
+     yet. No value is invented: writing 0 would be wrong for the copy and initializer-list
+     constructors, which do not produce an empty buffer, and would invent null-dereference
+     paths through the real body. *)
+  let initialize_backing_storage (this, hist) callee_procname {path; location; analysis_data} astate
+      =
+    match Procname.get_class_type_name callee_procname with
+    | Some class_name ->
+        let typ = Typ.mk (Tstruct class_name) in
+        AbductiveDomain.fold_pointer_targets analysis_data.InterproceduralAnalysis.tenv path
+          (`Malloc (this, hist))
+          typ location
+          ~f:(fun (addr, _) astate -> AbductiveDomain.AddressAttributes.initialize addr astate)
+          astate
+    | None ->
+        astate
+
+
   let default_constructor vector ~desc : model_no_non_disj =
-   fun {path; location} astate ->
+   fun ({path; location; callee_procname} as model_data) astate ->
     let<**> astate =
       GenericArrayBackedCollection.assign_size_constant path location vector ~constant:IntLit.zero
         ~desc astate
     in
+    let astate = initialize_backing_storage vector callee_procname model_data astate in
     record_capacity vector (Some Q.zero) astate |> Basic.ok_continue
 
 
@@ -1727,7 +1755,8 @@ module Vector = struct
 
 
   let init_list_constructor this init_list ~desc : model_no_non_disj =
-   fun {path; location} astate ->
+   fun ({path; location; callee_procname} as model_data) astate ->
+    let astate = initialize_backing_storage this callee_procname model_data astate in
     let astate = record_capacity this None astate in
     let size = post_size InitializerList.size_field init_list astate in
     let<**> astate =
@@ -1752,8 +1781,9 @@ module Vector = struct
 
 
   let init_copy_constructor this init_vector ~desc : model_no_non_disj =
-   fun {path; location; callee_procname} astate ->
+   fun ({path; location; callee_procname} as model_data) astate ->
     let move = is_move_constructor callee_procname in
+    let astate = initialize_backing_storage this callee_procname model_data astate in
     let astate =
       record_capacity this (if move then capacity_lower_bound init_vector astate else None) astate
     in
