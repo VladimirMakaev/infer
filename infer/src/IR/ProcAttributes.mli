@@ -64,6 +64,7 @@ type t =
         (** returns false if the declaration exists in code and true if it was created implicitly by
             the compiler *)
   ; is_defined: bool  (** true if the procedure is defined, and not just declared *)
+  ; is_native: bool  (** the procedure is a Java native method *)
   ; is_java_synchronized_method: bool  (** the procedure is a Java synchronized method *)
   ; is_csharp_synchronized_method: bool  (** the procedure is a C# synchronized method *)
   ; is_async: bool
