@@ -146,6 +146,117 @@ module NdkStatus = struct
     start_named_model "AStatus_delete" @@ fun () -> ret ()
 end
 
+(** [android::binder::Status], the C++ status the AIDL C++ backend returns.
+
+    Unlike {!NdkStatus} this class has real fields and inline accessors - [isOk] is
+    [mException == EX_NONE] and the callers read [mException] and [mErrorCode] directly - so there
+    is nothing to model on the reading side. What is missing is the writing side: every factory and
+    the private two-argument constructor are defined in libbinder, so a status arrives with its
+    fields unwritten and every check on it decides nothing.
+
+    These models therefore write the class's OWN fields rather than fields of their own invention,
+    and the existing inline accessors then produce the right answers by themselves. [mMessage] is
+    left alone: the analysis has no use for the text, and writing a string field a factory may not
+    have set would claim more than is known. *)
+module BinderStatus = struct
+  let status_type =
+    Typ.CppClass
+      { name= QualifiedCppName.of_qual_string "android::binder::Status"
+      ; template_spec_info= NoTemplate
+      ; is_union= false }
+
+
+  let exception_field = Fieldname.make status_type "mException"
+
+  let error_code_field = Fieldname.make status_type "mErrorCode"
+
+  (* Status::Exception *)
+  let ex_none = 0
+
+  let ex_service_specific = -8
+
+  let ex_transaction_failed = -129
+
+  (* android::status_t; FAILED_TRANSACTION is UNKNOWN_ERROR + 2 *)
+  let status_ok = 0
+
+  let failed_transaction = -2147483646
+
+  (* A factory returns by value, so the frontend hands it the object to fill as the last actual and
+     these models write through that, the way [std::make_error_code] is modelled. *)
+  let write ~exception_code ~error_code result =
+    let open DSL.Syntax in
+    store_field ~ref:result exception_field exception_code
+    @@> store_field ~ref:result error_code_field error_code
+
+
+  let write_consts ~exception_code ~error_code result =
+    let open DSL.Syntax in
+    let* ex = int exception_code in
+    let* err = int error_code in
+    write ~exception_code:ex ~error_code:err result
+
+
+  let ok result : model =
+    let open DSL.Syntax in
+    start_named_model "android::binder::Status::ok"
+    @@ fun () ->
+    let result = to_aval result in
+    write_consts ~exception_code:ex_none ~error_code:status_ok result
+
+
+  (* libbinder special-cases exactly one code: a status built as [EX_TRANSACTION_FAILED] carries
+     [FAILED_TRANSACTION] as its error code, so [transactionError()] hands that back rather than
+     [OK]. Every other code stores no error code. *)
+  let from_exception_code exception_code result : model =
+    let open DSL.Syntax in
+    start_named_model "android::binder::Status::fromExceptionCode"
+    @@ fun () ->
+    let exception_code = to_aval exception_code in
+    let result = to_aval result in
+    disj
+      [ ( prune_eq_int exception_code (IntLit.of_int ex_transaction_failed)
+        @@>
+        let* failed = int failed_transaction in
+        write ~exception_code ~error_code:failed result )
+      ; ( prune_ne_int exception_code (IntLit.of_int ex_transaction_failed)
+        @@>
+        let* zero = int status_ok in
+        write ~exception_code ~error_code:zero result ) ]
+
+
+  let from_service_specific_error error_code result : model =
+    let open DSL.Syntax in
+    start_named_model "android::binder::Status::fromServiceSpecificError"
+    @@ fun () ->
+    let error_code = to_aval error_code in
+    let result = to_aval result in
+    let* ex = int ex_service_specific in
+    write ~exception_code:ex ~error_code result
+
+
+  (* [setFromStatusT] is two-way and keeps the status verbatim as the error code:
+     [mException = status == NO_ERROR ? EX_NONE : EX_TRANSACTION_FAILED; mErrorCode = status].
+     There is no case for any particular status value, so every non-OK status - including
+     [UNEXPECTED_NULL] - is a failed transaction that still hands its status back through
+     [transactionError()]. *)
+  let from_status_t status result : model =
+    let open DSL.Syntax in
+    start_named_model "android::binder::Status::fromStatusT"
+    @@ fun () ->
+    let status = to_aval status in
+    let result = to_aval result in
+    disj
+      [ ( prune_eq_int status (IntLit.of_int status_ok)
+        @@>
+        let* none = int ex_none in
+        write ~exception_code:none ~error_code:status result )
+      ; ( prune_ne_int status (IntLit.of_int status_ok)
+        @@>
+        let* failed = int ex_transaction_failed in
+        write ~exception_code:failed ~error_code:status result ) ]
+end
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   [ -"AStatus_newOk" <>--> NdkStatus.new_ok
@@ -166,4 +277,16 @@ let matchers : matcher list =
            NdkStatus.service_specific_field
   ; -"AStatus_getStatus" <>$ capt_arg_payload
     $--> NdkStatus.get_field ~desc:"AStatus_getStatus" NdkStatus.status_field
-  ; -"AStatus_delete" <>$ any_arg $--> NdkStatus.delete ]
+  ; -"AStatus_delete" <>$ any_arg $--> NdkStatus.delete
+    (* the object a factory returns by value is the last actual *)
+  ; -"android" &:: "binder" &:: "Status" &:: "ok" <>$ capt_arg_payload $--> BinderStatus.ok
+  ; -"android" &:: "binder" &:: "Status" &:: "fromExceptionCode" <>$ capt_arg_payload
+    $+ capt_arg_payload $--> BinderStatus.from_exception_code
+  ; -"android" &:: "binder" &:: "Status" &:: "fromExceptionCode" <>$ capt_arg_payload $+ any_arg
+    $+ capt_arg_payload $--> BinderStatus.from_exception_code
+  ; -"android" &:: "binder" &:: "Status" &:: "fromServiceSpecificError" <>$ capt_arg_payload
+    $+ capt_arg_payload $--> BinderStatus.from_service_specific_error
+  ; -"android" &:: "binder" &:: "Status" &:: "fromServiceSpecificError" <>$ capt_arg_payload
+    $+ any_arg $+ capt_arg_payload $--> BinderStatus.from_service_specific_error
+  ; -"android" &:: "binder" &:: "Status" &:: "fromStatusT" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> BinderStatus.from_status_t ]
