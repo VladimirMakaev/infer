@@ -230,6 +230,21 @@ void move_iterated_vector_ok(std::vector<std::string> v) {
                std::make_move_iterator(v.end()));
 }
 
+// The same adaptor, spelled by naming its constructor instead of calling the helper. Taking
+// the parameter by const reference would turn the moves back into copies, so neither spelling
+// should be advised to do so.
+void move_iterated_vector_ctor_ok(std::vector<std::string> v) {
+  std::vector<std::string> local(
+      std::move_iterator<std::vector<std::string>::iterator>(v.begin()),
+      std::move_iterator<std::vector<std::string>::iterator>(v.end()));
+}
+
+// The control: the same shape without the adaptor copies the elements, so the parameter really
+// could be taken by const reference.
+void copy_iterated_vector_bad(std::vector<std::string> v) {
+  std::vector<std::string> local(v.begin(), v.end());
+}
+
 char mod_char(char);
 
 void modify_string(std::string& s) {

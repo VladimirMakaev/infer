@@ -4387,6 +4387,12 @@ let simple_matchers =
       |> with_non_disj
     ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+ capt_arg_payload
       $--> Std.make_move_iterator_into |> with_non_disj
+      (* The adaptor is also spelled by naming its constructor, which the helper above does not
+         cover: [std::move_iterator<It>(it)]. Same meaning, so same model, with the object
+         under construction playing the part of the temporary the helper fills in. *)
+    ; -"std" &:: "move_iterator" &:: "move_iterator" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> (fun result wrapped -> Std.make_move_iterator_into wrapped result)
+      |> with_non_disj
     ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+...$--> Std.make_move_iterator
       |> with_non_disj
     ; -"std" &:: "make_pair" < capt_typ &+ capt_typ >$ capt_arg_payload $+ capt_arg_payload
