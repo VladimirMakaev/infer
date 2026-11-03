@@ -210,6 +210,14 @@ type t =
           [UnknownEffect] it makes no claim about the VALUES reachable from the pointer: a callee
           can adopt a pointer it only ever reads, so nothing is havoc'd and no write is recorded.
           Deliberately LAST, for the rank reason above. *)
+  | CppLifetimeBegun
+      (** a new C++ object's lifetime began in the storage at this address, e.g. by placement new,
+          so a [CppDelete] that the previous occupant left there is stale. Clearing an invalidation
+          is a REMOVAL, which a summary cannot express, so the removal is recorded as this positive
+          attribute and the caller redoes it on its own state when it applies the summary -- where
+          the fields of the destroyed object exist and the callee's state has none of them.
+          [invalidate] drops it again, so whichever of the two happened last wins. ALSO LAST, for
+          the rank reason above. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -257,6 +265,8 @@ module Attributes : sig
   val get_static_type : t -> Typ.Name.t option
 
   val is_java_resource_released : t -> bool
+
+  val is_cpp_lifetime_begun : t -> bool
 
   val get_hack_builder : t -> Builder.t option
 
