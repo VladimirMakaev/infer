@@ -1002,20 +1002,30 @@ let get_message_and_suggestion diagnostic =
         let call_move = "call `std::move` instead" in
         let is_move_called = Option.exists ~f:is_from_std_move source_opt in
         let move_suggestion = "To avoid the copy, " ^ call_move in
+        let const_ref_callee = "change the callee's parameter type to `const &`" in
         if is_move_called then
           let reason =
             if is_from_const then
               "it is being called on a `const` which resolves to the copy operation"
             else "the type doesn't have a move operation"
           in
+          (* The move has already been written and bought nothing, so repeating it is not a
+             remedy. For a copy into a callee's by-value parameter one remedy is left, and
+             saying so is the difference between a report that can be acted on and one that
+             cannot. *)
+          let remedy =
+            match (copied_into : PulseAttribute.CopiedInto.t) with
+            | IntoIntermediate _ ->
+                ", so the copy remains: " ^ const_ref_callee ^ ", or make sure the copy is expected"
+            | IntoField _ | IntoVar _ ->
+                " so make sure the copy is expected"
+          in
           F.asprintf
-            "Even though `std::move` is called, nothing is actually getting moved (e.g. %s) so \
-             make sure the copy is expected"
-            reason
+            "Even though `std::move` is called, nothing is actually getting moved (e.g. %s)%s"
+            reason remedy
         else
           match (copied_into : PulseAttribute.CopiedInto.t) with
           | IntoIntermediate _ ->
-              let const_ref_callee = "change the callee's parameter type to `const &`" in
               if is_from_const then
                 "To avoid the copy, either 1) remove the `const` from the source and " ^ call_move
                 ^ " or 2) " ^ const_ref_callee
