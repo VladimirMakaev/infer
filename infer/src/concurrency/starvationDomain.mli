@@ -39,6 +39,13 @@ end
 module Lock : sig
   include module type of AbstractAddress
 
+  val make_normalised : Tenv.t -> FormalMap.t -> HilExp.t -> t option
+  (** name a capability's single inline wrapped mutex by the capability object *)
+
+  val make_normalised_subst :
+    Tenv.t -> ?guard_lock:(HilExp.t -> t option) -> FormalMap.t -> HilExp.t list -> subst
+  (** preserve that identity when substituting a mutex passed to a callee *)
+
   val pp_locks : F.formatter -> t -> unit
 
   val make_java_synchronized : FormalMap.t -> Procname.t -> t option
