@@ -349,7 +349,14 @@ module Basic = struct
       Reached along field and array edges only, NEVER through a [Dereference]: what the OLD object
       pointed AT is not part of this storage and stays invalid, which is what keeps this from
       becoming a blanket un-invalidation. This is the rule [PulseModelsOptional.renew_storage] has
-      already been applying to [std::optional]; placement new is the general case of it. *)
+      already been applying to [std::optional]; placement new is the general case of it.
+
+      The walk only reaches what is in THIS procedure's heap, and that is not where the problem is
+      when the placement new sits in a callee of its own, as it does in every library that wraps the
+      idiom. There the destroyed object's subobjects belong to the caller, and the callee would
+      abduce them into its precondition as values it needs to be valid, which is exactly what they
+      are not. So the storage is also MARKED: see [CppLifetimeBegun] and its use in
+      [PulseAbductiveDomain]'s [eval_edge]. *)
   let begin_cpp_lifetime_in_storage address astate =
     let seeds = Seq.return address in
     let storage =
@@ -360,6 +367,7 @@ module Basic = struct
     AbstractValue.Set.fold
       (fun address astate -> AddressAttributes.begin_cpp_lifetime address astate)
       storage astate
+    |> AddressAttributes.add_one address Attribute.CppLifetimeBegun
 
 
   let free_or_delete operation invalidation
