@@ -396,8 +396,8 @@ class NoInversion {
 
 class WithUnlocker {
  public:
-  // the lock released by an Unlocker is not reacquired by its destructor
-  void FN_thread1_bad() {
+  // the Unlocker gives mutex_2 up for its own scope and takes it back
+  void thread1_bad() {
     RefGuard lock2(mutex_2);
     {
       Unlocker unlock2(mutex_2);
@@ -405,7 +405,7 @@ class WithUnlocker {
     RefGuard lock1(mutex_1);
   }
 
-  void FN_thread2_bad() {
+  void thread2_bad() {
     RefGuard lock1(mutex_1);
     RefGuard lock2(mutex_2);
   }
