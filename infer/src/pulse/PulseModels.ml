@@ -14,8 +14,8 @@ module ProcNameDispatcher = struct
     ProcnameDispatcher.Call.make_dispatcher ~swift_matchers:PulseModelsSwift.matchers
       ( FbPulseModels.matchers @ PulseModelsCSharp.matchers
       @ PulseModelsObjC.transfer_ownership_matchers @ PulseModelsCpp.abort_matchers
-      @ PulseModelsAndroid.matchers @ PulseModelsC.matchers @ PulseModelsCpp.matchers
-      @ PulseModelsStdContainers.matchers @ PulseModelsErlang.matchers
+      @ PulseModelsAndroid.matchers @ PulseModelsBinder.matchers @ PulseModelsC.matchers
+      @ PulseModelsCpp.matchers @ PulseModelsStdContainers.matchers @ PulseModelsErlang.matchers
       @ PulseModelsGenericArrayBackedCollection.matchers @ PulseModelsHack.matchers
       @ PulseModelsJava.matchers @ PulseModelsObjC.matchers @ PulseModelsOptional.matchers
       @ PulseModelsSmartPointers.matchers @ PulseModelsLocks.matchers @ PulseModelsRust.matchers
