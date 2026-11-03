@@ -1094,6 +1094,22 @@ include struct
 
   let use_fd fd args : model = start_model @@ fun () -> use_fd_dsl fd args
 
+  (* Asio's [socket_ops::close] and [descriptor_ops::close] retry: when [::close] fails with
+     [EWOULDBLOCK] or [EAGAIN] they put the descriptor back into blocking mode with [::ioctl] and
+     close it again. [close] leaves its return value unconstrained on the branch that releases the
+     descriptor, and the error code is read through an unknown call, so that retry is a feasible
+     path on which the descriptor is used and released a second time.
+
+     Giving the wrapper a model of its own releases the descriptor exactly once and leaves the
+     retry unanalysed. It is deliberately the narrowest thing that works: a caller retrying
+     [::close] itself still reports, and no raw [::close] changes. The remaining arguments are
+     treated as an unknown call would treat them, so the state and error-code out-parameters the
+     body writes are havocked rather than left at their incoming values -- a caller that handles a
+     close failure keeps both of its branches. *)
+  let asio_close fd args : model =
+    start_model @@ fun () -> unknown_call args @@> close_fd (FuncArg.arg_payload fd)
+
+
   (* [F_DUPFD] is 0 wherever it is defined; [F_DUPFD_CLOEXEC] is 1030 on Linux and 67 on Darwin and
      the BSDs. These two return a descriptor of their own, so the result is not a function of the
      arguments: two calls hand back two different descriptors, and closing both is not a double
@@ -1593,6 +1609,18 @@ let matchers : matcher list =
   ; -"android_fdsan_close_with_tag"
     <>$ capt_arg_payload_of_prim_typ StdTyp.int
     $+ any_arg $--> close
+    (* both the Boost and the standalone distribution of Asio, and both the socket and the
+       descriptor flavour of the wrapper *)
+  ; ( -"asio" &:: "detail" &:: "descriptor_ops" &:: "close" <>$ capt_arg_of_prim_typ StdTyp.int
+    $++$--> fun fd args -> asio_close fd args )
+  ; ( -"asio" &:: "detail" &:: "socket_ops" &:: "close" <>$ capt_arg_of_prim_typ StdTyp.int
+    $++$--> fun fd args -> asio_close fd args )
+  ; ( -"boost" &:: "asio" &:: "detail" &:: "descriptor_ops" &:: "close"
+    <>$ capt_arg_of_prim_typ StdTyp.int
+    $++$--> fun fd args -> asio_close fd args )
+  ; ( -"boost" &:: "asio" &:: "detail" &:: "socket_ops" &:: "close"
+    <>$ capt_arg_of_prim_typ StdTyp.int
+    $++$--> fun fd args -> asio_close fd args )
   ; -"asctime" <>$ capt_arg_payload
     $--> compose1 (ignore_arg @@ start_model @@ null_or_nonneg_non_det_ret) taint_ret_from_arg
   ; ( -"__assert_fail" <>$ capt_arg
