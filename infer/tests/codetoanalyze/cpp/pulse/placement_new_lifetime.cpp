@@ -21,11 +21,13 @@ struct Heavy {
 // constructor read as a use-after-delete. std::optional already applied this
 // rule to its own storage; it is the general case of the same thing.
 //
-// THE RULE ONLY REACHES AS FAR AS THE CURRENT PROCEDURE. When the destruction
-// and the reconstruction happen in the same function, the stale invalidation is
-// in the state when placement new runs and is cleared. When they are split
-// across functions, each is summarised separately and they only meet in the
-// caller, where this model no longer runs -- see FP_cross_procedure_* below.
+// THE RULE ALSO HAS TO CROSS A CALL. The storage a callee placement-news into
+// usually holds none of the destroyed object's subobjects in the CALLEE's heap:
+// they are in the caller's. Abducing them would make the callee demand that the
+// previous occupant still be there and be valid, which is the opposite of what
+// placement new means, and every caller that destroyed it first -- the whole
+// point of the idiom -- would fail that precondition. So the storage is marked
+// instead, and the mark travels in the summary.
 
 int buffer_reconstruct_ok() {
   alignas(Heavy) char buf[sizeof(Heavy)];
@@ -91,19 +93,88 @@ int heap_delete_then_read_bad() {
   return (int)p->get().s.size();
 }
 
-// KNOWN LIMITATION, pinned so it is visible rather than forgotten. Splitting the
-// destruction and the reconstruction across member functions puts them in
-// different procedures: each is summarised on its own, the summaries only meet
-// in the caller, and this model does not run there. Reviving across that
-// boundary needs a summary-level "lifetime restart" effect, which Pulse has no
-// way to express today (decision-pulse-lifetime-restart-summary). This is the
-// unifex manual_lifetime shape.
-int FP_cross_procedure_reconstruct_ok() {
+// ACROSS A CALL. This is the unifex manual_lifetime shape: the placement new is
+// in a callee of its own, and the destruction is somewhere else entirely.
+int cross_procedure_reconstruct_ok() {
   Slot<Heavy> s;
   s.construct();
   s.destruct();
   s.construct();
   return (int)s.get().s.size();
+}
+
+// Only ONE of the two sides needs to be in a callee for the summaries to have to
+// carry the fact; both halves are pinned so a fix that only handles one shows up.
+int destruct_here_construct_in_callee_ok() {
+  Slot<Heavy> s;
+  s.construct();
+  s.value_.~Heavy();
+  s.construct();
+  return (int)s.get().s.size();
+}
+
+int destruct_in_callee_construct_here_ok() {
+  Slot<Heavy> s;
+  s.construct();
+  s.destruct();
+  ::new (&s.value_) Heavy();
+  return (int)s.value_.s.size();
+}
+
+// Reading the storage DIRECTLY afterwards, rather than through another callee:
+// nothing of the callee's post overwrites the caller's own cell here.
+int cross_procedure_reconstruct_direct_read_ok() {
+  Slot<Heavy> s;
+  s.construct();
+  s.destruct();
+  s.construct();
+  return (int)s.value_.s.size();
+}
+
+// A plain buffer, so this is not about unions.
+struct Buffer {
+  alignas(Heavy) char b[sizeof(Heavy)];
+  Heavy* construct() { return ::new (b) Heavy(); }
+};
+
+int cross_procedure_buffer_reconstruct_ok() {
+  Buffer buf;
+  Heavy* h = buf.construct();
+  h->~Heavy();
+  h = buf.construct();
+  return (int)h->s.size();
+}
+
+// The fact has to keep travelling: the real chain is several calls deep.
+struct Nested {
+  Slot<Heavy> slot;
+  void reconstruct() {
+    slot.destruct();
+    slot.construct();
+  }
+};
+
+int nested_reconstruct_ok() {
+  Nested n;
+  n.slot.construct();
+  n.reconstruct();
+  return (int)n.slot.get().s.size();
+}
+
+// A member with no destructor of its own, so the read is of a plain field rather
+// than of a modelled std::string.
+struct Plain {
+  int n;
+  Plain() : n(1) {}
+  ~Plain() {}
+};
+
+int cross_procedure_plain_field_ok() {
+  Slot<Plain> s;
+  s.construct();
+  s.destruct();
+  s.construct();
+  return s.get().n;
 }
 
 // The cross-procedure true positives keep reporting, as they did before.
@@ -121,6 +192,30 @@ void cross_procedure_reconstruct_then_double_destruct_bad() {
   s.construct();
   s.destruct();
   s.destruct();
+}
+
+// KNOWN LIMITATION, AND IT IS OLDER AND WIDER THAN THIS CHANGE: reading an object
+// that was destroyed in place and NOT reconstructed is not reported, through a
+// callee or inline, for a union member or a plain buffer. Only `delete` followed
+// by a use is (heap_delete_then_read_bad above). Both of these are silent on the
+// parent commit too, so nothing here revived them; they are pinned because they
+// are the shapes a reader of this file will expect to be covered, and because
+// they are the controls that would catch the mark outliving what it describes --
+// in the first one the LAST thing to happen to the storage is a destruction.
+int FN_cross_procedure_reconstruct_then_destruct_then_read() {
+  Slot<Heavy> s;
+  s.construct();
+  s.destruct();
+  s.construct();
+  s.destruct();
+  return (int)s.get().s.size();
+}
+
+int FN_cross_procedure_destruct_then_read() {
+  Slot<Heavy> s;
+  s.construct();
+  s.destruct();
+  return (int)s.get().s.size();
 }
 
 } // namespace placement_new_lifetime

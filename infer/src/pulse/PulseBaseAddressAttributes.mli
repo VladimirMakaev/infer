@@ -160,6 +160,8 @@ module type S = sig
 
   val has_contents_overwritten : key -> t -> bool
 
+  val has_cpp_lifetime_begun : key -> t -> bool
+
   val is_global_initializer_called : key -> t -> bool
 
   val is_hack_constinit_called : key -> t -> bool

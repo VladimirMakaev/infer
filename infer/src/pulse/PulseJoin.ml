@@ -215,6 +215,9 @@ let join_one_sided_attribute (attr : Attribute.t) =
   (* maybe we want to be more forgiving, at least we get a closure to call even if it comes from
      just one branch? *)
   | Closure _
+  | CppLifetimeBegun
+  (* one branch renewed the storage and the other did not, so the caller must not be told to
+     clear an invalidation that still stands on the other path *)
   | CSharpResourceReleased
   | DictContainConstKeys
   | GlobalInitializerCalled
@@ -279,6 +282,7 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
   match (attr1, attr2) with
   | AbsentFromContainer, AbsentFromContainer
   | AlwaysReachable, AlwaysReachable
+  | CppLifetimeBegun, CppLifetimeBegun
   | CSharpResourceReleased, CSharpResourceReleased
   | DictContainConstKeys, DictContainConstKeys
   | EndOfCollection, EndOfCollection
