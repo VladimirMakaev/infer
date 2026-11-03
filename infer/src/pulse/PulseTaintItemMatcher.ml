@@ -518,7 +518,7 @@ let procedure_matching_kinds tenv procname proc_attributes procedure_matchers =
 
 
 (** Returns a pair of (instance_reference, args) depending on the type of the proc *)
-let split_args procname args =
+let split_args ~clang_method_kind procname args =
   let get_this_from_actuals = function
     (* Instance method a guaranteed to have this/self as a first formal *)
     | instance_reference :: actuals ->
@@ -534,8 +534,13 @@ let split_args procname args =
       if is_static || Procname.is_objc_nsobject_class procname then (None, args)
       else get_this_from_actuals args
   | None ->
-      (* Hack is special with each method having a reference to this/self except some special cases *)
-      if
+      if Option.exists clang_method_kind ~f:(ClangMethodKind.equal CPP_INSTANCE) then
+        (* C++ targets already count this as argument 0. Keep those positions while also exposing
+           the receiver to InstanceReference targets. *)
+        let instance_reference, _ = get_this_from_actuals args in
+        (instance_reference, args)
+      else if
+        (* Hack is special with each method having a reference to this/self except some special cases *)
         Procname.is_hack procname
         && Procname.has_hack_classname procname
         && not (Procname.is_hack_builtins procname)
@@ -543,9 +548,10 @@ let split_args procname args =
       else (None, args)
 
 
-let match_procedure_impl tenv path location ?proc_attributes ~has_added_return_param procname
-    actuals return_opt matchers astate : AbductiveDomain.t * taint_match list =
-  let instance_reference, actuals = split_args procname actuals in
+let match_procedure_impl tenv path location ?proc_attributes ~clang_method_kind
+    ~has_added_return_param procname actuals return_opt matchers astate :
+    AbductiveDomain.t * taint_match list =
+  let instance_reference, actuals = split_args ~clang_method_kind procname actuals in
   let matches = procedure_matches tenv matchers ?proc_attributes procname actuals in
   if not (List.is_empty matches) then L.d_printfln "taint matches" ;
   match_procedure_target tenv astate matches path location return_opt ~has_added_return_param
@@ -554,14 +560,18 @@ let match_procedure_impl tenv path location ?proc_attributes ~has_added_return_p
 
 let match_procedure_call tenv path location ?proc_attributes ~has_added_return_param procname
     actuals return matchers astate =
-  match_procedure_impl tenv path location ?proc_attributes ~has_added_return_param procname actuals
-    (Some return) matchers astate
+  let clang_method_kind =
+    Option.map proc_attributes ~f:(fun attrs -> attrs.ProcAttributes.clang_method_kind)
+  in
+  match_procedure_impl tenv path location ?proc_attributes ~clang_method_kind
+    ~has_added_return_param procname actuals (Some return) matchers astate
 
 
 let match_procedure tenv (proc_attributes : ProcAttributes.t) formals matchers astate :
     AbductiveDomain.t * taint_match list =
   match_procedure_impl tenv PathContext.initial proc_attributes.loc ~has_added_return_param:false
-    proc_attributes.proc_name formals None matchers astate
+    ~clang_method_kind:(Some proc_attributes.clang_method_kind) proc_attributes.proc_name formals
+    None matchers astate
 
 
 let match_block tenv location ?proc_attributes procname actuals matchers astate :
