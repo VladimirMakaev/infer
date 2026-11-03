@@ -4610,9 +4610,6 @@ let simple_matchers =
     ; -"folly" &:: "fbvector" &:: "empty" <>$ capt_arg_payload
       $--> GenericArrayBackedCollection.empty ~desc:"folly::fbvector::is_empty()"
       |> with_non_disj
-    ; -"folly" &:: "fbvector" &:: "reserve" <>$ capt_arg_payload $+ capt_arg
-      $+...$--> Vector.reserve
-      |> observe_matcher ~rule:"folly.fbvector.reserve.1"
     ; -"folly" &:: "fbvector" &:: "resize" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.resize
       |> with_non_disj
       |> observe_matcher ~rule:"folly.fbvector.resize.1"
