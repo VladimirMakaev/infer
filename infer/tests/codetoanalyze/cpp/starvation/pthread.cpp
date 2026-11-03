@@ -134,6 +134,87 @@ class UseRecursiveMutex {
   int x_;
 };
 
+// the mutex is recursive, but its constructor delegates the initialisation to a
+// helper, and the wrapper is defined in another translation unit
+class UseDelegatingRecursiveMutex {
+ public:
+  void increment() {
+    mutex_.lock();
+    x_++;
+    mutex_.unlock();
+  }
+
+  void call_under_lock_ok() {
+    mutex_.lock();
+    increment();
+    mutex_.unlock();
+  }
+
+ private:
+  DelegatingRecursiveMutex mutex_;
+  int x_;
+};
+
+// control: the same shape on a mutex that is not recursive
+class UseDelegatingMutex {
+ public:
+  void increment() {
+    mutex_.lock();
+    x_++;
+    mutex_.unlock();
+  }
+
+  void call_under_lock_bad() {
+    mutex_.lock();
+    increment();
+    mutex_.unlock();
+  }
+
+ private:
+  DelegatingMutex mutex_;
+  int x_;
+};
+
+// the mutex is recursive and is locked through a pointer to it
+class UsePointerRecursiveMutex {
+ public:
+  void increment() {
+    mutex_.lock();
+    x_++;
+    mutex_.unlock();
+  }
+
+  void call_under_lock_ok() {
+    mutex_.lock();
+    increment();
+    mutex_.unlock();
+  }
+
+ private:
+  PointerRecursiveMutex mutex_;
+  int x_;
+};
+
+// control: the same shape on a mutex that is not recursive
+class UsePointerMutex {
+ public:
+  void increment() {
+    mutex_.lock();
+    x_++;
+    mutex_.unlock();
+  }
+
+  void call_under_lock_bad() {
+    mutex_.lock();
+    increment();
+    mutex_.unlock();
+  }
+
+ private:
+  PointerMutex mutex_;
+  int x_;
+};
+
 #ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
 #define RECURSIVE_MUTEX_INITIALIZER PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
 #else
