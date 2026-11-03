@@ -1467,23 +1467,48 @@ let unique_ptr_constructor tenv FuncArg.{arg_payload= this; typ} args ~desc =
         None
 
 
+(* [android::sp<T>] and [android::wp<T>] are not modelled at all: their [get], [operator->] and
+   [operator bool] are ordinary code reading the real [m_ptr] member. Writing the modelled backing
+   pointer for them, as the [std] pointers do, would put the null somewhere nothing ever reads and
+   the model would silently do nothing, so write [m_ptr] itself and let their own bodies pick it
+   up. If a future [sp] spells the member differently the write lands on a field that is never
+   read, which is the same no-op as today rather than a wrong answer. *)
+let android_pointer_access =
+  let matchers : (unit, Typ.t, unit) ProcnameDispatcher.TypName.dispatcher =
+    let open ProcnameDispatcher.TypName in
+    make_dispatcher
+      [ -"android" &:: "sp" < capt_typ &+...>--> Fn.id
+      ; -"android" &:: "wp" < capt_typ &+...>--> Fn.id ]
+  in
+  fun tenv typ ->
+    if Option.is_some (find_element_type_common matchers tenv typ) then
+      match (Typ.strip_ptr typ).desc with
+      | Tstruct name ->
+          Some (Access.FieldAccess (Fieldname.make name "m_ptr"))
+      | _ ->
+          None
+    else None
+
+
 let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
   let is_unique = Option.is_some (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) in
-  if is_unique || Option.is_some (SharedPtr.find_element_type tenv typ) then
+  let access = android_pointer_access tenv typ in
+  let is_android = Option.is_some access in
+  if is_unique || is_android || Option.is_some (SharedPtr.find_element_type tenv typ) then
     Some
       (fun {path; location} astate ->
         let assign_count constant astate =
-          if is_unique then Sat (Ok astate)
+          if is_unique || is_android then Sat (Ok astate)
           else SharedPtr.assign_count path location this ~constant ~desc astate
         in
         let null =
-          let** astate = assign_value_nullptr path location this ~desc astate in
+          let** astate = assign_value_nullptr ?access path location this ~desc astate in
           assign_count IntLit.zero astate
         in
         let non_null =
           let value = (AbstractValue.mk_fresh (), Hist.single_call path location desc) in
           let** astate = PulseArithmetic.and_positive (fst value) astate in
-          let=* astate, _ = write_value path location this ~value ~desc astate in
+          let=* astate, _ = write_value ?access path location this ~value ~desc astate in
           assign_count IntLit.one astate
         in
         SatUnsat.to_list (null >>|| ExecutionDomain.continue)
