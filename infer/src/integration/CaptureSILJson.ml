@@ -135,7 +135,8 @@ let parse_if_kind (json : Safe.t) =
     ; ("Ik_if", Sil.Ik_if)
     ; ("Ik_land_lor", Sil.Ik_land_lor)
     ; ("Ik_while", Sil.Ik_while)
-    ; ("Ik_switch", Sil.Ik_switch) ]
+    ; ("Ik_switch", Sil.Ik_switch)
+    ; ("Ik_switch_exhaustive_fallback", Sil.Ik_switch_exhaustive_fallback) ]
   in
   List.Assoc.find_exn ~equal:String.equal ifkind_map (to_string json)
 

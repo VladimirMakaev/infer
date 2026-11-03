@@ -152,7 +152,7 @@ let infeasible_switches pdesc =
   let switches =
     CFG.fold_nodes cfg ~init:[] ~f:(fun switches node ->
         match instr node with
-        | Some (Sil.Prune (exp, _, _, Sil.Ik_switch)) -> (
+        | Some (Sil.Prune (exp, _, _, (Sil.Ik_switch | Sil.Ik_switch_exhaustive_fallback))) -> (
           match comparison exp with
           | Some comparison ->
               (node, comparison) :: switches
@@ -248,7 +248,7 @@ let infeasible_switches pdesc =
                             values )
                   | _ ->
                       previous seen predicates node )
-                | Some (Prune (exp, _, _, Sil.Ik_switch)) -> (
+                | Some (Prune (exp, _, _, (Sil.Ik_switch | Sil.Ik_switch_exhaustive_fallback))) -> (
                   match comparison exp with
                   | Some (other, value, equal) when Ident.equal id other ->
                       previous seen ((value, equal) :: predicates) node

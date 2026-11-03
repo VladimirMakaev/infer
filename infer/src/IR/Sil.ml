@@ -18,6 +18,7 @@ type if_kind =
   | Ik_land_lor
   | Ik_while
   | Ik_switch
+  | Ik_switch_exhaustive_fallback
 [@@deriving compare, equal, hash, normalize, yojson_of]
 
 let pp_if_kind fmt = function
@@ -37,6 +38,8 @@ let pp_if_kind fmt = function
       F.pp_print_string fmt "while"
   | Ik_switch ->
       F.pp_print_string fmt "switch"
+  | Ik_switch_exhaustive_fallback ->
+      F.pp_print_string fmt "exhaustive switch fallback"
 
 
 type instr_metadata =
