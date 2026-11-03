@@ -825,6 +825,16 @@ let add_attributes pre_or_post {PathContext.timestamp} callee_attributes call_st
     in
     let astate = abduce_or_add addr_caller attrs_caller astate in
     let astate =
+      match pre_or_post with
+      | `Post when Option.is_some (Attributes.get_invalid attrs_caller) ->
+          (* the callee ended a lifetime in this storage, so a [CppLifetimeBegun] we are holding
+             from an earlier call describes an object that is no longer there. The callee clears
+             its own marks when it invalidates; ours have to be cleared here. *)
+          AddressAttributes.remove_cpp_lifetime_begun addr_caller astate
+      | _ ->
+          astate
+    in
+    let astate =
       match (pre_or_post, Attributes.get_uninitialized attrs_caller) with
       | `Post, Some typ ->
           (* the callee leaves the cell uninitialized, eg by copying an uninitialized field into it;

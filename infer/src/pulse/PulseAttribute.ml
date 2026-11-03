@@ -283,6 +283,14 @@ module Attribute = struct
          this attribute no longer has to. Unlike [UnknownEffect] it says nothing about
          the VALUES reachable from [v]: a callee can adopt a pointer it only ever reads,
          so the contents are not havoc'd and no write is recorded. *)
+    | CppLifetimeBegun
+      (* [v -> CppLifetimeBegun] records that a new C++ object's lifetime began in the
+       storage at [v], e.g. by placement new, so a [CppDelete] left there by whoever
+       occupied it before is stale. Clearing that invalidation is a REMOVAL, which a
+       summary cannot express, so the removal is recorded as this positive attribute and
+       the caller redoes it on its own state when it applies the summary. Dropped again
+       by [invalidate]: whichever of the two happened last wins.
+       ALSO LAST ON PURPOSE, for the rank reason above. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -306,6 +314,8 @@ module Attribute = struct
   let copied_return_rank = Variants.copiedreturn.rank
 
   let copy_origin_rank = Variants.sourceoriginofcopy.rank
+
+  let cpp_lifetime_begun_rank = Variants.cpplifetimebegun.rank
 
   let dict_contain_const_keys_rank = Variants.dictcontainconstkeys.rank
 
@@ -392,6 +402,8 @@ module Attribute = struct
         F.pp_print_string f "AbsentFromContainer"
     | AlwaysReachable ->
         F.pp_print_string f "AlwaysReachable"
+    | CppLifetimeBegun ->
+        F.pp_print_string f "CppLifetimeBegun"
     | Closure pname ->
         Procname.pp f pname
     | ConfigUsage config ->
@@ -547,6 +559,7 @@ module Attribute = struct
     | TaintSanitized _
     | Uninitialized _
     | OwnershipTransferred _
+    | CppLifetimeBegun
     | UnknownEffect _
     | UnreachableAt _
     | WrittenTo _ ->
@@ -601,6 +614,7 @@ module Attribute = struct
     | TaintSanitized _
     | Uninitialized _
     | OwnershipTransferred _
+    | CppLifetimeBegun
     | UnknownEffect _
     | WrittenTo _ ->
         true
@@ -626,6 +640,7 @@ module Attribute = struct
     | ConfigUsage _
     | ContentsOverwritten _
     | CopiedReturn _
+    | CppLifetimeBegun
     | DictContainConstKeys
     | DictReadConstKeys _
     | EndOfCollection
@@ -760,6 +775,7 @@ module Attribute = struct
       | AlwaysReachable
       | Closure _
       | ConfigUsage (ConfigName _)
+      | CppLifetimeBegun
       | CSharpResourceReleased
       | DictContainConstKeys
       | EndOfCollection
@@ -878,6 +894,7 @@ module Attribute = struct
       | ConfigUsage (ConfigName _)
       | ContentsOverwritten _
       | CopiedInto _
+      | CppLifetimeBegun
       | CSharpResourceReleased
       | DictContainConstKeys
       | DictReadConstKeys _
@@ -1054,6 +1071,8 @@ module Attributes = struct
 
 
   let is_java_resource_released = mem_by_rank Attribute.java_resource_released_rank
+
+  let is_cpp_lifetime_begun = mem_by_rank Attribute.cpp_lifetime_begun_rank
 
   let is_awaited_awaitable = mem_by_rank Attribute.awaited_awaitable_rank
 

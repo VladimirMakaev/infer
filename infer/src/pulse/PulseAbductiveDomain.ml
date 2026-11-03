@@ -863,8 +863,16 @@ module Internal = struct
               if
                 BaseMemory.mem addr_src (astate.pre :> base_domain).heap
                 (* the contents of an overwritten object are unrelated to the ones in the pre *)
+                && (not
+                      (BaseAddressAttributes.has_contents_overwritten addr_src
+                         (astate.post :> base_domain).attrs ) )
+                (* likewise for storage whose new occupant's lifetime has just begun: the
+                   subobjects the constructor is creating belong to the NEW object, so this
+                   procedure does not require the OLD one to have been there, let alone valid.
+                   Abducing them would make every caller that destroyed the previous occupant --
+                   which is the whole point of placement new -- fail the precondition. *)
                 && not
-                     (BaseAddressAttributes.has_contents_overwritten addr_src
+                     (BaseAddressAttributes.has_cpp_lifetime_begun addr_src
                         (astate.post :> base_domain).attrs )
               then
                 let cell_id = ValueHistory.CellId.next () in
@@ -3097,13 +3105,33 @@ module AddressAttributes = struct
     SafeAttributes.add_tainted (CanonValue.canon' astate v) taint astate
 
 
+  (* [CppLifetimeBegun] says the storage holds a lifetime that began after the last thing that
+     ended one there. An invalidation ends one, so it takes the mark back off; otherwise a
+     reconstruct-then-destroy callee would tell its caller to clear an invalidation that is the
+     most recent fact about that storage. *)
+  let remove_cpp_lifetime_begun_canon v astate =
+    match SafeAttributes.find_opt `Post v astate with
+    | Some attrs when Attributes.is_cpp_lifetime_begun attrs ->
+        let attrs = Attributes.filter attrs ~f:(function CppLifetimeBegun -> false | _ -> true) in
+        SafeAttributes.map_post_attrs astate ~f:(fun memory ->
+            BaseAddressAttributes.add v Attributes.empty memory |> BaseAddressAttributes.add v attrs )
+    | _ ->
+        astate
+
+
   let invalidate addr_hist invalidation location astate =
     let astate =
       if Invalidation.releases_resource invalidation then
         forget_function_applications_equal_to (fst addr_hist) astate
       else astate
     in
-    SafeAttributes.invalidate (CanonValue.canon_fst' astate addr_hist) invalidation location astate
+    let addr_hist = CanonValue.canon_fst' astate addr_hist in
+    let astate = remove_cpp_lifetime_begun_canon (fst addr_hist) astate in
+    SafeAttributes.invalidate addr_hist invalidation location astate
+
+
+  let remove_cpp_lifetime_begun v astate =
+    remove_cpp_lifetime_begun_canon (CanonValue.canon' astate v) astate
 
 
   let begin_cpp_lifetime v astate =
