@@ -1,0 +1,30 @@
+{
+  "annotation-reachability-custom-pairs": [
+    {"sources": ["Source"], "sinks": ["Sink"], "sanitizers": ["Sanitizer"]}
+  ],
+  "annotation-reachability-custom-models": {
+    "Source": [
+      "^modeled::Source::.*",
+      "^class modeled::LegacySource::.*",
+      "^modeled::source_control_bad$"
+    ],
+    "Sink": {
+      "allow": [
+        "^modeled::Sink::sink$",
+        "^class modeled::Sink::legacy_sink$",
+        "^modeled::Sink::blocked_legacy$",
+        "^class modeled::Sink::blocked_natural$",
+        "^modeled::TemplateSink<.*>::sink$",
+        "^modeled::free_sink$"
+      ],
+      "block": [
+        "^class modeled::Sink::blocked_legacy$",
+        "^modeled::Sink::blocked_natural$"
+      ]
+    },
+    "Sanitizer": [
+      "^modeled::NaturalSanitizer::.*",
+      "^class modeled::LegacySanitizer::.*"
+    ]
+  }
+}
