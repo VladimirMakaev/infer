@@ -22,6 +22,11 @@ val set_instr : Sil.instr -> unit
 val set_node : Procdesc.Node.t -> unit
 (** Set last node seen in symbolic execution *)
 
+val set_node_opt : Procdesc.Node.t option -> unit
+(** Set, or with [None] clear, the last node seen. Used when an issue is reported into a procedure
+    other than the one being analysed, so that the report does not inherit a node belonging to
+    another procedure's CFG. *)
+
 val set_remaining_disjuncts : int -> unit
 (** Set number of remaining disjuncts in the transfer function for Pulse *)
 
