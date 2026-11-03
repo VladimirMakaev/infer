@@ -194,3 +194,70 @@ void close_then_holder_closes_again_bad(const char* path) {
     close(fd);
   }
 }
+
+// Asio wraps [close] in a retry: when the call fails with EWOULDBLOCK or EAGAIN it puts the
+// descriptor back into blocking mode with [ioctl] and closes it again. [close] leaves its return
+// value unconstrained on the branch that releases the descriptor, so that retry is a feasible
+// path on which the descriptor is used and released a second time, and the report lands on
+// whoever owns the socket. Giving the wrapper a model releases the descriptor exactly once and
+// leaves the retry unanalysed.
+//
+// Declared and not defined on purpose. A definition here would be analysed directly and the
+// report would land inside the wrapper, where no call-site model can prevent it; the wrapper
+// lives in a third-party header in a real build. Declared, the wrapper is an unknown call on the
+// unfixed build, so each of the _ok functions below leaks its descriptor there and is silent
+// here -- which is what pins the model.
+namespace boost {
+namespace asio {
+namespace detail {
+namespace socket_ops {
+int close(int s, unsigned char& state, bool destruction, int& ec);
+}
+namespace descriptor_ops {
+int close(int d, unsigned char& state, int& ec);
+}
+} // namespace detail
+} // namespace asio
+} // namespace boost
+
+// the standalone distribution of Asio, whose namespace has no [boost] prefix
+namespace asio {
+namespace detail {
+namespace descriptor_ops {
+int close(int d, unsigned char& state, int& ec);
+}
+} // namespace detail
+} // namespace asio
+
+void asio_socket_closed_once_ok(const char* path) {
+  const int s = open(path, O_RDONLY);
+  unsigned char state = 0;
+  int ec = 0;
+  boost::asio::detail::socket_ops::close(s, state, true, ec);
+}
+
+void asio_descriptor_closed_once_ok(const char* path) {
+  const int d = open(path, O_RDONLY);
+  unsigned char state = 0;
+  int ec = 0;
+  boost::asio::detail::descriptor_ops::close(d, state, ec);
+}
+
+void standalone_asio_descriptor_closed_once_ok(const char* path) {
+  const int d = open(path, O_RDONLY);
+  unsigned char state = 0;
+  int ec = 0;
+  asio::detail::descriptor_ops::close(d, state, ec);
+}
+
+// The control for the other direction: the wrapper still releases the descriptor, so closing it
+// again afterwards is still a double close.
+void asio_close_then_close_again_bad(const char* path) {
+  const int s = open(path, O_RDONLY);
+  if (s >= 0) {
+    unsigned char state = 0;
+    int ec = 0;
+    boost::asio::detail::socket_ops::close(s, state, true, ec);
+    close(s);
+  }
+}
