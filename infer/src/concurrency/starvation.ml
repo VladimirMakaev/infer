@@ -481,7 +481,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
                   Option.some_if (Procname.is_destructor pname) pname ) )
           |> Option.bind ~f:get_lock_state
           |> Option.exists ~f:(fun lock_state ->
-              Option.is_some (Domain.LockState.get_single_unlocked_lock lock_state) )
+              (* a may-release: this only asks what KIND of class this is, and a destructor that
+                 releases under a flag is still the releasing half of a guard. The release itself
+                 is applied by [remove_guard] when the destructor runs, not from here. *)
+              Option.is_some (Domain.LockState.get_single_may_unlocked_lock lock_state) )
       | _ ->
           false
     in
