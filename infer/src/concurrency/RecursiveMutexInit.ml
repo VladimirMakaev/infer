@@ -150,17 +150,24 @@ and scan_proc ~visiting pdesc =
     | _ ->
         exp
   in
-  let mutexes, recursive_attrs, inits, copies =
-    Procdesc.fold_instrs pdesc ~init:(Exp.Set.empty, Exp.Set.empty, [], [])
-      ~f:(fun ((mutexes, recursive_attrs, inits, copies) as acc) _ (instr : Sil.instr) ->
+  let this_class = Procname.get_class_type_name (Procdesc.get_proc_name pdesc) in
+  let mutexes, recursive_attrs, inits, copies, delegated_keys =
+    Procdesc.fold_instrs pdesc ~init:(Exp.Set.empty, Exp.Set.empty, [], [], KeySet.empty)
+      ~f:(fun
+          ((mutexes, recursive_attrs, inits, copies, delegated_keys) as acc)
+          _
+          (instr : Sil.instr)
+        ->
         match instr with
         | Store {e1; typ; e2} -> (
             let e1 = normalize e1 in
             match mutex_of_recursive_initializer_store e1 e2 with
             | Some mutex ->
-                (Exp.Set.add mutex mutexes, recursive_attrs, inits, copies)
-            | None when is_mutex typ ->
-                (mutexes, recursive_attrs, inits, (e1, normalize e2) :: copies)
+                (Exp.Set.add mutex mutexes, recursive_attrs, inits, copies, delegated_keys)
+            | None when is_mutex typ || is_mutex_ptr typ ->
+                (* [is_mutex_ptr]: a wrapper may keep a pointer to the mutex it owns, as in
+                   [mutex_ = &storage_], and lock through that pointer *)
+                (mutexes, recursive_attrs, inits, (e1, normalize e2) :: copies, delegated_keys)
             | None ->
                 acc )
         | Call (_, Const (Cfun callee), args, _, _) -> (
@@ -170,12 +177,24 @@ and scan_proc ~visiting pdesc =
             match (Procname.get_method callee, args) with
             | "pthread_mutexattr_settype", [(attr, attr_typ); (kind, _)]
               when is_recursive_type_arg ~attr_typ kind ->
-                (mutexes, Exp.Set.add (normalize attr) recursive_attrs, inits, copies)
+                ( mutexes
+                , Exp.Set.add (normalize attr) recursive_attrs
+                , inits
+                , copies
+                , delegated_keys )
             | "pthread_mutex_init", [(mutex, _); (attr, _)] ->
-                (mutexes, recursive_attrs, (normalize mutex, normalize attr) :: inits, copies)
+                ( mutexes
+                , recursive_attrs
+                , (normalize mutex, normalize attr) :: inits
+                , copies
+                , delegated_keys )
             | _, [(dst, _); (src, _)] when is_mutex_method ->
                 (* copy constructor or assignment *)
-                (mutexes, recursive_attrs, inits, (normalize dst, normalize src) :: copies)
+                ( mutexes
+                , recursive_attrs
+                , inits
+                , (normalize dst, normalize src) :: copies
+                , delegated_keys )
             | _ when List.exists args ~f:(fun (_, typ) -> is_mutex_ptr typ) ->
                 let {formals} = scan_proc_name ~visiting callee in
                 let mutexes =
@@ -184,7 +203,16 @@ and scan_proc ~visiting pdesc =
                         Exp.Set.add (normalize arg) mutexes
                       else mutexes )
                 in
-                (mutexes, recursive_attrs, inits, copies)
+                (mutexes, recursive_attrs, inits, copies, delegated_keys)
+            | _
+              when Option.both this_class (Procname.get_class_type_name callee)
+                   |> Option.exists ~f:(fun (c1, c2) -> Typ.Name.equal c1 c2) ->
+                (* a constructor may delegate the initialisation to another method of its own
+                   class, which reaches the mutex through [this] rather than being handed a
+                   pointer to it. The keys are field names, so they mean the same thing in
+                   either procedure *)
+                let {keys} = scan_proc_name ~visiting callee in
+                (mutexes, recursive_attrs, inits, copies, KeySet.union keys delegated_keys)
             | _ ->
                 acc )
         | _ ->
@@ -216,7 +244,7 @@ and scan_proc ~visiting pdesc =
           {scan with keys= KeySet.add (Field field) keys}
       | _ ->
           scan )
-    (add_copies mutexes) empty
+    (add_copies mutexes) {empty with keys= delegated_keys}
 
 
 let file_cache : KeySet.t SourceFile.Cache.t =
