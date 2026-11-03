@@ -169,6 +169,42 @@ void erase_loop_ok(std::vector<int>& vec) {
   }
 }
 
+// erase() through a helper: the position it is given has no index there, and the iterator it
+// returns is a valid position in the new vector like any other
+std::vector<int>::iterator erase_at(std::vector<int>& vec,
+                                    std::vector<int>::iterator iter) {
+  return vec.erase(iter);
+}
+
+void erase_loop_through_helper_ok(std::vector<int>& vec) {
+  for (auto iter = vec.begin(); iter != vec.end();) {
+    if (*iter == 0) {
+      iter = erase_at(vec, iter);
+    } else {
+      ++iter;
+    }
+  }
+}
+
+// the same helper, but the iterator it returns is dropped, so the loop goes on through the
+// one that was erased
+void erase_through_helper_then_increment_bad() {
+  std::vector<int> vec{1, 0, 2};
+  for (auto iter = vec.begin(); iter != vec.end(); ++iter) {
+    if (*iter == 0) {
+      erase_at(vec, iter);
+    }
+  }
+}
+
+void erase_through_helper_then_increment_latent(std::vector<int>& vec) {
+  for (auto iter = vec.begin(); iter != vec.end(); ++iter) {
+    if (*iter == 0) {
+      erase_at(vec, iter);
+    }
+  }
+}
+
 void erase_keeps_earlier_reference_ok(std::vector<int>& vec) {
   int* elt = &vec[0];
   auto iter = vec.begin();
