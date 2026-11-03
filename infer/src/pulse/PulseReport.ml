@@ -205,13 +205,44 @@ let report analysis_data ~is_suppressed ~latent diagnostic =
   do_report analysis_data ~is_suppressed ~latent diagnostic
 
 
+(** The node of [proc_desc] that [loc] belongs to, lowest id first so that the choice does not
+    depend on the order nodes are stored in. [None] when the location is not in this procedure,
+    which leaves the report with no node rather than someone else's. *)
+let node_at_location proc_desc (loc : Location.t) =
+  (* Match on file and line rather than on the whole location: a node's own location can differ
+     from the diagnostic's in column and in the macro-expansion fields. *)
+  let same_line (node_loc : Location.t) =
+    Int.equal node_loc.line loc.line && SourceFile.equal node_loc.file loc.file
+  in
+  Procdesc.fold_nodes proc_desc ~init:None ~f:(fun acc node ->
+      if same_line (Procdesc.Node.get_loc node) then
+        match acc with
+        | Some best when (Procdesc.Node.get_id best :> int) <= (Procdesc.Node.get_id node :> int) ->
+            acc
+        | _ ->
+            Some node
+      else acc )
+
+
 let report_conditional_origin analysis_data
     {ExecutionDomain.origin= {proc_name}; original_diagnostic; is_suppressed} =
   match Procdesc.load proc_name with
   | Some proc_desc ->
       let err_log = Errlog.empty () in
       let origin_data = InterproceduralAnalysis.for_procedure proc_desc err_log analysis_data in
-      report origin_data ~is_suppressed ~latent:false original_diagnostic ;
+      (* [Reporting] stamps an issue with [AnalysisState]'s "last node seen". Here that node
+         belongs to the procedure this worker is analysing -- a CALLER of [proc_name] -- and not
+         to [proc_name], whose errlog the issue is being filed into. Inheriting it records a node
+         from somebody else's CFG, and which caller reaches this first is decided by the
+         scheduler: under the default restart scheduler a procedure reached from two callers gets
+         a different node, and so a different node_key, from run to run. Pin the node to the
+         origin procedure instead, so it depends only on the issue and not on who got here. *)
+      let saved_node = AnalysisState.get_node () in
+      AnalysisState.set_node_opt
+        (node_at_location proc_desc (Diagnostic.get_location original_diagnostic)) ;
+      Fun.protect
+        ~finally:(fun () -> AnalysisState.set_node_opt saved_node)
+        (fun () -> report origin_data ~is_suppressed ~latent:false original_diagnostic) ;
       analysis_data.InterproceduralAnalysis.add_errlog proc_name err_log
   | None ->
       (* A missing origin must not turn a pending error into a silent path. *)
