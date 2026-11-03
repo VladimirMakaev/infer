@@ -121,7 +121,8 @@ class ReverseLock {
 
 class ReverseLockUser {
  public:
-  void FP_lock_in_scope_ok() {
+  // the reverse lock holds the guard down across the second acquisition
+  void lock_in_scope_ok() {
     std::unique_lock<std::mutex> l(mutex_);
     ReverseLock unlocked(l);
     std::lock_guard<std::mutex> g(mutex_);

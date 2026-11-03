@@ -69,11 +69,8 @@ class Moved {
 
 class ReverseLocked {
  public:
-  // the callee drops the lock for the whole scope of the reverse lock.
-  // Still reported: the guard escapes into the reverse lock, so the release is
-  // not applied to the caller. Moving the guard by value is not enough on its
-  // own; see the reverse lock limitation of the guard-by-reference tests.
-  void FP_lock_in_scope_ok() {
+  // the callee drops the lock for the whole scope of the reverse lock
+  void lock_in_scope_ok() {
     Lock l(mutex_);
     unlocked(std::move(l));
   }
