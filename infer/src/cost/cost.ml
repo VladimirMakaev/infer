@@ -174,6 +174,7 @@ module InstrBasicCostWithReason = struct
         | Skip
         | TryEntry _
         | TryExit _
+        | UnevaluatedMention _
         | VariableLifetimeBegins _ ) ->
         CostDomain.zero_record
 
