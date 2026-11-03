@@ -64,6 +64,9 @@ val get_pointee_typ : Typ.t -> Typ.t option
 
 val get_typ : Tenv.t -> t -> Typ.t option
 
+val address_of_field : Tenv.t -> t -> Fieldname.t -> t option
+(** address of the given field of a struct address or its pointee *)
+
 val make : FormalMap.t -> HilExp.t -> t option
 (** convert an expression to a canonical form for an address *)
 

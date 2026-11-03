@@ -134,7 +134,111 @@ module Lock = struct
   (* a wrapper around a wrapper is unusual; stop rather than follow a cycle *)
   let wrapped_lock_depth_limit = 2
 
+  (* Only an inline mutex has the same identity as its owning capability. A reference or
+     pointer can name a mutex shared by several wrappers and must retain its original path. *)
+  let rec owned_mutex_field tenv ~depth name =
+    if depth > wrapped_lock_depth_limit then None
+    else
+      Tenv.lookup tenv name
+      |> Option.bind ~f:(fun ({fields; annots} : Struct.t) ->
+          if not (Annotations.ia_ends_with annots Annotations.capability) then None
+          else
+            let rec struct_type (typ : Typ.t) =
+              match typ.desc with
+              | Tptr (typ, _) ->
+                  struct_type typ
+              | Tstruct _ ->
+                  true
+              | _ ->
+                  false
+            in
+            match List.filter fields ~f:(fun ({typ} : Struct.field) -> struct_type typ) with
+            | [{name= field; typ= {desc= Tstruct wrapped}}]
+              when Option.is_some (ConcurrencyModels.lock_type_recursion wrapped)
+                   || Option.is_some (owned_mutex_field tenv ~depth:(depth + 1) wrapped) ->
+                Some field
+            | _ ->
+                None )
+
+
+  let rec normalise_exp tenv (exp : HilExp.t) =
+    let rec normalise_access (access : HilExp.AccessExpression.t) =
+      match access with
+      | AddressOf prefix -> (
+          let prefix' = normalise_access prefix in
+          if phys_equal prefix prefix' then access
+          else
+            match (prefix' : HilExp.AccessExpression.t) with
+            | Dereference pointer ->
+                pointer
+            | _ ->
+                HilExp.AccessExpression.add_access prefix' MemoryAccess.TakeAddress
+                |> Option.value ~default:access )
+      | FieldOffset (prefix, field)
+        when HilExp.AccessExpression.get_typ prefix tenv
+             |> Option.bind ~f:Typ.name
+             |> Option.bind ~f:(owned_mutex_field tenv ~depth:0)
+             |> Option.exists ~f:(Fieldname.equal field) ->
+          normalise_access prefix
+      | _ ->
+          access
+    in
+    match exp with
+    | AccessExpression access ->
+        let access' = normalise_access access in
+        if phys_equal access access' then exp else HilExp.AccessExpression access'
+    | Cast (typ, inner) ->
+        let inner' = normalise_exp tenv inner in
+        if phys_equal inner inner' then exp else HilExp.Cast (typ, inner')
+    | _ ->
+        exp
+
+
+  let make_normalised tenv formals exp = make formals (normalise_exp tenv exp)
+
+  let make_normalised_subst tenv ?guard_lock formals actuals =
+    make_subst ?guard_lock formals (List.map actuals ~f:(normalise_exp tenv))
+
+
+  (* Keep the underlying mutex path for the existing cross-thread alias predicate and recursive
+     pthread initializers. Collapsing it there would hide aliases between a wrapper's methods
+     and its owner, and lose initialization evidence recorded on the inline mutex field. *)
+  let for_aliasing tenv lock =
+    let rec expand ~depth lock =
+      if depth > wrapped_lock_depth_limit then lock
+      else
+        get_typ tenv lock
+        |> Option.bind ~f:(fun (typ : Typ.t) ->
+            match typ.desc with
+            | Tptr (typ, _) ->
+                Typ.name typ
+            | Tstruct name ->
+                Some name
+            | _ ->
+                None )
+        |> Option.bind ~f:(owned_mutex_field tenv ~depth:0)
+        |> Option.bind ~f:(address_of_field tenv lock)
+        |> Option.value_map ~default:lock ~f:(expand ~depth:(depth + 1))
+    in
+    expand ~depth:0 lock
+
+
+  let equal_across_threads tenv lhs rhs =
+    AbstractAddress.equal_across_threads tenv (for_aliasing tenv lhs) (for_aliasing tenv rhs)
+
+
+  let may_alias_across_threads tenv lhs rhs =
+    AbstractAddress.may_alias_across_threads tenv (for_aliasing tenv lhs) (for_aliasing tenv rhs)
+
+
+  let normalise_across_threads tenv lock =
+    AbstractAddress.normalise_across_threads tenv (for_aliasing tenv lock)
+
+
+  let get_path_classes tenv lock = AbstractAddress.get_path_classes tenv (for_aliasing tenv lock)
+
   let is_recursive tenv ~procname lock =
+    let lock = for_aliasing tenv lock in
     (* We default to recursive if the type can't be found or looks malformed.
        This reduces self-deadlock FPs. *)
     let rec strip_pointers (typ : Typ.t) =
