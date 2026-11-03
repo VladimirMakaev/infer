@@ -479,6 +479,8 @@ let pp_event_no_location fmt event =
             "switch condition is true, entering switch case"
         | false, Ik_switch ->
             "switch condition is false, skipping switch case"
+        | _, Ik_switch_exhaustive_fallback ->
+            "the value matches no enumerator, leaving the switch"
         | true, Ik_compexch ->
             "pointer contains expected value; writing desired to pointer"
         | false, Ik_compexch ->

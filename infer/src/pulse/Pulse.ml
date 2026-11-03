@@ -1817,6 +1817,13 @@ module PulseTransferFunctions = struct
               ~branch_location:loc ~location:loc trace acc ) )
 
 
+  (** whether [condition] can hold in [astate]; the pruned states are thrown away, so this only
+      answers the question and does not commit the path to the answer *)
+  let is_satisfiable proc_desc path location ~condition astate =
+    PulseOperations.prune proc_desc path location ~condition astate
+    |> List.exists ~f:(function SatUnsat.Sat _ -> true | SatUnsat.Unsat _ -> false)
+
+
   let max_inlined_global_constant_cells = 64
 
   (** whether values of type [typ] have no volatile parts and are made of at most
@@ -2358,6 +2365,15 @@ module PulseTransferFunctions = struct
                 NonDisjDomain.set_captured_variables exp astate_n )
           in
           (astates, path, astate_n)
+      | Prune (condition, loc, _is_then_branch, Ik_switch_exhaustive_fallback)
+        when is_satisfiable proc_desc path loc
+               ~condition:(Exp.UnOp (Unop.LNot, condition, None))
+               astate ->
+          (* The switch names every enumerator, so this edge needs a value the enumeration does not
+             name. Such a value is legal, but nothing here shows the program produces one, and
+             inventing one makes every variable the switch assigns look untouched. Keep the edge
+             only once the scrutinee is known to match no enumerator. *)
+          ([], path, astate_n)
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
           let results =
             let<*> astate = check_config_usage analysis_data loc condition astate in

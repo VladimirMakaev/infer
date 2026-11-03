@@ -23,6 +23,9 @@ type if_kind =
   | Ik_land_lor  (** obtained from translation of && or || *)
   | Ik_while
   | Ik_switch
+  | Ik_switch_exhaustive_fallback
+      (** the edge leaving a switch whose labels name every enumerator of the scrutinee's
+          enumeration; the language still allows values outside that set *)
 [@@deriving compare, equal, yojson_of]
 
 val pp_if_kind : F.formatter -> if_kind -> unit
