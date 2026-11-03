@@ -276,6 +276,9 @@ val add_guard :
 val lock_guard : procname:Procname.t -> loc:Location.t -> Tenv.t -> t -> HilExp.t -> t
 (** Acquire the locks the guard was constructed with. *)
 
+val transfer_guard : t -> guard:HilExp.t -> from:HilExp.t -> t
+(** Hand the locks of [from] over to [guard], which a move constructor does; [from] keeps none. *)
+
 val is_guard : t -> HilExp.t -> bool
 (** Whether a guard was constructed on the expression and not destroyed yet. *)
 

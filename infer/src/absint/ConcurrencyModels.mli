@@ -20,6 +20,8 @@ type lock_effect =
   | GuardLockedIfTrue of HilExp.t  (** lock underlying mutex if true via guard - clang only *)
   | GuardUnlock of HilExp.t  (** unlock underlying mutex via guard - clang only *)
   | GuardDestroy of HilExp.t  (** destroy guard and unlock underlying mutex - clang only *)
+  | GuardTransfer of {guard: HilExp.t; from: HilExp.t}
+      (** [guard] takes over the mutex of [from], which keeps none - clang only *)
   | NoEffect  (** function call has no lock-relevant effect *)
 
 type thread = BackgroundThread | MainThread | MainThreadIfTrue | UnknownThread
