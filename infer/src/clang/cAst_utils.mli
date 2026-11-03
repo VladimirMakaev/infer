@@ -97,6 +97,12 @@ val sil_annot_of_function_attributes : Clang_ast_t.attribute list -> Annot.Item.
     [Annotations.fails_on_true]. *)
 
 val sil_annot_of_field_attributes : Clang_ast_t.attribute list -> Annot.Item.t
+
+val sil_annot_of_class_attributes : Clang_ast_t.attribute list -> Annot.Item.t
+(** [Annotations.capability] if the class is itself a lock, and [Annotations.scoped_lockable] if
+    instances of it hold a capability for their lifetime, such as a lock guard. Neither carries
+    parameters: only the presence of the attribute is exported. *)
+
 (** [Annotations.guarded_by] with the capability as parameter if the field has a [guarded_by]
     attribute *)
 
