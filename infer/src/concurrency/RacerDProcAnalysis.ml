@@ -266,10 +266,44 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         astate
 
 
-  let exec_instr astate ({interproc= {proc_desc; tenv}; formals} as analysis_data) _ _ instr =
+  let exec_instr astate
+      ({interproc= {proc_desc; tenv; analyze_dependency}; formals} as analysis_data) _ _ instr =
     match (instr : HilInstr.t) with
     | Call (ret_base, Direct callee_pname, actuals, call_flags, loc) ->
-        let astate = Domain.add_reads_of_hilexps tenv formals actuals loc astate in
+        let assignment_as_write =
+          Procname.is_cpp_assignment_operator callee_pname
+          && (not (RacerDModels.proc_is_ignored_by_racerd callee_pname))
+          && Attributes.load callee_pname
+             |> Option.exists ~f:(fun {ProcAttributes.is_cpp_const_member_fun} ->
+                 not is_cpp_const_member_fun )
+          && ( RacerDModels.is_container_write tenv callee_pname
+             || RacerDModels.should_analyze_proc tenv callee_pname
+                && match analyze_dependency callee_pname with Ok _ -> false | Error _ -> true )
+        in
+        let assignment_receiver =
+          if assignment_as_write then
+            Domain.apply_to_first_actual actuals None ~f:(fun receiver -> Some receiver)
+          else None
+        in
+        (* Evaluating the assignment destination takes its address, not its value. The write below
+           records any reads needed to reach it; the other actuals still read their values. *)
+        let read_actuals =
+          if Option.is_some assignment_receiver then List.tl actuals |> Option.value ~default:[]
+          else actuals
+        in
+        let astate = Domain.add_reads_of_hilexps tenv formals read_actuals loc astate in
+        let astate =
+          (* A container access does not conflict with an ordinary field read, such as copying
+             the member into a return value. Unknown assignment also writes its receiver; for
+             analyzed user operators, keep their actual accesses and synchronization instead.
+             Deliberately skipped summaries, such as atomic operations, are not unknown writes. *)
+          Option.value_map assignment_receiver ~default:astate ~f:(fun receiver ->
+              let receiver =
+                AccessExpression.add_access receiver MemoryAccess.Dereference |> Option.value_exn
+              in
+              Domain.add_access tenv formals loc ~is_write:true astate
+                (HilExp.AccessExpression receiver) )
+        in
         if RacerDModels.acquires_ownership callee_pname tenv then
           do_call_acquiring_ownership (AccessExpression.base ret_base) astate
         else if RacerDModels.is_container_write tenv callee_pname then
