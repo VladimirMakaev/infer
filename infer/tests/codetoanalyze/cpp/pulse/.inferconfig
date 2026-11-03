@@ -81,6 +81,12 @@
       "kinds": ["Simple"],
       "taint_target": ["FieldsOfValue", [["manipulated", ["ArgumentPositions", [0]]]]]
     },
+    {
+      "class_names": ["receiver_taint::Receiver"],
+      "method_names": ["entry_receiver_source_bad"],
+      "kinds": ["SimpleSource"],
+      "taint_target": "InstanceReference"
+    },
     {"procedure": "makeRequest", "kinds": ["SimpleSource"]}
   ],
   "pulse-taint-sinks": [
@@ -120,6 +126,30 @@
     {"procedure": "requestSink", "kinds": ["SimpleSink"]}
   ],
   "pulse-taint-sanitizers": [
+     {
+       "class_names": ["receiver_taint::Receiver"],
+       "method_names": ["sanitize"],
+       "kinds": ["Simple"],
+       "taint_target": "InstanceReference"
+     },
+     {
+       "class_names": ["receiver_taint::Receiver"],
+       "method_names": ["sanitize_external"],
+       "kinds": ["Simple"],
+       "taint_target": "InstanceReference"
+     },
+     {
+       "class_names": ["receiver_taint::Receiver"],
+       "method_names": ["sanitize_by_position"],
+       "kinds": ["Simple"],
+       "taint_target": ["ArgumentPositions", [0]]
+     },
+     {
+       "class_names": ["receiver_taint::Receiver"],
+       "method_names": ["sanitize_argument"],
+       "kinds": ["Simple"],
+       "taint_target": ["ArgumentPositions", [0]]
+     },
      {
        "procedure": "basics::Obj::sanitizer1",
        "taint_target": "ReturnValue"
