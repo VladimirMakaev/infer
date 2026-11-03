@@ -452,6 +452,9 @@ module InstrBridge = struct
         call "try_entry" (LocationBridge.of_sil loc) [int_exp try_id]
     | TryExit {try_id; loc} ->
         call "try_exit" (LocationBridge.of_sil loc) [int_exp try_id]
+    | UnevaluatedMention {pvars; loc} ->
+        call "unevaluated_mention" (LocationBridge.of_sil loc)
+          (List.map pvars ~f:(fun pvar -> Exp.Lvar (VarNameBridge.of_pvar lang pvar)))
     | VariableLifetimeBegins {pvar; typ; loc} ->
         call "variable_lifetime_begins" (LocationBridge.of_sil loc)
           [Exp.Lvar (VarNameBridge.of_pvar lang pvar); Typ (TypBridge.of_sil typ)]

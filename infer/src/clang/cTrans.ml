@@ -481,23 +481,66 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     List.fold children ~init:vars ~f:(add_referenced_local_vars context)
 
 
-  (* The stmt seems to be always empty *)
-  let unaryExprOrTypeTraitExpr_trans trans_state unary_expr_or_type_trait_expr_info =
+  (** the local variables that [stmt] names, as program variables rather than as names only *)
+  let rec add_named_local_pvars context pvars stmt =
+    let pvars =
+      match (stmt : Clang_ast_t.stmt) with
+      | `DeclRefExpr
+          (_, _, _, {Clang_ast_t.drti_decl_ref= Some {Clang_ast_t.dr_kind= `Var; dr_decl_pointer}})
+        -> (
+        match CAst_utils.get_decl dr_decl_pointer with
+        | Some (Clang_ast_t.VarDecl (_, _, _, {Clang_ast_t.vdi_is_global= false}) as var_decl) ->
+            let procname = Procdesc.get_proc_name context.CContext.procdesc in
+            CVar_decl.sil_var_of_decl context var_decl procname :: pvars
+        | _ ->
+            pvars )
+      | _ ->
+          pvars
+    in
+    let _, children = Clang_ast_proj.get_stmt_tuple stmt in
+    List.fold children ~init:pvars ~f:(add_named_local_pvars context)
+
+
+  (** The operand of [sizeof] and of the [__alignof__] extension is unevaluated, so it is not
+      translated and the variables it names get no instruction of their own. Record the mention as
+      metadata at this program point: it tells liveness that the program refers to the variable
+      here, without inventing a read of its value, which would hide genuine dead stores and would
+      make the other checkers believe the memory is accessed. Only locals are recorded, as for the
+      discarded branch of an [if constexpr]; a parameter named in an unevaluated operand is not. *)
+  let unevaluated_mention_control trans_state stmt_info stmt_list =
+    let context = trans_state.context in
+    match
+      List.fold stmt_list ~init:[] ~f:(add_named_local_pvars context)
+      |> List.dedup_and_sort ~compare:Pvar.compare
+    with
+    | [] ->
+        empty_control
+    | pvars ->
+        let loc =
+          CLocation.location_of_stmt_info context.CContext.translation_unit_context.source_file
+            stmt_info
+        in
+        {empty_control with instrs= [Sil.Metadata (UnevaluatedMention {pvars; loc})]}
+
+
+  let unaryExprOrTypeTraitExpr_trans trans_state stmt_info stmt_list
+      unary_expr_or_type_trait_expr_info =
     let tenv = trans_state.context.CContext.tenv in
     let typ =
       CType_decl.qual_type_to_sil_type tenv
         unary_expr_or_type_trait_expr_info.Clang_ast_t.uttei_qual_type
     in
+    let control = unevaluated_mention_control trans_state stmt_info stmt_list in
     match unary_expr_or_type_trait_expr_info.Clang_ast_t.uttei_kind with
     | (`SizeOf | `SizeOfWithSize _) as size ->
         let nbytes = match size with `SizeOfWithSize nbytes -> Some nbytes | _ -> None in
         let sizeof_data =
           {Exp.typ; nbytes; dynamic_length= None; subtype= Subtype.exact; nullable= false}
         in
-        mk_trans_result (Exp.Sizeof sizeof_data, typ) empty_control
+        mk_trans_result (Exp.Sizeof sizeof_data, typ) control
     | `AlignOf | `OpenMPRequiredSimdAlign | `PreferredAlignOf | `VecStep | `VectorElements ->
         let nondet = (Exp.Var (Ident.create_fresh Ident.knormal), typ) in
-        mk_trans_result nondet empty_control
+        mk_trans_result nondet control
 
 
   let get_builtin_pname_opt trans_unit_ctx qual_name decl_opt =
@@ -6145,8 +6188,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           stmt_info.Clang_ast_t.si_source_range
     | `PseudoObjectExpr (_, stmt_list, _) ->
         pseudoObjectExpr_trans trans_state stmt_list
-    | `UnaryExprOrTypeTraitExpr (_, _, _, unary_expr_or_type_trait_expr_info) ->
-        unaryExprOrTypeTraitExpr_trans trans_state unary_expr_or_type_trait_expr_info
+    | `UnaryExprOrTypeTraitExpr (stmt_info, stmt_list, _, unary_expr_or_type_trait_expr_info) ->
+        unaryExprOrTypeTraitExpr_trans trans_state stmt_info stmt_list
+          unary_expr_or_type_trait_expr_info
     | `ImplicitCastExpr (stmt_info, stmt_list, expr_info, cast_kind, _)
     | `BuiltinBitCastExpr (stmt_info, stmt_list, expr_info, cast_kind, _)
     | `CStyleCastExpr (stmt_info, stmt_list, expr_info, cast_kind, _)
