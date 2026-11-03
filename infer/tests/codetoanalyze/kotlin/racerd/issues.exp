@@ -1,3 +1,4 @@
 Continuation.kt, codetoanalyze.kotlin.racerd.Continuation.writeOuterFieldWithoutLockBad(int,kotlin.coroutines.Continuation):java.lang.Object, 56, THREAD_SAFETY_VIOLATION, no_bucket, WARNING, [<Write on unknown thread>,access to `this.guarded`,<Write on background thread>,access to `this.guarded`]
+CoroutineInterfaces.kt, kotlinx.coroutines.CoroutineAwait.unannotatedAwait_bad(kotlin.coroutines.Continuation):java.lang.Object, 24, INTERFACE_NOT_THREAD_SAFE, no_bucket, WARNING, [Call to un-annotated interface method Object UnannotatedTask.await(Continuation)]
 GuardedByTests.kt, GuardedByTests.unguardedBad():void, 15, GUARDEDBY_VIOLATION, no_bucket, WARNING, [access to `this.unguardedBadField`]
 GuardedByTests.kt, GuardedByTests.interprocUnguardedBad():void, 42, GUARDEDBY_VIOLATION, no_bucket, WARNING, [call to void GuardedByTests.privateUnguardedOk(),access to `this.privateUnguardedField`]
