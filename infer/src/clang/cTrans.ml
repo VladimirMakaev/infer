@@ -2178,15 +2178,19 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             match Exp.zero_of_type typ with
             | Some zero_exp ->
                 [Sil.Store {e1= field_exp; typ; e2= zero_exp; loc}]
-            | None when is_trivial_constructor ->
+            | None ->
+                (* No scalar zero exists for this field, so zero every scalar leaf of it instead.
+                   That is what the brace spellings of the same initialization already produce,
+                   and leaving the field alone was why only the paren spelling of a nested
+                   aggregate looked uninitialized. We are inside
+                   [xcei_requires_zero_initialization], i.e. the language zero-initializes the
+                   whole object here, so this holds whether or not the constructor that runs
+                   next is trivial; a non-trivial one still runs afterwards and may overwrite. *)
                 (implicitValueInitExpr_trans
                    {trans_state with var_exp_typ= Some (field_exp, typ)}
                    si )
                   .control
-                  .instrs
-            | None ->
-                (* Note: This supports primitive types only for now. *)
-                [] )
+                  .instrs )
       else []
     in
     if is_trivial_constructor then

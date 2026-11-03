@@ -11,7 +11,7 @@ digraph cfg {
 	
 
 	 "array_filler_init#init_list#16485.449e7867460145f0_3" -> "array_filler_init#init_list#16485.449e7867460145f0_2" ;
-"array_filler_init#init_list#16485.449e7867460145f0_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(objects:init_list::C[2*32]); [line 57, column 3]\n  *&objects[0].z:int=0 [line 57, column 19]\n  n$2=_fun_init_list::C::C(&objects[0]:init_list::C*) [line 57, column 19]\n  *&objects[1].z:int=0 [line 57, column 19]\n  n$1=_fun_init_list::C::C(&objects[1]:init_list::C*) [line 57, column 19]\n " shape="box"]
+"array_filler_init#init_list#16485.449e7867460145f0_4" [label="4:  DeclStmt \n   VARIABLE_DECLARED(objects:init_list::C[2*32]); [line 57, column 3]\n  *&objects[0].z:int=0 [line 57, column 19]\n  *&objects[0].x.a:int=0 [line 57, column 19]\n  *&objects[0].x.p:int*=null [line 57, column 19]\n  n$2=_fun_init_list::C::C(&objects[0]:init_list::C*) [line 57, column 19]\n  *&objects[1].z:int=0 [line 57, column 19]\n  *&objects[1].x.a:int=0 [line 57, column 19]\n  *&objects[1].x.p:int*=null [line 57, column 19]\n  n$1=_fun_init_list::C::C(&objects[1]:init_list::C*) [line 57, column 19]\n " shape="box"]
 	
 
 	 "array_filler_init#init_list#16485.449e7867460145f0_4" -> "array_filler_init#init_list#16485.449e7867460145f0_3" ;
@@ -110,7 +110,7 @@ digraph cfg {
 "zero_init_record#init_list#736416.8baaea62666796dc_2" [label="2: Exit init_list::zero_init_record \n  " color=yellow style=filled]
 	
 
-"zero_init_record#init_list#736416.8baaea62666796dc_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(c:init_list::C); [line 34, column 3]\n  *&c.z:int=0 [line 34, column 5]\n  n$0=_fun_init_list::C::C(&c:init_list::C*) [line 34, column 5]\n " shape="box"]
+"zero_init_record#init_list#736416.8baaea62666796dc_3" [label="3:  DeclStmt \n   VARIABLE_DECLARED(c:init_list::C); [line 34, column 3]\n  *&c.z:int=0 [line 34, column 5]\n  *&c.x.a:int=0 [line 34, column 5]\n  *&c.x.p:int*=null [line 34, column 5]\n  n$0=_fun_init_list::C::C(&c:init_list::C*) [line 34, column 5]\n " shape="box"]
 	
 
 	 "zero_init_record#init_list#736416.8baaea62666796dc_3" -> "zero_init_record#init_list#736416.8baaea62666796dc_2" ;
