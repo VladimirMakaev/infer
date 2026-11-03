@@ -34,6 +34,12 @@ let set_instr instr = (DLS.get gs).last_instr <- Some instr
 
 let get_node () = (DLS.get gs).last_node
 
+let set_node_opt node_opt =
+  let gs = DLS.get gs in
+  gs.last_instr <- None ;
+  gs.last_node <- node_opt
+
+
 let set_node (node : Procdesc.Node.t) =
   let gs = DLS.get gs in
   gs.last_instr <- None ;
