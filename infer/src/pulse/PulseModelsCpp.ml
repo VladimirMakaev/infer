@@ -4016,9 +4016,79 @@ let folly_co_yield_co_error : model =
   start_named_model "folly::coro::detail::*::yield_value(folly::coro::co_error)" @@ fun () -> throw
 
 
+(* Whether some disjunct of the callee's own summary can return null.
+
+   The list says a function MAY return null; a callee Pulse could analyse has already answered
+   that question for itself. If no disjunct of its summary returns null, the body disproves the
+   list entry on every path, and applying the model would discard a summary that is known safe
+   and report a path the body rules out, which is the false positive this guard removes.
+
+   Only the plain return value is examined. A callee that returns through a hidden parameter is
+   left to the model as before: the answer is not in the return variable and guessing it wrong
+   would silently drop a real null. *)
+let summary_can_return_null callee_procname (summary : PulseSummary.t) =
+  let ret_var = Var.of_pvar (Pvar.get_ret_pvar callee_procname) in
+  List.exists summary.PulseSummary.main.PulseSummary.pre_post_list ~f:(function
+    | ExecutionDomain.ContinueProgram (astate : AbductiveDomain.Summary.t) -> (
+        let astate_t : AbductiveDomain.t = (astate :> AbductiveDomain.t) in
+        let post = (AbductiveDomain.Summary.get_post astate :> BaseDomain.t) in
+        match BaseStack.find_opt ret_var post.BaseDomain.stack with
+        | None ->
+            (* no binding for the return value: say nothing rather than "cannot be null" *)
+            true
+        | Some value_origin -> (
+            (* The stack binds a variable to its ADDRESS, so the returned value is one dereference
+               away and that is where the nullness is recorded. Testing the address instead finds
+               nothing and silently concludes the function cannot return null. *)
+            let addr = AbductiveDomain.CanonValue.canon astate_t (ValueOrigin.value value_origin) in
+            let v =
+              match BaseMemory.find_edge_opt addr Dereference post.BaseDomain.heap with
+              | Some (value, _) ->
+                  AbductiveDomain.CanonValue.downcast
+                    (AbductiveDomain.CanonValue.canon astate_t value)
+              | None ->
+                  AbductiveDomain.CanonValue.downcast addr
+            in
+            (* Two ways a disjunct says the return is null, and both have to be asked. The formula
+               knows it when the body returns a literal; when the null came from a branch on state
+               the value carries the invalidation attribute instead, and the return may even be
+               aliased to the field that decided it. Asking only the formula misses exactly the
+               case the list is for -- a documented null on a live error path. *)
+            Formula.is_known_zero (AbductiveDomain.Summary.get_path_condition astate) v
+            ||
+            match AbductiveDomain.AddressAttributes.find_opt `Post v astate_t with
+            | Some attrs -> (
+              match Attributes.get_invalid attrs with
+              | Some (Invalidation.ConstantDereference i, _) ->
+                  IntLit.iszero i
+              | _ ->
+                  false )
+            | None ->
+                false ) )
+    | _ ->
+        false )
+
+
 (* Run as an unknown call first: calls that cannot change the memory they read return the same
    value, so checking one of them checks the others. *)
-let nullable_model args : model =
+(* Whether the list entry is disproved by the callee's own body on every path. *)
+let body_rules_out_null (analysis_data : PulseSummary.t InterproceduralAnalysis.t) callee_procname =
+  let has_return_param =
+    Option.exists (IRAttributes.load callee_procname) ~f:(fun attrs ->
+        attrs.ProcAttributes.has_added_return_param )
+  in
+  (not has_return_param)
+  &&
+  match analysis_data.InterproceduralAnalysis.analyze_dependency callee_procname with
+  | Ok summary ->
+      not (summary_can_return_null callee_procname summary)
+  | Error _ ->
+      (* no summary: a declaration, or a body Pulse could not analyse. This is the case the list
+         exists for, so keep today's behaviour. *)
+      false
+
+
+let nullable_model_unknown args : model =
   let open PulseModelsDSL.Syntax in
   start_model
   @@ fun () ->
@@ -4055,6 +4125,35 @@ let nullable_model args : model =
            in
            assign_ret res )
         ; prune_positive res ]
+
+
+(* A matched model REPLACES the call: there is no interprocedural fallback once we are here
+   (Pulse.ml runs the model INSTEAD of the call). So when the body disproves the list entry we
+   cannot simply return -- that would drop the call altogether, losing whatever else the callee
+   does: an internal null dereference stops being reported at the call site, and an out-parameter
+   the callee initialises is left at its stale value, which invents a null dereference in the
+   caller. Apply the callee's real summary instead, which is what "keep the summary" means. *)
+let nullable_model args : model =
+ fun ({analysis_data; path; location; ret; callee_procname; call_flags} as model_data) astate
+     non_disj ->
+  if body_rules_out_null analysis_data callee_procname then (
+    L.d_printfln ~color:Orange
+      "nullable list entry for %a is disproved by its own summary: applying the real summary"
+      Procname.pp callee_procname ;
+    (* Go straight to the interprocedural call rather than re-dispatching the call expression:
+       dispatching would run model matching again, this model would match the same procname a
+       second time, and the analysis would not terminate. (The dispatching precedent for models
+       resolves a function pointer to a DIFFERENT procname, so it cannot recurse; this one can.) *)
+    let actuals = List.map args ~f:(fun {FuncArg.arg_payload; typ} -> (arg_payload, typ)) in
+    let formals_opt =
+      Option.map (IRAttributes.load callee_procname) ~f:ProcAttributes.get_pvar_formals
+    in
+    let results, non_disj, _contradiction, _call_status =
+      PulseCallOperations.call analysis_data path location callee_procname ~ret ~actuals
+        ~formals_opt PulseOperations.ResolvedCall call_flags astate non_disj
+    in
+    (results, non_disj) )
+  else nullable_model_unknown args model_data astate non_disj
 
 
 let matchers : matcher list =
