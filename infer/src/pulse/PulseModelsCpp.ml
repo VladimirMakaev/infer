@@ -1094,6 +1094,26 @@ module Std = struct
     PulseOperations.write_id ret_id
       (fst vector, Hist.add_call path location "std::make_move_iterator" (snd vector))
       astate
+
+
+  (* [std::move_iterator] is a class returned by value, so the frontend gives the call a
+     temporary of its own to fill in and it is that temporary, not the return value, that the
+     caller goes on to use. Writing only the return value leaves the temporary unconstrained,
+     and the wrapped iterator's link to the range it came from is lost. *)
+  let make_move_iterator_into vector result : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let event = Hist.call_event path location "std::make_move_iterator" in
+    let astate_with_result =
+      match
+        GenericArrayBackedCollection.Iterator.construct path location event ~init:vector ~ref:result
+          astate
+      with
+      | Ok astate | Recoverable (astate, _) ->
+          astate
+      | FatalError _ ->
+          astate
+    in
+    make_move_iterator vector model_data astate_with_result
 end
 
 (** [std::distance], [std::next], [std::prev] and [std::advance] on raw pointers are pointer
@@ -2014,6 +2034,17 @@ module Vector = struct
       GenericArrayBackedCollection.eval path Read location vector astate
     in
     PulseOperations.write_id ret_id (arr_addr, Hist.add_event event arr_hist) astate
+
+
+  (* For a container whose iterator is a raw pointer the past-the-end position is the return
+     value itself, so there is no iterator object to point into the way [vector_end] does. *)
+  let end_pointer ~desc vector : model_no_non_disj =
+   fun {path; location; ret= ret_id, _} astate ->
+    let event = Hist.call_event path location desc in
+    let<+> astate, (pointer_addr, pointer_hist) =
+      GenericArrayBackedCollection.eval_pointer_to_last_element path location vector astate
+    in
+    PulseOperations.write_id ret_id (pointer_addr, Hist.add_event event pointer_hist) astate
 
 
   let vector_begin ~desc vector iter : model_no_non_disj =
@@ -4354,6 +4385,8 @@ let simple_matchers =
     ; -"std" &:: "move_if_noexcept" $ capt_arg_payload
       $--> Basic.id_first_arg ~desc:"std::move_if_noexcept()"
       |> with_non_disj
+    ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+ capt_arg_payload
+      $--> Std.make_move_iterator_into |> with_non_disj
     ; -"std" &:: "make_move_iterator" $ capt_arg_payload $+...$--> Std.make_move_iterator
       |> with_non_disj
     ; -"std" &:: "make_pair" < capt_typ &+ capt_typ >$ capt_arg_payload $+ capt_arg_payload
@@ -4487,6 +4520,144 @@ let simple_matchers =
       $--> GenericArrayBackedCollection.size ~desc:"std::vector::size()"
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.size.1"
+      (* [folly::fbvector] is a drop-in replacement for [std::vector] with the same member
+         interface, but it was not modelled, so its own storage pointer was analysed instead: a
+         default-constructed one holds a literal null that survives any operation whose body
+         cannot be related to its arguments, and a later [begin()] hands that null back. The
+         [std::vector] models are reused as they are. The entries are spelled out rather than
+         shared with the [std::vector] block above because the two differ where it matters:
+         [folly::fbvector] defines [iterator = T*], so [begin], [end], [insert], [erase] and
+         [emplace] return the iterator in the return value, while [std::vector]'s class-typed
+         iterator arrives through a trailing out-parameter. *)
+    ; -"folly" &:: "fbvector" &:: "fbvector" $ capt_arg_payload
+      $--> Vector.default_constructor ~desc:"folly::fbvector::fbvector()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.fbvector.1"
+    ; -"folly" &:: "fbvector" &:: "fbvector" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $+...$--> Vector.init_list_constructor ~desc:"folly::fbvector::fbvector()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.fbvector.2"
+    ; -"folly" &:: "fbvector" &:: "fbvector" <>$ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"folly" &:: "fbvector")
+      $+...$--> Vector.init_copy_constructor ~desc:"folly::fbvector::fbvector()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.fbvector.3"
+    ; -"folly" &:: "fbvector" &:: "assign" $ capt_arg_payload
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> Vector.assign_initializer_list |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "assign" $ capt_arg_payload $+ capt_arg $+ any_arg
+      $--> Vector.assign_count |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "assign" $ capt_arg_payload
+      $+...$--> Vector.invalidate_references_unknown_size Assign
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "at" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.at ~desc:"folly::fbvector::at()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "back" <>$ capt_arg_payload
+      $--> Vector.back ~desc:"folly::fbvector::back()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.back.1"
+    ; -"folly" &:: "fbvector" &:: "front" <>$ capt_arg_payload
+      $--> Vector.front ~desc:"folly::fbvector::front()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.front.1"
+    ; -"folly" &:: "fbvector" &:: "data" <>$ capt_arg_payload
+      $--> Vector.data ~desc:"folly::fbvector::data()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.data.1"
+    ; -"folly" &:: "fbvector" &:: "rbegin" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_end ~desc:"folly::fbvector::rbegin()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "crbegin" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_end ~desc:"folly::fbvector::crbegin()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "rend" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_begin ~desc:"folly::fbvector::rend()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "crend" <>$ capt_arg_payload $+ capt_arg
+      $--> reverse_begin_or_end Vector.vector_begin ~desc:"folly::fbvector::crend()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "clear" <>$ capt_arg_payload $--> Vector.clear
+      |> observe_matcher ~rule:"folly.fbvector.clear.1"
+    ; -"folly" &:: "fbvector" &:: "~fbvector" <>$ capt_arg_payload $+...$--> Vector.destructor
+      |> observe_matcher ~rule:"folly.fbvector.destructor.1"
+    ; -"folly" &:: "fbvector" &:: "emplace_back" $ capt_arg_payload
+      $++$--> Vector.emplace_back ~desc:"folly::fbvector::emplace_back()"
+    ; -"folly" &:: "fbvector" &:: "operator=" <>$ capt_arg_payload $+ capt_arg
+      $+...$--> Vector.assign
+      |> observe_matcher ~rule:"folly.fbvector.assign.1"
+    ; -"folly" &:: "fbvector" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> Vector.at ~desc:"folly::fbvector::at()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.subscript.1"
+    ; -"folly" &:: "fbvector" &:: "shrink_to_fit" <>$ capt_arg_payload
+      $--> Vector.invalidate_references ShrinkToFit
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.shrink_to_fit.1"
+    ; -"folly" &:: "fbvector" &:: "push_back" <>$ capt_arg_payload $+ capt_arg
+      $--> Vector.push_back_cpp ~vector_f:PushBack ~desc:"folly::fbvector::push_back()"
+      |> observe_matcher ~rule:"folly.fbvector.push_back.1"
+    ; -"folly" &:: "fbvector" &:: "pop_back" <>$ capt_arg_payload
+      $+...$--> Vector.pop_back ~desc:"folly::fbvector::pop_back()"
+      |> observe_matcher ~rule:"folly.fbvector.pop_back.1"
+    ; -"folly" &:: "fbvector" &:: "empty" <>$ capt_arg_payload
+      $--> GenericArrayBackedCollection.empty ~desc:"folly::fbvector::is_empty()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "reserve" <>$ capt_arg_payload $+ capt_arg
+      $+...$--> Vector.reserve
+      |> observe_matcher ~rule:"folly.fbvector.reserve.1"
+    ; -"folly" &:: "fbvector" &:: "resize" <>$ capt_arg_payload $+ capt_arg $+...$--> Vector.resize
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.resize.1"
+    ; -"folly" &:: "fbvector" &:: "size" $ capt_arg_payload
+      $--> GenericArrayBackedCollection.size ~desc:"folly::fbvector::size()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.size.1"
+      (* [begin] and [end] hand back the storage pointer itself, so they are the [data] model
+         and a past-the-end variant of it rather than the iterator-filling ones. *)
+    ; -"folly" &:: "fbvector" &:: "begin" <>$ capt_arg_payload
+      $--> Vector.data ~desc:"folly::fbvector::begin()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.begin.1"
+    ; -"folly" &:: "fbvector" &:: "cbegin" <>$ capt_arg_payload
+      $--> Vector.data ~desc:"folly::fbvector::cbegin()"
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "end" <>$ capt_arg_payload
+      $--> Vector.end_pointer ~desc:"folly::fbvector::end()"
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.end.1"
+    ; -"folly" &:: "fbvector" &:: "cend" <>$ capt_arg_payload
+      $--> Vector.end_pointer ~desc:"folly::fbvector::cend()"
+      |> with_non_disj
+      (* [insert], [erase] and [emplace] do not take the trailing out-parameter the
+         [std::vector] models read, so the models used here are the ones that need only the
+         container and ignore the returned iterator. *)
+    ; -"folly" &:: "fbvector" &:: "emplace" $ capt_arg_payload $+ any_arg $+ capt_arg
+      $--> (fun vector value ->
+      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Emplace vector) )
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "emplace" $ capt_arg_payload
+      $+...$--> Vector.invalidate_references_one_more Emplace
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg
+      $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
+      $--> Vector.insert_initializer_list |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ capt_arg
+      $--> (fun vector count value ->
+      Vector.tie_inserted_value vector value (Vector.insert_count vector count) )
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg
+      $--> (fun vector value ->
+      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Insert vector) )
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload
+      $+...$--> Vector.invalidate_references_unknown_size Insert
+      |> with_non_disj
+    ; -"folly" &:: "fbvector" &:: "erase" $ capt_arg_payload
+      $+...$--> Vector.invalidate_references_unknown_size Erase
+      |> with_non_disj
+      |> observe_matcher ~rule:"folly.fbvector.erase.1"
       (* [std::span]: the constructors are function templates, so they are matched with any
          template arguments, and the order of the two-argument ones matters. *)
     ; -"std" &:: "span" &:: "span" $ capt_arg_payload
