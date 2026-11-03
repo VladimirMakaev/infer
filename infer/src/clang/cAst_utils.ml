@@ -390,6 +390,20 @@ let sil_annot_of_function_attributes attributes =
   @ try_acquire_annot
 
 
+(* [capability] and [scoped_lockable] carry no payload the exporter keeps, so only their presence
+   is recorded. That is all the analysis needs: [capability] says the class is itself a lock, and
+   [scoped_lockable] says instances hold a capability for their lifetime, which is what makes a
+   constructor's [acquire_capability] describe the whole object rather than one statement in it. *)
+let sil_annot_of_class_attributes attributes =
+  List.filter_map attributes ~f:(function
+    | `CapabilityAttr _ ->
+        Some {Annot.class_name= Annotations.capability; parameters= []}
+    | `ScopedLockableAttr _ ->
+        Some {Annot.class_name= Annotations.scoped_lockable; parameters= []}
+    | _ ->
+        None )
+
+
 let sil_annot_of_field_attributes attributes =
   List.filter_map attributes ~f:(function
     | `GuardedByAttr (_, {Clang_ast_t.ca_expression}) ->
