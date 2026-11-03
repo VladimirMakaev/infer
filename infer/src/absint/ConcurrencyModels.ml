@@ -105,7 +105,11 @@ let get_thread_assert_effect = function
 module Clang : sig
   val get_lock_effect : Procname.t -> HilExp.t list -> lock_effect
 
+  val get_scoped_capability_lock_effect : Tenv.t -> Procname.t -> HilExp.t list -> lock_effect
+
   val is_recursive_lock_type : QualifiedCppName.t -> bool
+
+  val lock_type_recursion : QualifiedCppName.t -> bool option
 end = struct
   type lock_model =
     { classname: string [@default ""]
@@ -186,27 +190,31 @@ end = struct
     @ config_locks
 
 
-  let is_recursive_lock_type =
-    (* user models come last in [lock_models] so their [recursive] overrides the built-in one *)
-    let recursive_of_classname =
-      List.fold lock_models ~init:IString.Map.empty ~f:(fun acc {classname; recursive} ->
-          if String.is_empty classname then acc
-          else
-            IString.Map.update classname
-              (fun previous ->
-                Some (Option.first_some recursive previous |> Option.value ~default:true) )
-              acc )
-    in
-    fun qname ->
-      let qname_str = QualifiedCppName.to_qual_string qname in
-      match IString.Map.find_opt qname_str recursive_of_classname with
-      | None ->
-          L.debug Analysis Medium
-            "is_recursive_lock_type: Could not find lock type %s, will assume recursive@\n"
-            qname_str ;
-          true
-      | Some recursive ->
-          recursive
+  (* user models come last in [lock_models] so their [recursive] overrides the built-in one *)
+  let recursive_of_classname =
+    lazy
+      (List.fold lock_models ~init:IString.Map.empty ~f:(fun acc {classname; recursive} ->
+           if String.is_empty classname then acc
+           else
+             IString.Map.update classname
+               (fun previous ->
+                 Some (Option.first_some recursive previous |> Option.value ~default:true) )
+               acc ) )
+
+
+  let lock_type_recursion qname =
+    IString.Map.find_opt (QualifiedCppName.to_qual_string qname) (Lazy.force recursive_of_classname)
+
+
+  let is_recursive_lock_type qname =
+    match lock_type_recursion qname with
+    | None ->
+        L.debug Analysis Medium
+          "is_recursive_lock_type: Could not find lock type %s, will assume recursive@\n"
+          (QualifiedCppName.to_qual_string qname) ;
+        true
+    | Some recursive ->
+        recursive
 
 
   (** the classes we have a lock model for, including the ones [--lock-model] adds *)
@@ -381,12 +389,12 @@ end = struct
       gets its effect from its summary instead. A capability is ["this"], a formal [f], a field
       [f->g] or [f.g] of a formal, or a field of [this]. Other capabilities, eg globals, are counted
       as locks but have no lock path. *)
-  let get_capability_lock_effect pname actuals =
+  let get_capability_lock_effect ?(even_if_defined = false) pname actuals =
     (* builtins have no attributes, and missing attributes are not cached *)
     let attributes = if BuiltinDecl.is_declared pname then None else Attributes.load pname in
     match attributes with
-    | Some {ProcAttributes.is_defined= false; formals; ret_annots}
-      when not (List.is_empty ret_annots) -> (
+    | Some {ProcAttributes.is_defined; formals; ret_annots}
+      when (even_if_defined || not is_defined) && not (List.is_empty ret_annots) -> (
         let find_annot class_name =
           List.find ret_annots ~f:(fun {Annot.class_name= name} -> String.equal name class_name)
         in
@@ -493,6 +501,27 @@ end = struct
         Typ.Name.equal guard_class from_class
     | _ ->
         false
+
+
+  (* A [scoped_lockable] class exists to hold a capability for the lifetime of an instance, so
+     what its constructor and destructor DECLARE is a statement about the whole object, and is
+     believed even when they are defined. An ordinary annotated method is not that -- it may take
+     the lock in one of several branches, or take others besides -- so it keeps being read from
+     its body, which is also what keeps the lock names such a method produces unchanged.
+
+     Without this, a guard whose constructor is defined in a header acquires nothing: its body
+     builds a guard of its own over a member, and guarded locks are dropped from a summary
+     because interprocedural handling of guards does not exist. *)
+  let get_scoped_capability_lock_effect tenv pname actuals =
+    let is_scoped_lockable () =
+      Procname.get_class_type_name pname
+      |> Option.bind ~f:(Tenv.lookup tenv)
+      |> Option.exists ~f:(fun {Struct.annots} ->
+          Annotations.ia_ends_with annots Annotations.scoped_lockable )
+    in
+    if (Procname.is_constructor pname || Procname.is_destructor pname) && is_scoped_lockable () then
+      get_capability_lock_effect ~even_if_defined:true pname actuals
+    else NoEffect
 
 
   let get_lock_effect pname actuals =
@@ -719,9 +748,19 @@ let runs_on_ui_thread tenv pname =
   || annotated_as_uithread_equivalent tenv pname
 
 
+let get_scoped_capability_lock_effect = Clang.get_scoped_capability_lock_effect
+
 let is_recursive_lock_type (typename : Typ.name) =
   match typename with
   | CppClass {name} | CStruct name | CUnion name ->
       Clang.is_recursive_lock_type name
   | _ ->
       true
+
+
+let lock_type_recursion (typename : Typ.name) =
+  match typename with
+  | CppClass {name} | CStruct name | CUnion name ->
+      Clang.lock_type_recursion name
+  | _ ->
+      None

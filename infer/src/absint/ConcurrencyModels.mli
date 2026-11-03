@@ -29,6 +29,12 @@ type thread = BackgroundThread | MainThread | MainThreadIfTrue | UnknownThread
 val get_lock_effect : Procname.t -> HilExp.t list -> lock_effect
 (** describe how this procedure behaves with respect to locking *)
 
+val get_scoped_capability_lock_effect : Tenv.t -> Procname.t -> HilExp.t list -> lock_effect
+(** the effect that the constructor or destructor of a [scoped_lockable] class declares through its
+    thread-safety attribute, believed even when the function is defined because the class exists to
+    hold that capability for an instance's lifetime. [NoEffect] for anything else, including
+    ordinary annotated methods, whose body stays authoritative. *)
+
 val get_thread_assert_effect : Procname.t -> thread
 (** In Java, certain methods can be used to assert execution on a specific kind of thread, or return
     a boolean equivalent to such a fact. *)
@@ -37,6 +43,10 @@ val get_current_class_and_annotated_superclasses :
   (Annot.Item.t -> bool) -> Tenv.t -> Procname.t -> (Typ.name * Typ.name list) option
 
 val is_recursive_lock_type : Typ.name -> bool
+
+val lock_type_recursion : Typ.name -> bool option
+(** [Some recursive] when there is a lock model for this type, [None] when there is none, so that a
+    caller can tell "modelled as non-recursive" from "no model, assume recursive" *)
 
 (** Type documenting why a method is considered as annotated with a certain annotation *)
 type annotation_trail =
