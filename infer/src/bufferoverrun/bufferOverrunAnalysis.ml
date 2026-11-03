@@ -615,6 +615,7 @@ module TransferFunctions = struct
           | Skip
           | TryEntry _
           | TryExit _
+          | UnevaluatedMention _
           | VariableLifetimeBegins _ ) ->
           mem
 

@@ -53,6 +53,7 @@ type instr_metadata =
   | Skip
   | TryEntry of {try_id: int; loc: Location.t}
   | TryExit of {try_id: int; loc: Location.t}
+  | UnevaluatedMention of {pvars: Pvar.t list; loc: Location.t}
   | VariableLifetimeBegins of
       {pvar: Pvar.t; typ: Typ.t; loc: Location.t; is_cpp_structured_binding: bool}
 [@@deriving compare, equal, hash, normalize]
@@ -91,6 +92,7 @@ let location_of_instr_metadata = function
   | Nullify (_, loc)
   | TryEntry {loc}
   | TryExit {loc}
+  | UnevaluatedMention {loc}
   | VariableLifetimeBegins {loc} ->
       loc
   | Skip | LoopEntry _ | LoopExit _ | LoopBackEdge _ ->
@@ -112,6 +114,10 @@ let exps_of_instr_metadata = function
   | Nullify (pvar, _) ->
       [Exp.Lvar pvar]
   | Skip | LoopEntry _ | LoopExit _ | LoopBackEdge _ | TryEntry _ | TryExit _ ->
+      []
+  | UnevaluatedMention _ ->
+      (* deliberately empty: the variables are named, not used, so a consumer that collects the
+         expressions an instruction touches must not see them *)
       []
   | VariableLifetimeBegins {pvar} ->
       [Exp.Lvar pvar]
@@ -152,6 +158,10 @@ let pp_instr_metadata pe f = function
       F.fprintf f "TRY_ENTRY; [%a]" Location.pp loc
   | TryExit {loc} ->
       F.fprintf f "TRY_EXIT; [%a]" Location.pp loc
+  | UnevaluatedMention {pvars; loc} ->
+      F.fprintf f "UNEVALUATED_MENTION(%a); [%a]"
+        (Pp.seq ~sep:"," (Pvar.pp pe))
+        pvars Location.pp loc
   | VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding} ->
       F.fprintf f "VARIABLE_DECLARED(%a:%a%t); [%a]" Pvar.pp_value pvar (Typ.pp_full pe) typ
         (fun f -> if is_cpp_structured_binding then F.pp_print_string f ", cpp_structured_binding")
@@ -262,6 +272,9 @@ let equal_structural_instr instr instr' exp_map =
       (true, exp_map)
   | Metadata (ExitScope (temps, _)), Metadata (ExitScope (temps', _)) ->
       var_list_equal_structural temps temps' exp_map
+  | Metadata (UnevaluatedMention {pvars}), Metadata (UnevaluatedMention {pvars= pvars'}) ->
+      var_list_equal_structural (List.map pvars ~f:Var.of_pvar) (List.map pvars' ~f:Var.of_pvar)
+        exp_map
   | ( Metadata (VariableLifetimeBegins {pvar= pv; typ= t})
     , Metadata (VariableLifetimeBegins {pvar= pv'; typ= t'}) ) ->
       exp_equal_structural (Lvar pv) (Lvar pv') exp_map &&+ Typ.equal t t'

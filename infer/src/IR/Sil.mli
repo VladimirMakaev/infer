@@ -42,6 +42,11 @@ type instr_metadata =
   | Skip  (** no-op *)
   | TryEntry of {try_id: int; loc: Location.t}  (** entry of C++ try block *)
   | TryExit of {try_id: int; loc: Location.t}  (** exit of C++ try block *)
+  | UnevaluatedMention of {pvars: Pvar.t list; loc: Location.t}
+      (** the program names these variables here in an unevaluated operand, e.g. the argument of
+          [sizeof]. The operand is not translated because it is not evaluated, so this records the
+          mention without reading any value: it says the variable is referenced at this point, not
+          that its contents are used. *)
   | VariableLifetimeBegins of
       {pvar: Pvar.t; typ: Typ.t; loc: Location.t; is_cpp_structured_binding: bool}
       (** stack variable declared *)
