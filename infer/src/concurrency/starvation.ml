@@ -614,6 +614,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
                  ~f:(Domain.acquire_or_restore ~tenv astate ~procname ~loc)
         | GuardLock guard ->
             Domain.lock_guard tenv astate guard ~procname ~loc
+        | GuardTransfer {guard; from} ->
+            Domain.transfer_guard astate ~guard ~from
         | GuardConstruct {guard; locks; acquire_now} ->
             let lock_paths = List.filter_map locks ~f:get_lock_path in
             if List.length lock_paths < List.length locks then

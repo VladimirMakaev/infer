@@ -107,6 +107,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         Fn.apply_n_times ~n:(Int.max 1 (List.length locks)) Domain.acquire_lock astate
     | GuardLock _ ->
         Domain.acquire_lock astate
+    | GuardTransfer _ ->
+        (* a move used to reach the case below with the source guard as its one lock;
+           keep counting it the same way, so that the two destructors stay balanced *)
+        Domain.acquire_lock astate
     | GuardConstruct {locks; acquire_now= true} ->
         Fn.apply_n_times ~n:(List.length locks) Domain.acquire_lock astate
     | Unlock _ ->
