@@ -1247,7 +1247,15 @@ let remove_reverse_guard ~tenv ~procname ~loc astate guard =
   GuardToLockMap.find_opt guard astate.reverse_guard_map
   |> Option.value_map ~default:astate ~f:(fun locks_opt ->
       let locks = FlatLocks.get locks_opt |> Option.value ~default:[] in
-      let astate = acquire ~tenv astate ~procname ~loc locks in
+      (* a reverse lock hands the lock back to whoever held it on entry. If this procedure gave it
+         up without ever holding it - the lock belongs to a caller, reached through a formal - then
+         taking it back cancels that release instead of acquiring here. Recording an acquisition
+         would make the procedure look like it leaves the lock held, and [CriticalPair.is_balanced]
+         would then drop every critical pair that mentions it *)
+      let astate =
+        List.fold locks ~init:astate ~f:(fun astate lock ->
+            acquire_or_restore ~tenv astate ~procname ~loc lock )
+      in
       {astate with reverse_guard_map= GuardToLockMap.remove_guard astate.reverse_guard_map guard} )
 
 
