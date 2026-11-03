@@ -516,3 +516,30 @@ int call_default_function_null_bad(
 }
 
 int call_default_function() { return call_default_function_null_bad(); }
+
+// A closure that captures a local by reference reads it when it runs, so an
+// assignment made after the capture has to be visible through the capture.
+void ref_capture_sees_later_assignment_ok() {
+  int* p = nullptr;
+  auto read = [&p] { return *p; };
+  p = &global_int;
+  read();
+}
+
+// The same, in the other direction: a null assigned after the capture is a real
+// dereference of null and has to be reported.
+int ref_capture_sees_later_null_bad() {
+  int* p = &global_int;
+  auto read = [&p] { return *p; };
+  p = nullptr;
+  return read();
+}
+
+// Control for the two above: a capture by value copies at capture time, so a
+// later assignment is invisible to the closure by design.
+int value_capture_ignores_later_assignment_ok() {
+  int* p = &global_int;
+  auto read = [p] { return *p; };
+  p = nullptr;
+  return read();
+}

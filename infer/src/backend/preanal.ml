@@ -390,6 +390,24 @@ module Liveness = struct
 
   module NullifyAnalysis = AbstractInterpreter.MakeRPO (NullifyTransferFunctions)
 
+  (** The locals that a closure built in this procedure captured BY REFERENCE. The closure reads
+      them when it runs, which can be long after the capture, but liveness cannot see that read: the
+      call site passes the closure, not the variable. Without this they are nullified and their
+      scope exited right after the capture, and an assignment to one of them afterwards creates a
+      fresh cell that the closure does not point at -- so the closure goes on reading the value the
+      variable held when it was captured, and `close(fd); fd = other;` under a guard lambda looks
+      like a double close.
+
+      A capture BY VALUE copies into the closure and is unaffected, which is also how the two are
+      told apart here: the frontend records a by-reference capture as the variable's address
+      ([Lvar pvar]) and a by-value one as the temporary holding the copy. *)
+  let captured_by_ref_pvars proc_desc =
+    Procdesc.fold_instrs proc_desc ~init:Pvar.Set.empty ~f:(fun acc _node instr ->
+        List.fold (Sil.exps_of_instr instr) ~init:acc ~f:(fun acc exp ->
+            Exp.fold_captured exp acc ~f:(fun acc (captured_exp : Exp.t) ->
+                match captured_exp with Lvar pvar -> Pvar.Set.add pvar acc | _ -> acc ) ) )
+
+
   let add_nullify_instrs proc_desc liveness_inv_map =
     let address_taken_vars =
       if Procname.is_java (Procdesc.get_proc_name proc_desc) then AddressTaken.Domain.empty
@@ -405,8 +423,13 @@ module Liveness = struct
     let nullify_proc_cfg = ProcCfg.Exceptional.from_pdesc proc_desc in
     let initial = (VarDomain.bottom, VarDomain.bottom) in
     let nullify_inv_map = NullifyAnalysis.exec_cfg nullify_proc_cfg liveness_inv_map ~initial in
-    (* only nullify pvars that are local; don't nullify those that can escape *)
-    let is_local pvar = not (Liveness.is_always_in_scope proc_desc pvar) in
+    (* only nullify pvars that are local; don't nullify those that can escape, and treat a local
+       a closure captured by reference as one of those: it is still read, through the closure,
+       after liveness believes it dead *)
+    let captured_by_ref = captured_by_ref_pvars proc_desc in
+    let is_local pvar =
+      (not (Liveness.is_always_in_scope proc_desc pvar)) && not (Pvar.Set.mem pvar captured_by_ref)
+    in
     let prepend_node_nullify_instructions loc pvars instrs =
       List.fold pvars ~init:instrs ~f:(fun instrs pvar ->
           if is_local pvar && not (Pvar.is_artificial pvar) then
