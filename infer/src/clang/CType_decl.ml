@@ -813,8 +813,13 @@ and add_record tenv decl_info definition_decl record_decl_info ?cxx_record_decl_
               not is_sil_typename )
         in
         let annots =
-          if Typ.Name.Cpp.is_class sil_typename then Annot.Class.cpp
-          else (* No annotations for structs *) Annot.Item.empty
+          let class_annots =
+            if Typ.Name.Cpp.is_class sil_typename then Annot.Class.cpp
+            else (* No annotations for structs *) Annot.Item.empty
+          in
+          (* a thread-safety attribute is meaningful on a struct as much as on a class *)
+          class_annots
+          @ CAst_utils.sil_annot_of_class_attributes decl_info.Clang_ast_t.di_attributes
         in
         let class_info =
           let is_trivially_copyable =

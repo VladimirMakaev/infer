@@ -89,6 +89,10 @@ let release_capability = "ReleaseCapability"
 
 let try_acquire_capability = "TryAcquireCapability"
 
+let capability = "Capability"
+
+let scoped_lockable = "ScopedLockable"
+
 let fails_on_true = "fails_on_true"
 
 let thread_confined = "ThreadConfined"

@@ -57,6 +57,13 @@ val release_capability : string
 val try_acquire_capability : string
 (** annotation of a clang function with a [try_acquire_capability] attribute *)
 
+val capability : string
+(** annotation of a clang class with a [capability] attribute, ie one that is itself a lock *)
+
+val scoped_lockable : string
+(** annotation of a clang class with a [scoped_lockable] attribute, ie one that holds a capability
+    for its lifetime, such as a lock guard *)
+
 val fails_on_true : string
 (** parameter of [try_acquire_capability] when the function returns [false] on success *)
 
