@@ -18,6 +18,7 @@ type lock_effect =
   | GuardLockedIfTrue of HilExp.t
   | GuardUnlock of HilExp.t
   | GuardDestroy of HilExp.t
+  | GuardTransfer of {guard: HilExp.t; from: HilExp.t}
   | NoEffect
 
 let make_lock_action type_str action procname locks =
@@ -472,6 +473,28 @@ end = struct
         NoEffect
 
 
+  (* [std::unique_lock] and [std::shared_lock] can be moved, and their move constructor has
+     the same arity as the one taking a mutex. Tell them apart by the argument's type: a guard is
+     built from a mutex, never from another guard of its own class. *)
+  let guard_moved_from guard from =
+    let class_of (exp : HilExp.t) =
+      match exp with
+      | AccessExpression access_exp -> (
+        match HilExp.AccessExpression.get_base access_exp with
+        | _, {Typ.desc= Tstruct name | Tptr ({desc= Tstruct name}, _)} ->
+            Some name
+        | _ ->
+            None )
+      | _ ->
+          None
+    in
+    match (class_of guard, class_of from) with
+    | Some guard_class, Some from_class ->
+        Typ.Name.equal guard_class from_class
+    | _ ->
+        false
+
+
   let get_lock_effect pname actuals =
     let fst_arg = match actuals with x :: _ -> [x] | _ -> [] in
     if is_std_lock pname then make_lock pname actuals
@@ -481,7 +504,12 @@ end = struct
     else if is_zero_trylock pname then make_zero_trylock pname fst_arg
     else if is_locked_ptr_of_unmodelled_mutex pname then get_capability_lock_effect pname actuals
     else if is_scoped_lock_constructor pname then make_scoped_lock_construct actuals
-    else if is_guard_constructor pname then make_guard_construct pname actuals
+    else if is_guard_constructor pname then
+      match actuals with
+      | [guard; from] when guard_moved_from guard from ->
+          GuardTransfer {guard; from}
+      | _ ->
+          make_guard_construct pname actuals
     else if is_guard_lock pname then make_guard_lock pname actuals
     else if is_guard_unlock pname then make_guard_unlock pname actuals
     else if is_guard_destructor pname then make_guard_destructor pname actuals

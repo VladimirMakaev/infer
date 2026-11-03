@@ -1222,6 +1222,16 @@ let remove_guard astate guard =
       {astate with guard_map= GuardToLockMap.remove_guard astate.guard_map guard} )
 
 
+(* a moved-from guard owns nothing, so the entry moves rather than being copied; the locks
+   themselves stay held, the object holding them is simply another one *)
+let transfer_guard astate ~guard ~from =
+  GuardToLockMap.find_opt from astate.guard_map
+  |> Option.value_map ~default:astate ~f:(fun locks ->
+      { astate with
+        guard_map=
+          GuardToLockMap.remove_guard astate.guard_map from |> GuardToLockMap.add guard locks } )
+
+
 let is_guard astate guard = GuardToLockMap.mem guard astate.guard_map
 
 let get_guard_lock astate guard =
