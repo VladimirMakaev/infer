@@ -122,7 +122,8 @@ class ReverseGuard {
 
 class ReverseGuardUser {
  public:
-  void FP_lock_in_scope_ok() {
+  // the reverse lock holds the guard down across the second acquisition
+  void lock_in_scope_ok() {
     Lock l(mutex_);
     ReverseGuard released(l);
     std::lock_guard<std::mutex> g(mutex_);
@@ -135,6 +136,85 @@ class ReverseGuardUser {
   }
 
  private:
+  std::mutex mutex_;
+};
+
+// the same two shapes one call deeper. Whether the second acquisition deadlocks
+// turns only on where the reverse lock's scope ends relative to it, so the
+// callee's summary has to carry that and not just "the lock was given up".
+class AcrossCallByReference {
+ public:
+  void scope_ends_bad() {
+    Lock l(mutex_);
+    ends(l);
+  }
+
+  void lock_in_scope_ok() {
+    Lock l(mutex_);
+    spans(l);
+  }
+
+ private:
+  void take() { std::lock_guard<std::mutex> g(mutex_); }
+  void ends(Lock& l) {
+    { ReverseGuard released(l); }
+    take();
+  }
+  void spans(Lock& l) {
+    ReverseGuard released(l);
+    take();
+  }
+  std::mutex mutex_;
+};
+
+class AcrossCallByValue {
+ public:
+  void scope_ends_bad() {
+    Lock l(mutex_);
+    ends(std::move(l));
+  }
+
+  void lock_in_scope_ok() {
+    Lock l(mutex_);
+    spans(std::move(l));
+  }
+
+ private:
+  void take() { std::lock_guard<std::mutex> g(mutex_); }
+  void ends(Lock l) {
+    { ReverseGuard released(l); }
+    take();
+  }
+  void spans(Lock l) {
+    ReverseGuard released(l);
+    take();
+  }
+  std::mutex mutex_;
+};
+
+// the same, over a raw mutex reference rather than a guard
+class AcrossCallOverMutex {
+ public:
+  void scope_ends_bad() {
+    Lock l(mutex_);
+    ends();
+  }
+
+  void lock_in_scope_ok() {
+    Lock l(mutex_);
+    spans();
+  }
+
+ private:
+  void take() { std::lock_guard<std::mutex> g(mutex_); }
+  void ends() {
+    { ReverseMutex released(mutex_); }
+    take();
+  }
+  void spans() {
+    ReverseMutex released(mutex_);
+    take();
+  }
   std::mutex mutex_;
 };
 

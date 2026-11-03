@@ -56,10 +56,16 @@ let get_escaped_formals proc_desc =
     |> Sequence.fold ~init:escaped ~f:(fun escaped ((pvar, _) as formal) ->
         if keep formal then escaped else Var.Set.add (Var.of_pvar pvar) escaped )
   in
+  (* a constructor storing a formal into a field of its own object is not letting it escape: the
+     object has taken custody of the guard, and its destructor is where it is handed back *)
+  let is_constructor = Procname.is_constructor (Procdesc.get_proc_name proc_desc) in
+  let keeps_in_own_field (e1 : Exp.t) =
+    is_constructor && match e1 with Lfield _ -> true | _ -> false
+  in
   Procdesc.fold_instrs proc_desc ~init:Var.Set.empty ~f:(fun escaped _ (instr : Sil.instr) ->
       match instr with
-      | Store {e2} ->
-          add_formals escaped e2
+      | Store {e1; e2} ->
+          if keeps_in_own_field e1 then escaped else add_formals escaped e2
       | Call (_, Const (Cfun callee), receiver :: args, _, _) ->
           let escaped = add_formals ~keep:(is_method_of callee) escaped (fst receiver) in
           List.fold args ~init:escaped ~f:(fun escaped (arg, _) -> add_formals escaped arg)
@@ -685,11 +691,17 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     in
     let do_unlock locks astate = List.filter_map ~f:get_lock_path locks |> Domain.release astate in
     (* a guard passed by reference stands for its lock, which callers substitute, unless the
-       guard escapes and may be relocked later, eg by a reverse lock *)
+       guard escapes and may be relocked later, eg by a reverse lock. A destructor may also name
+       one through a field of its object, as a reverse lock names the guard it keeps as [this->l_]:
+       the destructor is the last point at which that object acts, so unlike an ordinary method it
+       cannot be leaving the retaking to a later call of its own *)
+    let is_destructor = Procname.is_destructor (Procdesc.get_proc_name proc_desc) in
     let is_guard_parameter (guard : HilExp.t) =
       match guard with
-      | AccessExpression (Base ((var, _) as base)) ->
-          FormalMap.is_formal base formals
+      | AccessExpression access_exp ->
+          let ((var, _) as base) = HilExp.AccessExpression.get_base access_exp in
+          (match access_exp with Base _ -> true | _ -> is_destructor)
+          && FormalMap.is_formal base formals
           && (not (Domain.is_guard astate guard))
           && ( (not (Var.Set.mem var (Lazy.force escaped_formals)))
              || Var.Set.mem var (Lazy.force restoring_guard_formals) )
