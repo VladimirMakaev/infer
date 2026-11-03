@@ -18,7 +18,8 @@ let pname_pp = MF.wrap_monospaced Procname.pp
 type analysis_data =
   { interproc: StarvationDomain.summary InterproceduralAnalysis.t
   ; formals: FormalMap.t
-  ; escaped_formals: Var.Set.t Lazy.t }
+  ; escaped_formals: Var.Set.t Lazy.t
+  ; restoring_guard_formals: Var.Set.t Lazy.t }
 
 let get_escaped_formals proc_desc =
   let formals = Procdesc.get_pvar_formals proc_desc in
@@ -66,6 +67,98 @@ let get_escaped_formals proc_desc =
           List.fold args ~init:escaped ~f:(fun escaped (arg, _) -> add_formals escaped arg)
       | _ ->
           escaped )
+
+
+(* [restoring_guard_formals]: the guard formals this procedure always leaves as it found them,
+   i.e. every [unlock] of them is followed by a [lock] on every path to an exit. Such a guard may
+   escape without hiding anything: the procedure hands the lock back before returning, so applying
+   its release to the caller only says the lock is down for the span of the call. A procedure that
+   releases and walks away, leaving the relock to someone else, is not one of these. *)
+let get_restoring_guard_formals proc_desc =
+  let formals = Procdesc.get_pvar_formals proc_desc in
+  let formal_of_exp =
+    let loaded =
+      Procdesc.fold_instrs proc_desc ~init:Ident.Map.empty ~f:(fun loaded _ (instr : Sil.instr) ->
+          match instr with
+          | Load {id; e= Lvar pvar} when List.Assoc.mem formals ~equal:Pvar.equal pvar ->
+              Ident.Map.add id pvar loaded
+          | _ ->
+              loaded )
+    in
+    fun (exp : Exp.t) ->
+      match exp with
+      | Var id ->
+          Ident.Map.find_opt id loaded
+      | Lvar pvar when List.Assoc.mem formals ~equal:Pvar.equal pvar ->
+          Some pvar
+      | _ ->
+          None
+  in
+  (* the last lock or unlock a node performs on [pvar], if any *)
+  let node_effect pvar node =
+    Procdesc.Node.get_instrs node
+    |> Instrs.fold ~init:None ~f:(fun last (instr : Sil.instr) ->
+        match instr with
+        | Call (_, Const (Cfun callee), (receiver, _) :: _, _, _)
+          when Option.exists (formal_of_exp receiver) ~f:(Pvar.equal pvar) -> (
+          match Procname.get_method callee with
+          | "lock" ->
+              Some `Lock
+          | "unlock" ->
+              Some `Unlock
+          | _ ->
+              last )
+        | _ ->
+            last )
+  in
+  let nodes = Procdesc.get_nodes proc_desc in
+  (* [relocked.(n)]: every path from [n] to an exit locks [pvar] before leaving. Least fixpoint
+     from [false], so a loop that never relocks cannot pass by assuming itself. *)
+  let relocked_from pvar =
+    let rec iterate relocked =
+      let relocked', changed =
+        List.fold nodes ~init:(relocked, false) ~f:(fun (relocked, changed) node ->
+            let value =
+              match node_effect pvar node with
+              | Some `Lock ->
+                  true
+              | _ -> (
+                match Procdesc.Node.get_succs node with
+                | [] ->
+                    false
+                | succs ->
+                    List.for_all succs ~f:(fun succ ->
+                        Procdesc.IdMap.find_opt (Procdesc.Node.get_id succ) relocked
+                        |> Option.value ~default:false ) )
+            in
+            let id = Procdesc.Node.get_id node in
+            let before = Procdesc.IdMap.find_opt id relocked |> Option.value ~default:false in
+            if Bool.equal before value then (relocked, changed)
+            else (Procdesc.IdMap.add id value relocked, true) )
+      in
+      if changed then iterate relocked' else relocked'
+    in
+    iterate Procdesc.IdMap.empty
+  in
+  (* a formal qualifies when no node unlocks it without every path onwards locking it again *)
+  List.fold formals ~init:Var.Set.empty ~f:(fun restoring (pvar, _) ->
+      let unlocks =
+        List.filter nodes ~f:(fun node -> Poly.equal (node_effect pvar node) (Some `Unlock))
+      in
+      if List.is_empty unlocks then restoring
+      else
+        let relocked = relocked_from pvar in
+        let restored_after node =
+          match Procdesc.Node.get_succs node with
+          | [] ->
+              false
+          | succs ->
+              List.for_all succs ~f:(fun succ ->
+                  Procdesc.IdMap.find_opt (Procdesc.Node.get_id succ) relocked
+                  |> Option.value ~default:false )
+        in
+        if List.for_all unlocks ~f:restored_after then Var.Set.add (Var.of_pvar pvar) restoring
+        else restoring )
 
 
 module TransferFunctions (CFG : ProcCfg.S) = struct
@@ -386,6 +479,22 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
       | _ ->
           false
     in
+    (* the mirror of [destructor_releases_one_lock]: a reverse lock's destructor takes a lock *)
+    let destructor_acquires_one_lock (obj : HilExp.t) =
+      match obj with
+      | AccessExpression
+          (AddressOf (Base (_, {Typ.desc= Tstruct name | Tptr ({desc= Tstruct name}, _)}))) ->
+          Tenv.lookup tenv name
+          |> Option.bind ~f:(fun ({methods} : Struct.t) ->
+              List.find_map methods ~f:(fun meth ->
+                  let pname = Struct.name_of_tenv_method meth in
+                  Option.some_if (Procname.is_destructor pname) pname ) )
+          |> Option.bind ~f:get_lock_state
+          |> Option.exists ~f:(fun lock_state ->
+              Option.is_some (Domain.LockState.get_single_held_lock lock_state) )
+      | _ ->
+          false
+    in
     let is_constructor = is_cpp_constructor callee in
     let initialised_object =
       if is_constructor then List.hd actuals
@@ -393,6 +502,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
       else None
     in
     match (callee, actuals) with
+    | Procname.ObjC_Cpp {kind= CPPDestructor _}, guard :: _
+      when Domain.is_reverse_guard astate guard ->
+        let astate = do_call ~ignore_lock_state:true analysis_data lhs callee actuals loc astate in
+        Domain.remove_reverse_guard ~tenv ~procname ~loc astate guard
     | Procname.ObjC_Cpp {kind= CPPDestructor _}, guard :: _ when Domain.is_guard astate guard ->
         let astate = do_call ~ignore_lock_state:true analysis_data lhs callee actuals loc astate in
         Domain.remove_guard astate guard
@@ -423,13 +536,28 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
             | _ ->
                 None
           in
-          match guard_lock with
-          | Some lock ->
+          let reverse_guard_lock =
+            match (obj : HilExp.t) with
+            | AccessExpression (AddressOf (Base (ProgramVar _, _))) ->
+                get_lock_state callee
+                |> Option.bind ~f:Domain.LockState.get_single_unlocked_lock
+                |> Option.bind ~f:lock_in_caller
+                |> Option.filter ~f:(fun _ -> destructor_acquires_one_lock obj)
+            | _ ->
+                None
+          in
+          match (guard_lock, reverse_guard_lock) with
+          | _, Some lock ->
+              let astate =
+                do_call ~ignore_lock_state:true analysis_data lhs callee actuals loc astate
+              in
+              Domain.add_reverse_guard astate obj [lock]
+          | Some lock, None ->
               let astate =
                 do_call ~ignore_lock_state:true analysis_data lhs callee actuals loc astate
               in
               Domain.add_guard ~acquire_now:true ~procname ~loc tenv astate obj [lock]
-          | None ->
+          | None, None ->
               do_call ~release_held_locks:is_constructor analysis_data lhs callee actuals loc astate
           )
       | _ ->
@@ -545,7 +673,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
 
   let exec_instr (astate : Domain.t)
-      ({interproc= {proc_desc; tenv}; formals; escaped_formals} as analysis_data) _ _ instr =
+      ( {interproc= {proc_desc; tenv}; formals; escaped_formals; restoring_guard_formals} as
+        analysis_data ) _ _ instr =
     let open ConcurrencyModels in
     let open StarvationModels in
     let get_lock_path = Domain.Lock.make formals in
@@ -562,7 +691,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
       | AccessExpression (Base ((var, _) as base)) ->
           FormalMap.is_formal base formals
           && (not (Domain.is_guard astate guard))
-          && not (Var.Set.mem var (Lazy.force escaped_formals))
+          && ( (not (Var.Set.mem var (Lazy.force escaped_formals)))
+             || Var.Set.mem var (Lazy.force restoring_guard_formals) )
       | _ ->
           false
     in
@@ -734,7 +864,8 @@ let analyze_procedure ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
   else
     let formals = FormalMap.make (Procdesc.get_attributes proc_desc) in
     let escaped_formals = lazy (get_escaped_formals proc_desc) in
-    let proc_data = {interproc; formals; escaped_formals} in
+    let restoring_guard_formals = lazy (get_restoring_guard_formals proc_desc) in
+    let proc_data = {interproc; formals; escaped_formals; restoring_guard_formals} in
     let loc = Procdesc.get_loc proc_desc in
     let locks_for_synchronized_proc =
       if Procdesc.is_java_synchronized proc_desc || Procdesc.is_csharp_synchronized proc_desc then
