@@ -2476,6 +2476,7 @@ module PulseTransferFunctions = struct
           | Skip
           | TryEntry _
           | TryExit _
+          | UnevaluatedMention _
           | VariableLifetimeBegins _ ) ->
           ([ContinueProgram astate], path, astate_n) )
 

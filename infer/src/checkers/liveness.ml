@@ -568,14 +568,37 @@ let alias_node_id (node, backward_index) =
   (Procdesc.Node.get_id node, index)
 
 
+(** the program variables read anywhere in the procedure, by the same notion of "read" as the
+    transfer function above: everything except the address a [Store] writes to. A mention in an
+    unevaluated operand is not a read, which is the whole point of recording it separately. *)
+let pvars_read_anywhere proc_desc =
+  Procdesc.fold_instrs proc_desc ~init:Pvar.Set.empty ~f:(fun acc _node (instr : Sil.instr) ->
+      let add_exp acc exp =
+        Exp.program_vars exp |> Sequence.fold ~init:acc ~f:(fun acc pvar -> Pvar.Set.add pvar acc)
+      in
+      match instr with
+      | Load {e} ->
+          add_exp acc e
+      | Store {e1; e2} ->
+          let acc = match e1 with Exp.Lvar _ -> acc | e1 -> add_exp acc e1 in
+          add_exp acc e2
+      | Prune (e, _, _, _) ->
+          add_exp acc e
+      | Call (_, call_exp, actuals, _, _) ->
+          List.fold actuals ~init:(add_exp acc call_exp) ~f:(fun acc (e, _) -> add_exp acc e)
+      | Metadata _ ->
+          acc )
+
+
 module CheckerTransferFunctions = struct
   module Base = TransferFunctions (CheckerMode) (CFG)
   include Base
 
-  type analysis_data = Procdesc.t * PassedByRefAnalyzer.invariant_map * AliasCFG.Node.IdSet.t
+  type analysis_data =
+    Procdesc.t * PassedByRefAnalyzer.invariant_map * AliasCFG.Node.IdSet.t * Pvar.Set.t Lazy.t
 
-  let exec_instr astate (proc_desc, aliases_map, infeasible_switches) node index (instr : Sil.instr)
-      =
+  let exec_instr astate (proc_desc, aliases_map, infeasible_switches, read_pvars) node index
+      (instr : Sil.instr) =
     let aliases, escaped =
       PassedByRefAnalyzer.extract_pre (alias_node_id node) aliases_map
       |> Option.value_map ~default:(LocalAliases.Domain.empty, VarSet.empty)
@@ -634,6 +657,16 @@ module CheckerTransferFunctions = struct
         List.fold actuals ~init:astate ~f:(fun astate (exp, _) -> add_reachable exp astate)
     | Store {e1; e2; _} when LocalAliases.store_escapes aliases escaped e1 ->
         add_reachable e2 astate
+    | Metadata (UnevaluatedMention {pvars}) ->
+        (* [sizeof(x)] does not read [x], but it does name it on purpose, so a store whose only
+           successor is the mention is not a value someone forgot to use: that is what an
+           assertion macro leaves behind when assertions are compiled out. Count the mention as a
+           use only when nothing in the procedure ever reads the variable -- the condition clang's
+           -Wunused-variable uses -- so that [x = f(); sizeof(x); x = g(); use(x)] still reports
+           its first store, which is dead for a reason the mention has nothing to do with. *)
+        List.fold pvars ~init:astate ~f:(fun astate pvar ->
+            if Pvar.Set.mem pvar (Lazy.force read_pvars) then astate
+            else Domain.add (Var.of_pvar pvar) astate )
     | _ ->
         astate
 end
@@ -776,7 +809,10 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
   let cfg = CFG.from_pdesc proc_desc in
   let invariant_map =
     CheckerAnalyzer.exec_cfg cfg
-      (proc_desc, passed_by_ref_invariant_map, infeasible_switches)
+      ( proc_desc
+      , passed_by_ref_invariant_map
+      , infeasible_switches
+      , lazy (pvars_read_anywhere proc_desc) )
       ~initial:ExtendedDomain.bottom
   in
   (* Integer negation uses the captured target widths: unsigned values wrap, while signed

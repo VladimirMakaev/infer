@@ -371,7 +371,8 @@ module Liveness = struct
             | LoopExit _
             | Skip
             | TryEntry _
-            | TryExit _ ) ->
+            | TryExit _
+            | UnevaluatedMention _ ) ->
             astate
         | Metadata (Nullify _) ->
             L.die InternalError
