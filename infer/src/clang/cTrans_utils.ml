@@ -636,6 +636,13 @@ let cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind
   | `BitCast | `IntegralCast | `IntegralToBoolean ->
       (* This is treated as a nop by returning the same expressions exps*)
       ([], (exp, cast_typ))
+  (* [LValueToRValueBitCast] is [__builtin_bit_cast] applied to an lvalue: it reads the object
+     representation of the operand and reinterprets it as the target type. The reinterpretation
+     itself is below SIL's level of detail and is treated as a nop, as [BitCast] is, but the READ
+     is not optional -- without it the operand's ADDRESS is passed off as its value. Left
+     untranslated, a [__builtin_bit_cast] of a materialised temporary made the temporary's address
+     the result, and returning it was reported as "Address of C++ temporary is returned". That is
+     how every NEON intrinsic looks: arm_neon.h builds its result with __builtin_bit_cast. *)
   | `LValueToRValue -> (
     match typ with
     | {Typ.desc= Tstruct _} ->
@@ -644,6 +651,18 @@ let cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind
     | _ ->
         (* Takes an LValue and allow it to use it as RValue. *)
         (* So we assign the LValue to a temp and we pass it to the parent.*)
+        let instr, deref_exp = dereference_var_sil (exp, cast_typ) sil_loc in
+        ([instr], (deref_exp, cast_typ)) )
+  | `LValueToRValueBitCast -> (
+    (* The exemption is on the TYPE PRODUCED, not the one consumed: SIL carries a struct around
+       as its address, so a bit_cast whose result is a struct keeps the address, but one whose
+       result is a scalar must load -- including when the operand is a struct, which is the
+       [struct -> double] shape. Keying this on the operand's type instead would leave a struct
+       address standing in for a scalar, which is the bug this case exists to fix. *)
+    match cast_typ with
+    | {Typ.desc= Tstruct _} ->
+        ([], exp_typ)
+    | _ ->
         let instr, deref_exp = dereference_var_sil (exp, cast_typ) sil_loc in
         ([instr], (deref_exp, cast_typ)) )
   | `NullToPointer | `NullToMemberPointer ->

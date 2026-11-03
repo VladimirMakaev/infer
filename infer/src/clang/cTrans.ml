@@ -4386,7 +4386,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let cast_kind = cast_expr_info.Clang_ast_t.cei_cast_kind in
     let trans_state =
       match cast_kind with
-      | `LValueToRValue -> (
+      | `LValueToRValue | `LValueToRValueBitCast -> (
         match stmt with
         | `CompoundLiteralExpr _ ->
             (* HACK: we don't want to apply the reasoning below in the specific case where the
