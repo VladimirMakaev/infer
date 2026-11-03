@@ -644,8 +644,51 @@ let annotated_as_uithread_equivalent tenv pname =
   annotated_as Annotations.ia_is_uithread_equivalent tenv pname
 
 
+(** The input-method callback interfaces whose methods the framework delivers on one Looper.
+
+    An editor's [InputConnection] is called by the input method through IPC, and the calls are
+    dispatched on the handler the connection belongs to -- the view's Looper, which is the main
+    thread unless the editor overrides [getHandler]. So they run on the same thread as the lifecycle
+    callbacks and cannot race with them, or with each other.
+
+    [is_android_lifecycle_method] misses them for one reason only: it requires the method name to
+    start with "on", and these are [commitText], [setComposingText], [finishComposingText] and so
+    on. The result is that in a [@ThreadSafe] editor every IME callback starts at [AnyThread]
+    (through [is_marked_thread_safe]) and is reported against the confined lifecycle methods -- the
+    false positives this allow-list removes.
+
+    This is an ALLOW-LIST OF NAMED INTERFACES rather than a widening of the rule, and deliberately
+    so. Dropping the "on" prefix requirement and confining every [android.*] override would also
+    confine [IBinder.DeathRecipient.binderDied], which runs on a BINDER POOL thread and is the
+    mechanism behind a known true positive: a service field read and rebound from the pool thread.
+    [BinderDeathWatcher] in java/racerd pins that. *)
+let input_method_callback_interfaces =
+  [ "android.view.inputmethod.InputConnection"
+  ; "android.view.inputmethod.InputConnectionWrapper"
+  ; "android.view.inputmethod.BaseInputConnection" ]
+
+
+let overrides_input_method_callback tenv pname =
+  let declared_by_ime_interface procname =
+    Procname.get_class_type_name procname
+    |> Option.exists ~f:(fun typename ->
+        match (typename : Typ.Name.t) with
+        | JavaClass _ ->
+            List.mem input_method_callback_interfaces (Typ.Name.name typename) ~equal:String.equal
+        | _ ->
+            false )
+  in
+  match (pname : Procname.t) with
+  | Java _ ->
+      PatternMatch.override_exists declared_by_ime_interface tenv pname
+  | _ ->
+      false
+
+
 let runs_on_ui_thread tenv pname =
-  is_android_lifecycle_method tenv pname || annotated_as_uithread_equivalent tenv pname
+  is_android_lifecycle_method tenv pname
+  || overrides_input_method_callback tenv pname
+  || annotated_as_uithread_equivalent tenv pname
 
 
 let is_recursive_lock_type (typename : Typ.name) =
