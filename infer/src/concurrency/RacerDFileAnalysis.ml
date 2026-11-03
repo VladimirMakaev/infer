@@ -196,6 +196,8 @@ module ReportMap : sig
   val fold : (reported_access list -> 'a -> 'a) -> t -> 'a -> 'a
 
   val filter_container_accesses : (PathModuloThis.t -> bool) -> t -> t
+
+  val filter_redundant_cpp_field_reads : t -> t
 end = struct
   module Key = struct
     type t = Location of PathModuloThis.t | Container of PathModuloThis.t | Call of Procname.t
@@ -225,6 +227,45 @@ end = struct
 
   let filter_container_accesses f map =
     M.filter (fun k _ -> match k with Container p -> f p | _ -> true) map
+
+
+  let filter_redundant_cpp_field_reads map =
+    let open RacerDDomain in
+    M.mapi
+      (fun key accesses ->
+        match key with
+        | Key.Location path -> (
+          match M.find_opt (Key.Container path) map with
+          | Some containers
+            when List.exists containers ~f:(fun {snapshot} ->
+                     AccessSnapshot.is_write snapshot
+                     && not (AccessSnapshot.is_unprotected snapshot) )
+                 && List.exists containers ~f:(fun ({threads} : reported_access) ->
+                     ThreadsDomain.is_any threads ) ->
+              (* Passing the receiver also reads the field. Keep the modeled container report when
+                 it already reports the same read, rather than adding a field report for it too. *)
+              List.filter accesses ~f:(fun {snapshot; procname} ->
+                  match (procname, snapshot.elem.access) with
+                  | Procname.ObjC_Cpp _, Read {exp} when AccessSnapshot.is_unprotected snapshot ->
+                      not
+                        (List.exists containers ~f:(fun container ->
+                             match container.snapshot.elem.access with
+                             | ContainerRead {exp= HilExp.AddressOf receiver} ->
+                                 AccessExpression.equal exp receiver
+                                 && AccessSnapshot.is_unprotected container.snapshot
+                                 && Procname.equal procname container.procname
+                                 && Location.equal snapshot.loc container.snapshot.loc
+                                 && List.equal CallSite.equal snapshot.trace
+                                      container.snapshot.trace
+                             | _ ->
+                                 false ) )
+                  | _ ->
+                      true )
+          | _ ->
+              accesses )
+        | _ ->
+            accesses )
+      map
 
 
   let fold f map a =
@@ -976,5 +1017,6 @@ let analyze ({InterproceduralAnalysis.analyze_file_dependency} as file_t) =
     (fun classname methods issue_log ->
       make_results_table ~analyze:analyze_file_dependency methods
       |> synchronized_container_filter classname
+      |> ReportMap.filter_redundant_cpp_field_reads
       |> report_unsafe_accesses ~issue_log classname )
     class_map IssueLog.empty
