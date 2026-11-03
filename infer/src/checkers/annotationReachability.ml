@@ -132,13 +132,19 @@ let check_modeled_annotation models annot pname =
     Procname.to_string ~verbosity:(if Procname.is_erlang pname then Verbose else FullNameOnly) pname
   in
   Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun matchers ->
-      let pos_match =
-        List.exists matchers ~f:(fun m -> m.positive && Str.string_match m.regexp method_name 0)
+      let unprefixed_method_name =
+        match pname with
+        | Procname.ObjC_Cpp {kind= CPPMethod _ | CPPConstructor _ | CPPDestructor _} ->
+            Some (Procname.to_string ~verbosity:NameOnly pname)
+        | _ ->
+            None
       in
-      let neg_match =
-        List.exists matchers ~f:(fun m ->
-            (not m.positive) && Str.string_match m.regexp method_name 0 )
+      let matches regexp =
+        Str.string_match regexp method_name 0
+        || Option.exists unprefixed_method_name ~f:(fun name -> Str.string_match regexp name 0)
       in
+      let pos_match = List.exists matchers ~f:(fun m -> m.positive && matches m.regexp) in
+      let neg_match = List.exists matchers ~f:(fun m -> (not m.positive) && matches m.regexp) in
       pos_match && not neg_match )
 
 

@@ -80,6 +80,7 @@ DIRECT_TESTS += \
   c_starvation-dedup \
   c_starvation-per-file \
   c_topl \
+  cpp_annotreach \
   cpp_bufferoverrun \
   cpp_frontend \
   cpp_frontend-17 \
