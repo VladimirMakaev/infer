@@ -221,6 +221,7 @@ module LazilyInitialized : AbstractDomain.FiniteSetS with type elt = HilExp.Acce
 type t =
   { ignore_blocking_calls: bool
   ; guard_map: GuardToLockMap.t
+  ; reverse_guard_map: GuardToLockMap.t
   ; lock_state: LockState.t
   ; critical_pairs: NullLocsCriticalPairs.t
   ; attributes: AttributeDomain.t
@@ -278,6 +279,16 @@ val lock_guard : procname:Procname.t -> loc:Location.t -> Tenv.t -> t -> HilExp.
 
 val transfer_guard : t -> guard:HilExp.t -> from:HilExp.t -> t
 (** Hand the locks of [from] over to [guard], which a move constructor does; [from] keeps none. *)
+
+val add_reverse_guard : t -> HilExp.t -> Lock.t list -> t
+(** Release the locks and remember them against the object, which is a reverse lock: it gives the
+    caller's lock up for its own lifetime and takes it back when destroyed. *)
+
+val is_reverse_guard : t -> HilExp.t -> bool
+
+val remove_reverse_guard :
+  tenv:Tenv.t -> procname:Procname.t -> loc:Location.t -> t -> HilExp.t -> t
+(** Destroy the reverse lock, taking back the locks it released. *)
 
 val is_guard : t -> HilExp.t -> bool
 (** Whether a guard was constructed on the expression and not destroyed yet. *)

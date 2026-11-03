@@ -1044,6 +1044,7 @@ module IgnoreBlockingCalls = AbstractDomain.BooleanOr
 type t =
   { ignore_blocking_calls: IgnoreBlockingCalls.t
   ; guard_map: GuardToLockMap.t
+  ; reverse_guard_map: GuardToLockMap.t
   ; lock_state: LockState.t
   ; critical_pairs: NullLocsCriticalPairs.t
   ; attributes: AttributeDomain.t
@@ -1059,6 +1060,7 @@ type t =
 let initial =
   { ignore_blocking_calls= false
   ; guard_map= GuardToLockMap.empty
+  ; reverse_guard_map= GuardToLockMap.empty
   ; lock_state= LockState.top
   ; critical_pairs= NullLocsCriticalPairs.empty
   ; attributes= AttributeDomain.empty
@@ -1230,6 +1232,23 @@ let transfer_guard astate ~guard ~from =
       { astate with
         guard_map=
           GuardToLockMap.remove_guard astate.guard_map from |> GuardToLockMap.add guard locks } )
+
+
+(* a reverse lock releases its caller's lock when built and takes it back when destroyed, the
+   mirror of a scoped guard; the locks stay recorded so the destructor knows what to reacquire *)
+let add_reverse_guard astate guard locks =
+  let astate = release astate locks in
+  {astate with reverse_guard_map= GuardToLockMap.add_guard ~guard ~locks astate.reverse_guard_map}
+
+
+let is_reverse_guard astate guard = GuardToLockMap.mem guard astate.reverse_guard_map
+
+let remove_reverse_guard ~tenv ~procname ~loc astate guard =
+  GuardToLockMap.find_opt guard astate.reverse_guard_map
+  |> Option.value_map ~default:astate ~f:(fun locks_opt ->
+      let locks = FlatLocks.get locks_opt |> Option.value ~default:[] in
+      let astate = acquire ~tenv astate ~procname ~loc locks in
+      {astate with reverse_guard_map= GuardToLockMap.remove_guard astate.reverse_guard_map guard} )
 
 
 let is_guard astate guard = GuardToLockMap.mem guard astate.guard_map
