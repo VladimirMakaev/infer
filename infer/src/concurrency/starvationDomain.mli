@@ -116,6 +116,11 @@ module LockState : sig
 
   val get_single_unlocked_lock : t -> Lock.t option
   (** the lock released, if exactly one lock is released once and no lock is held *)
+
+  val get_single_may_unlocked_lock : t -> Lock.t option
+  (** like [get_single_unlocked_lock], but for a lock released on SOME path rather than on every
+      one, as a destructor releasing under a flag does. Only for deciding whether a class's
+      destructor is the releasing half of a scoped guard: the release itself is applied elsewhere *)
 end
 
 (** A set of lock acquisitions with source locations and procnames. *)

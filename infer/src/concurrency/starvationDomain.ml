@@ -545,6 +545,10 @@ module LockState : sig
 
   val get_single_unlocked_lock : t -> Lock.t option
 
+  val get_single_may_unlocked_lock : t -> Lock.t option
+  (** like [get_single_unlocked_lock], but for a lock released on SOME path rather than on every
+      one; only for deciding whether a class's destructor is the releasing half of a scoped guard *)
+
   val get_unlocked : t -> Lock.t list
 end = struct
   (* abstraction limit for lock counts *)
@@ -561,11 +565,24 @@ end = struct
   module HeldMap = AbstractDomain.InvertedMap (Lock) (LockCount)
   module UnlockedMap = AbstractDomain.InvertedMap (Lock) (UnlockCount)
 
+  (* [UnlockedMap] joins by intersection, so it holds the locks released on EVERY path, which is
+     what a release must mean. This set joins by union and so holds those released on SOME path.
+     It exists for the one question that wants a may-release answer rather than a must-release
+     one: whether a class's destructor is the releasing half of a scoped guard. A destructor that
+     releases under a flag, as [~Locked() { if (mLocked) mLock.unlock(); }] does throughout AOSP's
+     Mutexed<T>, releases nothing according to [unlocked] and would leave every user of the class
+     unbalanced. *)
+  module MayUnlockedSet = AbstractDomain.FiniteSet (Lock)
+
   (* [held] has the locks currently held.
    * [unlocked] The lock function has unlocked (without locking them)
    * [acquisitions] has the currently held locks, so as to avoid a linear fold in [get_acquisitions].
      This should also increase sharing across returned values from [get_acquisitions]. *)
-  type t = {held: HeldMap.t; unlocked: UnlockedMap.t; acquisitions: Acquisitions.t}
+  type t =
+    { held: HeldMap.t
+    ; unlocked: UnlockedMap.t
+    ; may_unlocked: MayUnlockedSet.t
+    ; acquisitions: Acquisitions.t }
 
   let get_acquisitions {acquisitions} = acquisitions
 
@@ -587,34 +604,54 @@ end = struct
         None
 
 
+  let get_single_may_unlocked_lock {held; may_unlocked} =
+    match MayUnlockedSet.elements may_unlocked with
+    | [lock] when HeldMap.is_empty held ->
+        Some lock
+    | _ ->
+        None
+
+
   let get_unlocked {unlocked} = UnlockedMap.bindings unlocked |> List.map ~f:fst
 
-  let pp fmt {held; unlocked; acquisitions} =
-    F.fprintf fmt "{@[map= %a;@;unlocked= %a;@;acquisitions= %a@]}" HeldMap.pp held UnlockedMap.pp
-      unlocked Acquisitions.pp acquisitions
+  let pp fmt {held; unlocked; may_unlocked; acquisitions} =
+    F.fprintf fmt "{@[map= %a;@;unlocked= %a;@;may_unlocked= %a;@;acquisitions= %a@]}" HeldMap.pp
+      held UnlockedMap.pp unlocked MayUnlockedSet.pp may_unlocked Acquisitions.pp acquisitions
 
 
   let join lhs rhs =
     let held = HeldMap.join lhs.held rhs.held in
     let unlocked = UnlockedMap.join lhs.unlocked rhs.unlocked in
+    let may_unlocked = MayUnlockedSet.join lhs.may_unlocked rhs.may_unlocked in
     let acquisitions = Acquisitions.inter lhs.acquisitions rhs.acquisitions in
-    {held; unlocked; acquisitions}
+    {held; unlocked; may_unlocked; acquisitions}
 
 
   let widen ~prev ~next ~num_iters =
     let held = HeldMap.widen ~prev:prev.held ~next:next.held ~num_iters in
     let unlocked = UnlockedMap.widen ~prev:prev.unlocked ~next:next.unlocked ~num_iters in
+    let may_unlocked =
+      MayUnlockedSet.widen ~prev:prev.may_unlocked ~next:next.may_unlocked ~num_iters
+    in
     let acquisitions = Acquisitions.inter prev.acquisitions next.acquisitions in
-    {held; unlocked; acquisitions}
+    {held; unlocked; may_unlocked; acquisitions}
 
 
-  let leq ~lhs ~rhs = HeldMap.leq ~lhs:lhs.held ~rhs:rhs.held
+  let leq ~lhs ~rhs =
+    HeldMap.leq ~lhs:lhs.held ~rhs:rhs.held
+    && MayUnlockedSet.leq ~lhs:lhs.may_unlocked ~rhs:rhs.may_unlocked
 
-  let top = {held= HeldMap.top; unlocked= UnlockedMap.top; acquisitions= Acquisitions.empty}
+
+  let top =
+    { held= HeldMap.top
+    ; unlocked= UnlockedMap.top
+    ; may_unlocked= MayUnlockedSet.empty
+    ; acquisitions= Acquisitions.empty }
+
 
   let is_top {held} = HeldMap.is_top held
 
-  let acquire' acquisition lock {held; acquisitions; unlocked} =
+  let acquire' acquisition lock {held; acquisitions; unlocked; may_unlocked} =
     let should_add_acquisition = ref false in
     let held =
       HeldMap.update lock
@@ -640,7 +677,7 @@ end = struct
     let acquisitions =
       if !should_add_acquisition then Acquisitions.add acquisition acquisitions else acquisitions
     in
-    {held; unlocked; acquisitions}
+    {held; unlocked; may_unlocked; acquisitions}
 
 
   let acquire ~procname ~loc lock =
@@ -648,7 +685,7 @@ end = struct
     acquire' maybe_added_acquisition lock
 
 
-  let release lock {held; unlocked; acquisitions} =
+  let release lock {held; unlocked; may_unlocked; acquisitions} =
     let unbalanced_unlock = ref true in
     let should_remove_acquisition = ref false in
     let held =
@@ -682,7 +719,10 @@ end = struct
         Acquisitions.remove acquisition acquisitions
       else acquisitions
     in
-    {held; unlocked; acquisitions}
+    let may_unlocked =
+      if !unbalanced_unlock then MayUnlockedSet.add lock may_unlocked else may_unlocked
+    in
+    {held; unlocked; may_unlocked; acquisitions}
 
 
   let restore lock ({unlocked} as lock_state) =
@@ -718,6 +758,18 @@ end = struct
       else
         let lock_state = acquire' acquisition acquisition.elem.lock lock_state in
         held_folder acquisition (LockCount.decrement other_count) lock_state
+    in
+    (* a destructor that only delegates to [__infer_inner_destructor_~C] must inherit its
+       may-release set, or the class is still not recognised as a guard *)
+    let lock_state =
+      { lock_state with
+        may_unlocked=
+          MayUnlockedSet.fold
+            (fun lock may_unlocked ->
+              Lock.apply_subst subst lock
+              |> Option.value_map ~default:may_unlocked ~f:(fun lock ->
+                  MayUnlockedSet.add lock may_unlocked ) )
+            other.may_unlocked lock_state.may_unlocked }
     in
     HeldMap.fold
       (fun lock other_count lock_state ->

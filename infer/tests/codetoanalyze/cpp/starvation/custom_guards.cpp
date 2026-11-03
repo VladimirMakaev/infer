@@ -345,16 +345,16 @@ class Relock {
 
 class ConditionalRelease {
  public:
-  // a guard whose destructor releases its lock only on some paths is not
-  // recognised
-  void FN_thread1_bad() {
+  // a guard whose destructor releases its lock only on some paths is still a
+  // guard: this asks what KIND of class it is, which wants a may-release answer
+  void thread1_bad() {
     UniqueGuard lock2(mutex_2);
     lock2.unlock();
     RefGuard lock1(mutex_1);
     lock2.lock();
   }
 
-  void FN_thread2_bad() {
+  void thread2_bad() {
     RefGuard lock2(mutex_2);
     RefGuard lock1(mutex_1);
   }
