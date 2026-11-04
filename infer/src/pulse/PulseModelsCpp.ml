@@ -4069,23 +4069,127 @@ let summary_can_return_null callee_procname (summary : PulseSummary.t) =
         false )
 
 
+(* Can the body produce a null return AT ALL? Answered from the CFG rather than the summary,
+   and that is the whole point: the summary is precisely what the disjunct cap truncated, whereas
+   every [return] in the procedure is in the CFG whether or not Pulse explored a path reaching it.
+   So this question stays decidable exactly where "what did the cap drop" does not.
+
+   Two conditions, and BOTH are needed:
+
+   - every store to the return variable writes something provably non-null. Only an ADDRESS
+     counts: [&x] for a program variable cannot be null. A temporary loaded from memory, a call
+     result or any other expression is left as "could be null". [&p->f] is deliberately not
+     counted -- with a null [p] and a zero offset it is null.
+
+   - every path to the normal exit actually performs one of those stores. Looking only at the
+     stores that exist misses a path that falls off the end of a non-void function: it writes
+     nothing, so there is no store to find and no store to object to, and the return the caller
+     reads is whatever was there. Over the disjunct cap that path can be the one Pulse dropped,
+     which is when the summary cannot be consulted about it either -- so the question has to be
+     asked of the CFG, like the first one.
+
+   [false] when the procedure cannot be loaded, or when no store to the return variable is found
+   at all: both mean "not proven", which keeps the model's existing behaviour. *)
+let returns_only_non_null callee_procname =
+  match Procdesc.load callee_procname with
+  | None ->
+      false
+  | Some proc_desc ->
+      let ret_pvar = Procdesc.get_ret_var proc_desc in
+      let is_non_null = function
+        | Exp.Lvar _ ->
+            (* the address of a global, local or parameter slot *)
+            true
+        | Exp.Const (Const.Cint i) ->
+            not (IntLit.iszero i)
+        | Exp.Const (Const.Cfun _) ->
+            true
+        | _ ->
+            false
+      in
+      let is_ret_store = function
+        | Sil.Store {e1= Exp.Lvar pvar} ->
+            Pvar.equal pvar ret_pvar
+        | _ ->
+            false
+      in
+      let found_a_return, all_stores_non_null =
+        Procdesc.fold_instrs proc_desc ~init:(false, true) ~f:(fun (found, non_null) _node instr ->
+            match instr with
+            | Sil.Store {e1= Exp.Lvar pvar; e2} when Pvar.equal pvar ret_pvar ->
+                (true, non_null && is_non_null e2)
+            | _ ->
+                (found, non_null) )
+      in
+      (* Backward "every path from here to the normal exit stores the return variable". A node
+         that stores is itself the witness; the exit node has not stored; a node with no
+         successors other than the exit does not reach it, so it has nothing to answer for.
+         Initialising to [true] and intersecting is the greatest fixpoint, which is what makes a
+         loop that never returns count as satisfied rather than as a missing store. *)
+      let exit_node = Procdesc.get_exit_node proc_desc in
+      let nodes = Procdesc.get_nodes proc_desc in
+      let stores_on_every_path = ref Procdesc.NodeMap.empty in
+      let get node =
+        Procdesc.NodeMap.find_opt node !stores_on_every_path |> Option.value ~default:true
+      in
+      let pass () =
+        List.fold nodes ~init:false ~f:(fun changed node ->
+            let value =
+              if Instrs.exists (Procdesc.Node.get_instrs node) ~f:is_ret_store then true
+              else if Procdesc.Node.equal node exit_node then false
+              else
+                match Procdesc.Node.get_succs node with
+                | [] ->
+                    true
+                | succs ->
+                    List.for_all succs ~f:get
+            in
+            if Bool.equal value (get node) then changed
+            else (
+              stores_on_every_path := Procdesc.NodeMap.add node value !stores_on_every_path ;
+              true ) )
+      in
+      let rec fixpoint () = if pass () then fixpoint () in
+      fixpoint () ;
+      found_a_return && all_stores_non_null && get (Procdesc.get_start_node proc_desc)
+
+
 (* Run as an unknown call first: calls that cannot change the memory they read return the same
    value, so checking one of them checks the others. *)
-(* Whether the list entry is disproved by the callee's own body on every path. *)
-let body_rules_out_null (analysis_data : PulseSummary.t InterproceduralAnalysis.t) callee_procname =
+(* What to do with a call to a function on the nullable-return list. *)
+type nullable_action =
+  | Apply_summary  (** the body rules null out on every path: run the call, add nothing *)
+  | Apply_summary_and_null
+      (** the summary is under-approximate, so run the call AND add the list's null case *)
+  | Unknown_model  (** no usable summary: the original model *)
+
+let nullable_action (analysis_data : PulseSummary.t InterproceduralAnalysis.t) callee_procname =
   let has_return_param =
     Option.exists (IRAttributes.load callee_procname) ~f:(fun attrs ->
         attrs.ProcAttributes.has_added_return_param )
   in
-  (not has_return_param)
-  &&
-  match analysis_data.InterproceduralAnalysis.analyze_dependency callee_procname with
-  | Ok summary ->
-      not (summary_can_return_null callee_procname summary)
-  | Error _ ->
-      (* no summary: a declaration, or a body Pulse could not analyse. This is the case the list
-         exists for, so keep today's behaviour. *)
-      false
+  if has_return_param then Unknown_model
+  else
+    match analysis_data.InterproceduralAnalysis.analyze_dependency callee_procname with
+    | Ok summary ->
+        let disjuncts = summary.PulseSummary.main.PulseSummary.pre_post_list in
+        if List.length disjuncts >= Config.pulse_max_disjuncts then
+          (* The analysis under-approximates once it reaches the disjunct cap, so this summary may
+             have dropped paths -- possibly the one that returns null. "No disjunct returns null"
+             then means "none of the ones that survived". Apply the summary anyway, so everything
+             else the callee does still happens, and add the null case the list claims. Routing
+             the call to the unknown-call model instead loses the callee's writes to globals.
+
+             Unless no [return] in the body can yield null, in which case no dropped path could
+             have returned null either and the injection would be pure noise: crossing the cap
+             alone would make every caller of such a function report. *)
+          if returns_only_non_null callee_procname then Apply_summary else Apply_summary_and_null
+        else if summary_can_return_null callee_procname summary then Unknown_model
+        else Apply_summary
+    | Error _ ->
+        (* no summary: a declaration, or a body Pulse could not analyse. This is the case the list
+           exists for, so keep today's behaviour. *)
+        Unknown_model
 
 
 let nullable_model_unknown args : model =
@@ -4127,6 +4231,50 @@ let nullable_model_unknown args : model =
         ; prune_positive res ]
 
 
+(* One extra disjunct per surviving post, in which the return value is null. It is built FROM an
+   applied post rather than from the state before the call, so it carries the callee's side
+   effects too: a null disjunct without them is precisely the false positive that replacing the
+   call produced -- the caller would see a global the callee writes still holding its old value. *)
+let with_null_return_disjuncts path location callee_procname ret_id results =
+  let null_return astate =
+    (* A FRESH value, not the one the summary returned. The surviving disjuncts of a capped
+       summary all return something the formula already knows is non-null -- the address of a
+       global, say -- so constraining that value to zero is unsatisfiable and the disjunct is
+       simply lost. The point here is a return the summary never produced. *)
+    let v = AbstractValue.mk_fresh () in
+    let null_deref = Invalidation.ConstantDereference IntLit.zero in
+    let value =
+      ( v
+      , ValueHistory.sequence
+          (ValueHistory.Invalidated (null_deref, location, path.PathContext.timestamp))
+          (Hist.single_call path location (Procname.to_string callee_procname)) )
+    in
+    match PulseArithmetic.and_eq_int v IntLit.zero astate with
+    | Unsat _ | Sat (FatalError _) ->
+        None
+    | Sat (Ok astate) | Sat (Recoverable (astate, _)) ->
+        Some
+          ( PulseOperations.invalidate path UntraceableAccess location null_deref value astate
+          |> PulseOperations.write_id ret_id value )
+  in
+  (* Interleaved rather than appended: a capped callee has as many posts as the cap allows, so
+     doubling them takes the caller over its own cap, and whichever end gets truncated would be
+     lost wholesale. Alternating keeps both kinds whatever the truncation takes. *)
+  List.concat_map results ~f:(fun result ->
+      let null_result =
+        match result with
+        | Ok (ContinueProgram astate) ->
+            null_return astate |> Option.map ~f:(fun astate -> Ok (ContinueProgram astate))
+        | Recoverable (ContinueProgram astate, errors) ->
+            null_return astate
+            |> Option.map ~f:(fun astate -> Recoverable (ContinueProgram astate, errors))
+        | Ok _ | Recoverable _ | FatalError _ ->
+            (* the call did not continue normally, so there is no return value to make null *)
+            None
+      in
+      result :: Option.to_list null_result )
+
+
 (* A matched model REPLACES the call: there is no interprocedural fallback once we are here
    (Pulse.ml runs the model INSTEAD of the call). So when the body disproves the list entry we
    cannot simply return -- that would drop the call altogether, losing whatever else the callee
@@ -4136,24 +4284,31 @@ let nullable_model_unknown args : model =
 let nullable_model args : model =
  fun ({analysis_data; path; location; ret; callee_procname; call_flags} as model_data) astate
      non_disj ->
-  if body_rules_out_null analysis_data callee_procname then (
-    L.d_printfln ~color:Orange
-      "nullable list entry for %a is disproved by its own summary: applying the real summary"
-      Procname.pp callee_procname ;
-    (* Go straight to the interprocedural call rather than re-dispatching the call expression:
-       dispatching would run model matching again, this model would match the same procname a
-       second time, and the analysis would not terminate. (The dispatching precedent for models
-       resolves a function pointer to a DIFFERENT procname, so it cannot recurse; this one can.) *)
-    let actuals = List.map args ~f:(fun {FuncArg.arg_payload; typ} -> (arg_payload, typ)) in
-    let formals_opt =
-      Option.map (IRAttributes.load callee_procname) ~f:ProcAttributes.get_pvar_formals
-    in
-    let results, non_disj, _contradiction, _call_status =
-      PulseCallOperations.call analysis_data path location callee_procname ~ret ~actuals
-        ~formals_opt PulseOperations.ResolvedCall call_flags astate non_disj
-    in
-    (results, non_disj) )
-  else nullable_model_unknown args model_data astate non_disj
+  match nullable_action analysis_data callee_procname with
+  | Unknown_model ->
+      nullable_model_unknown args model_data astate non_disj
+  | (Apply_summary | Apply_summary_and_null) as action ->
+      let add_null = match action with Apply_summary_and_null -> true | _ -> false in
+      L.d_printfln ~color:Orange "nullable list entry for %a: applying its real summary%s"
+        Procname.pp callee_procname
+        (if add_null then " plus a null-return disjunct (summary hit the disjunct cap)" else "") ;
+      (* Go straight to the interprocedural call rather than re-dispatching the call expression:
+         dispatching would run model matching again, this model would match the same procname a
+         second time, and the analysis would not terminate. (The dispatching precedent for models
+         resolves a function pointer to a DIFFERENT procname, so it cannot recurse; this one can.) *)
+      let actuals = List.map args ~f:(fun {FuncArg.arg_payload; typ} -> (arg_payload, typ)) in
+      let formals_opt =
+        Option.map (IRAttributes.load callee_procname) ~f:ProcAttributes.get_pvar_formals
+      in
+      let results, non_disj, _contradiction, _call_status =
+        PulseCallOperations.call analysis_data path location callee_procname ~ret ~actuals
+          ~formals_opt PulseOperations.ResolvedCall call_flags astate non_disj
+      in
+      let results =
+        if add_null then with_null_return_disjuncts path location callee_procname (fst ret) results
+        else results
+      in
+      (results, non_disj)
 
 
 let matchers : matcher list =
