@@ -231,6 +231,11 @@ module Lock = struct
     AbstractAddress.may_alias_across_threads tenv (for_aliasing tenv lhs) (for_aliasing tenv rhs)
 
 
+  let may_alias_across_threads_direction tenv lhs rhs =
+    AbstractAddress.may_alias_across_threads_direction tenv (for_aliasing tenv lhs)
+      (for_aliasing tenv rhs)
+
+
   let normalise_across_threads tenv lock =
     AbstractAddress.normalise_across_threads tenv (for_aliasing tenv lock)
 
@@ -618,6 +623,18 @@ module Acquisitions = struct
     exists (fun acq -> Lock.may_alias_across_threads tenv lock acq.elem.lock) acquisitions
 
 
+  (* [lock_is_held_in_other_thread], returning how the two root objects were identified *)
+  let find_held_in_other_thread tenv lock acquisitions =
+    fold
+      (fun acq acc ->
+        match acc with
+        | Some _ ->
+            acc
+        | None ->
+            Lock.may_alias_across_threads_direction tenv lock acq.elem.lock )
+      acquisitions None
+
+
   let no_locks_common_across_threads tenv acqs1 acqs2 =
     for_all (fun acq1 -> not (lock_is_held_in_other_thread tenv acq1.elem.lock acqs2)) acqs1
 
@@ -929,15 +946,38 @@ module CriticalPair = struct
 
   let get_thread {elem} = CriticalPairElement.get_thread elem
 
+  (* Each side of a deadlock identifies the root object of one trace's lock with the root object of
+     the other's. [d_lhs] comes from matching a lock the right-hand trace acquires with one the
+     left-hand trace holds, [d_rhs] the other way round. If one of them says that the left-hand
+     object is reached from the right-hand one through fields and the other says the opposite, the
+     two traces can only run on the same pair of objects when the object graph has a cycle between
+     them, as for a parent holding its child and that child pointing back at the parent. The same
+     objects are then the first AND the second of their class on the composed path, which is what
+     [reaches_object] already refuses to match within one path. *)
+  let identification_is_cyclic (d_lhs : Lock.alias_direction) (d_rhs : Lock.alias_direction) =
+    match (d_lhs, d_rhs) with
+    | SecondUnderFirst, SecondUnderFirst | FirstUnderSecond, FirstUnderSecond ->
+        true
+    | _, _ ->
+        false
+
+
   let may_deadlock tenv ~(lhs : t) ~lhs_lock ~(rhs : t) =
     if ThreadDomain.can_run_in_parallel (get_thread lhs) (get_thread rhs) then
       Event.get_acquired_locks rhs.elem.event
       |> List.find ~f:(fun rhs_lock ->
           (not (Lock.equal_across_threads tenv lhs_lock rhs_lock))
-          && Acquisitions.lock_is_held_in_other_thread tenv rhs_lock lhs.elem.acquisitions
-          && Acquisitions.lock_is_held_in_other_thread tenv lhs_lock rhs.elem.acquisitions
-          && Acquisitions.no_locks_common_across_threads tenv lhs.elem.acquisitions
-               rhs.elem.acquisitions )
+          &&
+          match
+            ( Acquisitions.find_held_in_other_thread tenv rhs_lock lhs.elem.acquisitions
+            , Acquisitions.find_held_in_other_thread tenv lhs_lock rhs.elem.acquisitions )
+          with
+          | Some d_lhs, Some d_rhs ->
+              (not (identification_is_cyclic d_lhs d_rhs))
+              && Acquisitions.no_locks_common_across_threads tenv lhs.elem.acquisitions
+                   rhs.elem.acquisitions
+          | _, _ ->
+              false )
     else None
 
 

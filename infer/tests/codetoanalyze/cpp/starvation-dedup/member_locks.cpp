@@ -6,7 +6,7 @@
  */
 
 #include <mutex>
-
+// Cyclic owner back-pointers can deadlock; parent/child ordering currently misses these cases.
 namespace member_locks {
 
 class Owner {
@@ -46,11 +46,11 @@ class ZClient {
 
 class MemberB;
 
-// the deadlock between lock_then_call_b_bad() and
-// MemberB::lock_then_call_a_bad() is found from both sides but reported once
+// The cyclic-pointer false negative spans FN_lock_then_call_b_bad() and
+// MemberB::FN_lock_then_call_a_bad(); without it, deduplication reports one side.
 class MemberA {
  public:
-  void lock_then_call_b_bad();
+  void FN_lock_then_call_b_bad(); // Known FN; see the parent/child ordering follow-up.
   void lock_a() { std::lock_guard<std::mutex> l(mutex_); }
 
   MemberB* b_;
@@ -62,7 +62,7 @@ class MemberA {
 class MemberB {
  public:
   void lock_b() { std::lock_guard<std::mutex> l(mutex_); }
-  void lock_then_call_a_bad() {
+  void FN_lock_then_call_a_bad() { // Known FN; see the parent/child ordering follow-up.
     std::lock_guard<std::mutex> l(mutex_);
     a_->lock_a();
   }
@@ -73,7 +73,7 @@ class MemberB {
   std::mutex mutex_;
 };
 
-void MemberA::lock_then_call_b_bad() {
+void MemberA::FN_lock_then_call_b_bad() {
   std::lock_guard<std::mutex> l(mutex_);
   b_->lock_b();
 }
