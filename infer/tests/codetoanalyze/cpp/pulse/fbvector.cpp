@@ -6,6 +6,7 @@
  */
 
 #include <cstddef>
+#include <cstdlib>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
@@ -75,6 +76,26 @@ class fbvector {
     }
     b_ = nb;
     e_ = nb + i;
+    return b_;
+  }
+
+  iterator insert(const_iterator, const T&) {
+    grow(1);
+    return b_;
+  }
+
+  iterator insert(const_iterator, size_type count, const T&) {
+    grow(count);
+    return b_;
+  }
+
+  iterator insert(const_iterator pos, std::initializer_list<T> values) {
+    return insert(pos, values.begin(), values.end());
+  }
+
+  template <class... Args>
+  iterator emplace(const_iterator, Args&&...) {
+    grow(1);
     return b_;
   }
 
@@ -199,6 +220,105 @@ int reference_before_push_back_ok() {
   int x = r;
   v.push_back(2);
   return sink(x);
+}
+
+void insert_return_ok(folly::fbvector<int*>& v) {
+  auto it = v.insert(v.begin(), nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void emplace_return_ok(folly::fbvector<int*>& v) {
+  auto it = v.emplace(v.begin(), nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void insert_count_return_ok(folly::fbvector<int*>& v) {
+  auto it = v.insert(v.begin(), 1, nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void insert_initializer_list_return_ok(folly::fbvector<int*>& v) {
+  auto it = v.insert(v.begin(), {nullptr});
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void insert_range_return_ok(folly::fbvector<int*>& v) {
+  int* values[] = {nullptr};
+  auto it = v.insert(v.begin(), values, values + 1);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_insert_return_bad() {
+  folly::fbvector<int*> v;
+  auto it = v.insert(v.begin(), nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_emplace_return_bad() {
+  folly::fbvector<int*> v;
+  auto it = v.emplace(v.begin(), nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_insert_count_return_bad() {
+  folly::fbvector<int*> v;
+  auto it = v.insert(v.begin(), 1, nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_insert_initializer_list_return_bad() {
+  folly::fbvector<int*> v;
+  auto it = v.insert(v.begin(), {nullptr});
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_insert_range_return_bad() {
+  folly::fbvector<int*> v;
+  int* values[] = {nullptr};
+  auto it = v.insert(v.begin(), values, values + 1);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+int range_old_iterator_invalidated_bad() {
+  folly::fbvector<int> v;
+  v.push_back(1);
+  auto old = v.begin();
+  int values[] = {2};
+  v.insert(v.begin(), values, values + 1);
+  return *old;
+}
+
+int range_returned_iterator_invalidated_bad(folly::fbvector<int>& v) {
+  int values[] = {1};
+  auto it = v.insert(v.begin(), values, values + 1);
+  v.clear();
+  return *it;
+}
+
+void local_free_return_ok() {
+  folly::fbvector<int*> v;
+  auto it = v.insert(v.begin(), nullptr);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+  free(*it);
+}
+
+void deleted_pointee_return_bad(folly::fbvector<int*>& v) {
+  auto it = v.insert(v.begin(), nullptr);
+  int* p = new int(1);
+  *it = p;
+  delete p;
+  **it = 2;
+}
+
+void default_emplace_return_ok(folly::fbvector<int*>& v) {
+  auto it = v.emplace(v.begin());
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_default_emplace_return_bad() {
+  folly::fbvector<int*> v;
+  auto it = v.emplace(v.begin());
+  *it = static_cast<int*>(malloc(sizeof(int)));
 }
 
 } // namespace fbvector_models
