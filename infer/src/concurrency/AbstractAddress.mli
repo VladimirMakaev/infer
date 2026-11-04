@@ -46,6 +46,15 @@ val may_alias_across_threads : Tenv.t -> t -> t -> bool
     be the root of the other: [x.f.g.h] may alias [y.h] in distinct threads if [x.f.g] and [y] are
     objects of the same class and [x.f.g] is the first object of that class on the path *)
 
+type alias_direction =
+  | SameObject  (** the two paths are equal, so their root objects are the same *)
+  | SecondUnderFirst  (** the root of the second address is reached from the root of the first *)
+  | FirstUnderSecond  (** the root of the first address is reached from the root of the second *)
+
+val may_alias_across_threads_direction : Tenv.t -> t -> t -> alias_direction option
+(** [may_alias_across_threads] together with the direction in which the two root objects were
+    identified; [None] exactly when [may_alias_across_threads] is false *)
+
 val normalise_across_threads : Tenv.t -> t -> t
 (** a coarse key for the address such that [equal_across_threads tenv t1 t2] implies
     [equal (normalise_across_threads tenv t1) (normalise_across_threads tenv t2)]; the converse does

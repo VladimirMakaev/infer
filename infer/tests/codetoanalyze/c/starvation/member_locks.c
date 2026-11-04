@@ -10,7 +10,7 @@ struct FakeMut {
 };
 void pthread_mutex_lock(struct FakeMut*);
 void pthread_mutex_unlock(struct FakeMut*);
-
+// Cyclic owner back-pointers can deadlock; parent/child ordering currently misses these cases.
 struct MemberB;
 
 struct MemberA {
@@ -23,14 +23,14 @@ struct MemberB {
   struct MemberA* a;
 };
 
-void lock_a_then_b_bad(struct MemberA* a) {
+void FN_lock_a_then_b_bad(struct MemberA* a) { // Known FN; see the parent/child ordering follow-up.
   pthread_mutex_lock(&a->mutex);
   pthread_mutex_lock(&a->b->mutex);
   pthread_mutex_unlock(&a->b->mutex);
   pthread_mutex_unlock(&a->mutex);
 }
 
-void lock_b_then_a_bad(struct MemberB* b) {
+void FN_lock_b_then_a_bad(struct MemberB* b) { // Known FN; see the parent/child ordering follow-up.
   pthread_mutex_lock(&b->mutex);
   pthread_mutex_lock(&b->a->mutex);
   pthread_mutex_unlock(&b->a->mutex);

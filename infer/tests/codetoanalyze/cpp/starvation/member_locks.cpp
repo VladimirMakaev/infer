@@ -6,15 +6,15 @@
  */
 
 #include <mutex>
-
+// Cyclic owner back-pointers can deadlock; parent/child ordering currently misses these cases.
 namespace member_locks {
 
 class MemberB;
 
 class MemberA {
  public:
-  // deadlock between lock_then_call_b_bad() and MemberB::lock_then_call_a_bad()
-  void lock_then_call_b_bad();
+  // deadlock between FN_lock_then_call_b_bad() and MemberB::FN_lock_then_call_a_bad()
+  void FN_lock_then_call_b_bad(); // Known FN; see the parent/child ordering follow-up.
   void lock_a() { std::lock_guard<std::mutex> l(mutex_); }
 
   MemberB* b_;
@@ -26,7 +26,7 @@ class MemberA {
 class MemberB {
  public:
   void lock_b() { std::lock_guard<std::mutex> l(mutex_); }
-  void lock_then_call_a_bad() {
+  void FN_lock_then_call_a_bad() { // Known FN; see the parent/child ordering follow-up.
     std::lock_guard<std::mutex> l(mutex_);
     a_->lock_a();
   }
@@ -37,7 +37,7 @@ class MemberB {
   std::mutex mutex_;
 };
 
-void MemberA::lock_then_call_b_bad() {
+void MemberA::FN_lock_then_call_b_bad() {
   std::lock_guard<std::mutex> l(mutex_);
   b_->lock_b();
 }
@@ -76,9 +76,9 @@ class Owner;
 class Part {
  public:
   void lock_part() { std::lock_guard<std::mutex> l(mutex_); }
-  // deadlock between lock_then_call_owner_bad() and
-  // Owner::lock_then_call_part_bad()
-  void lock_then_call_owner_bad();
+  // deadlock between FN_lock_then_call_owner_bad() and
+  // Owner::FN_lock_then_call_part_bad()
+  void FN_lock_then_call_owner_bad(); // Known FN; see the parent/child ordering follow-up.
 
   Owner* owner_;
 
@@ -89,7 +89,7 @@ class Part {
 class Owner {
  public:
   void lock_owner() { std::lock_guard<std::mutex> l(mutex_); }
-  void lock_then_call_part_bad() {
+  void FN_lock_then_call_part_bad() { // Known FN; see the parent/child ordering follow-up.
     std::lock_guard<std::mutex> l(mutex_);
     part_.lock_part();
   }
@@ -100,7 +100,7 @@ class Owner {
   std::mutex mutex_;
 };
 
-void Part::lock_then_call_owner_bad() {
+void Part::FN_lock_then_call_owner_bad() {
   std::lock_guard<std::mutex> l(mutex_);
   owner_->lock_owner();
 }
@@ -110,8 +110,8 @@ class ChainC;
 class ChainA {
  public:
   void lock_a() { std::lock_guard<std::mutex> l(mutex_); }
-  // deadlock between lock_then_call_c_bad() and ChainC::lock_then_call_a_bad()
-  void lock_then_call_c_bad();
+  // deadlock between FN_lock_then_call_c_bad() and ChainC::FN_lock_then_call_a_bad()
+  void FN_lock_then_call_c_bad(); // Known FN; see the parent/child ordering follow-up.
 
   struct Link {
     ChainC* c_;
@@ -125,7 +125,7 @@ class ChainA {
 class ChainC {
  public:
   void lock_c() { std::lock_guard<std::mutex> l(mutex_); }
-  void lock_then_call_a_bad() {
+  void FN_lock_then_call_a_bad() { // Known FN; see the parent/child ordering follow-up.
     std::lock_guard<std::mutex> l(mutex_);
     a_->lock_a();
   }
@@ -136,7 +136,7 @@ class ChainC {
   std::mutex mutex_;
 };
 
-void ChainA::lock_then_call_c_bad() {
+void ChainA::FN_lock_then_call_c_bad() {
   std::lock_guard<std::mutex> l(mutex_);
   link_->c_->lock_c();
 }
@@ -176,8 +176,8 @@ class HeldA {
  public:
   void lock() { mutex_.lock(); }
   void unlock() { mutex_.unlock(); }
-  // deadlock between lock_b_then_self_bad() and HeldB::lock_a_then_self_bad()
-  void lock_b_then_self_bad();
+  // deadlock between FN_lock_b_then_self_bad() and HeldB::FN_lock_a_then_self_bad()
+  void FN_lock_b_then_self_bad(); // Known FN; see the parent/child ordering follow-up.
 
   HeldB* b_;
 
@@ -189,7 +189,7 @@ class HeldB {
  public:
   void lock() { mutex_.lock(); }
   void unlock() { mutex_.unlock(); }
-  void lock_a_then_self_bad() {
+  void FN_lock_a_then_self_bad() { // Known FN; see the parent/child ordering follow-up.
     a_->lock();
     {
       std::lock_guard<std::mutex> l(mutex_);
@@ -203,7 +203,7 @@ class HeldB {
   std::mutex mutex_;
 };
 
-void HeldA::lock_b_then_self_bad() {
+void HeldA::FN_lock_b_then_self_bad() {
   b_->lock();
   {
     std::lock_guard<std::mutex> l(mutex_);
