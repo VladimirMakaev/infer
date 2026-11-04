@@ -448,6 +448,32 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
     | _ ->
         astate
   in
+  let forget_file_descriptors_owned_by_constructor astate =
+    let has_user_declared_destructor =
+      Option.bind callee_pname_opt ~f:(fun pname ->
+          if Procname.is_constructor pname then Procname.get_class_type_name pname else None )
+      |> Option.bind ~f:(Tenv.find_cpp_destructor tenv)
+      |> Option.bind ~f:IRAttributes.load
+      |> Option.exists ~f:(fun attrs -> not attrs.ProcAttributes.is_cpp_implicit)
+    in
+    if Config.pulse_havoc_arguments && has_user_declared_destructor then
+      (* An unknown constructor may adopt an fd when its class declares a destructor. Restrict
+         this assumption to file descriptors: an integer can also carry a cast memory address.
+         Known constructor bodies and ordinary unknown consumers keep their usual effects. *)
+      List.foldi actuals ~init:astate ~f:(fun index astate ((value, _), actual_typ) ->
+          (* Models can dereference a forwarding reference while retaining its original type.
+             The constructor's formal then identifies the by-value integral argument. *)
+          let typ =
+            Option.bind (Lazy.force callee_attrs) ~f:(fun attrs ->
+                List.nth attrs.ProcAttributes.formals index )
+            |> Option.value_map ~default:actual_typ ~f:(fun (_, typ, _) -> typ)
+          in
+          if Typ.is_int typ then
+            PulseOperations.forget_file_descriptors_passed_by_value [(value, typ)] astate
+            |> AddressAttributes.add_one value (FileDescriptorOwnershipTransferred (reason, hist))
+          else astate )
+    else astate
+  in
   let forget_file_descriptors_owned_by_callee astate =
     let owns_fd (_, formal_typ, annot) =
       (not (Typ.is_pointer formal_typ))
@@ -486,8 +512,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
             havoc_actuals_without_typ_info astate
         | Ok (_, result) ->
             result ) )
-  |> forget_file_descriptors_owned_by_result |> forget_file_descriptors_owned_by_callee
-  |> add_skipped_proc
+  |> forget_file_descriptors_owned_by_result |> forget_file_descriptors_owned_by_constructor
+  |> forget_file_descriptors_owned_by_callee |> add_skipped_proc
 
 
 type implicit_copy = {class_name: Typ.Name.t; is_trivial: bool}

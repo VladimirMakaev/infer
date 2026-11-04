@@ -1197,6 +1197,12 @@ let apply_unknown_effects call_state =
      AbductiveDomain.transfer_ownership addr_caller astate )
     |> Option.value ~default:astate
   in
+  let transfer_file_descriptor_ownership addr_callee attrs astate =
+    (let* _call, _hist = Attributes.get_file_descriptor_ownership_transferred attrs in
+     let+ addr_caller, _ = to_caller_value call_state (CanonValue.downcast addr_callee) in
+     PulseOperations.forget_file_descriptors_passed_by_value [(addr_caller, StdTyp.int)] astate )
+    |> Option.value ~default:astate
+  in
   let overwrite_contents addr_callee attrs astate =
     (let* hist = Attributes.get_contents_overwritten attrs in
      let+ addr_caller, _ = to_caller_value call_state (CanonValue.downcast addr_callee) in
@@ -1223,6 +1229,7 @@ let apply_unknown_effects call_state =
          astate )
         |> Option.value ~default:astate
         |> transfer_ownership addr_callee attrs
+        |> transfer_file_descriptor_ownership addr_callee attrs
         |> overwrite_contents addr_callee attrs )
       (AbductiveDomain.Summary.get_post call_state.callee_summary).attrs call_state.astate
   in

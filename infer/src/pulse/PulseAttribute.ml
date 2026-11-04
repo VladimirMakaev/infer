@@ -291,11 +291,17 @@ module Attribute = struct
        the caller redoes it on its own state when it applies the summary. Dropped again
        by [invalidate]: whichever of the two happened last wins.
        ALSO LAST ON PURPOSE, for the rank reason above. *)
+    | FileDescriptorOwnershipTransferred of CallEvent.t * ValueHistory.t
+      (* An unknown constructor adopted this integral value's descriptor. Reapply the effect
+         to descriptors in callers; a cast memory address keeps its allocation obligation.
+         Appended to preserve existing attribute ranks. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
 
   let to_rank = Variants.to_rank
+
+  let file_descriptor_ownership_transferred_rank = Variants.filedescriptorownershiptransferred.rank
 
   let address_of_stack_variable_rank = Variants.addressofstackvariable.rank
 
@@ -498,6 +504,9 @@ module Attribute = struct
         F.fprintf f "TaintedSanitized%a" TaintSanitizedSet.pp taint_sanitized
     | Uninitialized typ ->
         F.fprintf f "Uninitialized(%a)" UninitializedTyp.pp typ
+    | FileDescriptorOwnershipTransferred (call, hist) ->
+        F.fprintf f "FileDescriptorOwnershipTransferred(@[%a,@ %a)@]" CallEvent.pp call
+          ValueHistory.pp hist
     | OwnershipTransferred (call, hist) ->
         F.fprintf f "OwnershipTransferred(@[%a,@ %a)@]" CallEvent.pp call ValueHistory.pp hist
     | UnknownEffect (call, hist) ->
@@ -558,6 +567,7 @@ module Attribute = struct
     | Tainted _
     | TaintSanitized _
     | Uninitialized _
+    | FileDescriptorOwnershipTransferred _
     | OwnershipTransferred _
     | CppLifetimeBegun
     | UnknownEffect _
@@ -613,6 +623,7 @@ module Attribute = struct
     | Tainted _
     | TaintSanitized _
     | Uninitialized _
+    | FileDescriptorOwnershipTransferred _
     | OwnershipTransferred _
     | CppLifetimeBegun
     | UnknownEffect _
@@ -669,6 +680,7 @@ module Attribute = struct
     | StdVectorReserve
     | TaintSanitized _
     | Uninitialized _
+    | FileDescriptorOwnershipTransferred _
     | OwnershipTransferred _
     | UnknownEffect _
     | UnreachableAt _
@@ -756,6 +768,8 @@ module Attribute = struct
             ; trace= add_call_to_trace trace }
         in
         TaintSanitized (TaintSanitizedSet.map add_call_to_taint_sanitized taint_sanitized)
+    | FileDescriptorOwnershipTransferred (call, hist) ->
+        FileDescriptorOwnershipTransferred (call, add_call_to_history hist)
     | OwnershipTransferred (call, hist) ->
         OwnershipTransferred (call, add_call_to_history hist)
     | UnknownEffect (call, hist) ->
@@ -923,6 +937,7 @@ module Attribute = struct
       | Tainted _
       | TaintSanitized _
       | Uninitialized _
+      | FileDescriptorOwnershipTransferred _
       | OwnershipTransferred _
       | UnknownEffect _
       | UnreachableAt _
@@ -1235,6 +1250,12 @@ module Attributes = struct
   let get_ownership_transferred =
     get_by_rank Attribute.ownership_transferred_rank ~dest:(function[@warning "-partial-match"]
         | OwnershipTransferred (call, hist) -> (call, hist) )
+
+
+  let get_file_descriptor_ownership_transferred =
+    get_by_rank Attribute.file_descriptor_ownership_transferred_rank
+      ~dest:(function[@warning "-partial-match"]
+        | FileDescriptorOwnershipTransferred (call, hist) -> (call, hist) )
 
 
   let get_contents_overwritten =
