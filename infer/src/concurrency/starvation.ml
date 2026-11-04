@@ -750,15 +750,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         let ret_base = (Var.of_id id, typ) in
         let actuals = hilexp_of_sils ~add_deref:false astate sil_actuals in
         let astate = forget_field_aliases_reachable_from tenv actuals astate in
-        let lock_effect =
-          match get_lock_effect callee actuals with
-          | NoEffect when not is_java ->
-              (* a guard whose constructor or destructor is defined: believe what it declares *)
-              ConcurrencyModels.get_scoped_capability_lock_effect tenv callee actuals
-          | lock_effect ->
-              lock_effect
-        in
-        match lock_effect with
+        match get_lock_effect callee actuals with
         | Lock [guard] when Domain.is_guard astate guard ->
             (* a method of a scoped capability with [acquire_capability] and no argument *)
             Domain.lock_guard tenv astate guard ~procname ~loc
