@@ -251,12 +251,39 @@ module Lock = struct
           let typ = strip_pointers typ in
           AbstractAddress.get_pointee_typ typ |> Option.value_map ~default:typ ~f:strip_pointers )
     in
+    (* A class marked as a capability is a lock in its own right but has no lock model of its
+       own: it behaves like the mutex it wraps, so it inherits that mutex's recursion. Without
+       this it would fall back to "no model, assume recursive" and every self deadlock on such a
+       wrapper would be silenced -- which is exactly what happens once a scoped guard names the
+       wrapper rather than the mutex inside it. *)
+    let rec wrapped_lock_recursion ~depth name =
+      if depth > wrapped_lock_depth_limit then None
+      else
+        Tenv.lookup tenv name
+        |> Option.bind ~f:(fun ({fields; annots} : Struct.t) ->
+            if not (Annotations.ia_ends_with annots Annotations.capability) then None
+            else
+              match
+                List.filter_map fields ~f:(fun ({typ; _} : Struct.field) ->
+                    match (strip_pointers typ).desc with Tstruct name -> Some name | _ -> None )
+              with
+              | [wrapped] ->
+                  IOption.if_none_evalopt (ConcurrencyModels.lock_type_recursion wrapped)
+                    ~f:(fun () -> wrapped_lock_recursion ~depth:(depth + 1) wrapped )
+              | _ ->
+                  (* no single mutex to inherit from *)
+                  None )
+    in
     (* two acquisitions may take distinct locks, eg elements of an array with lock striping *)
     may_denote_distinct_objects lock
     ||
     match typ with
     | Some {Typ.desc= Tstruct name} ->
-        ConcurrencyModels.is_recursive_lock_type name
+        ( match wrapped_lock_recursion ~depth:0 name with
+          | Some recursive ->
+              recursive
+          | None ->
+              ConcurrencyModels.is_recursive_lock_type name )
         || RecursiveMutexInit.is_recursive tenv ~caller:procname name lock
     | Some typ ->
         (* weird type passed as a lock, return default *)
