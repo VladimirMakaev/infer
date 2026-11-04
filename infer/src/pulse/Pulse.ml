@@ -1994,6 +1994,25 @@ module PulseTransferFunctions = struct
       instr
 
 
+  (* Is the lvalue accessed by a [Load] or a [Store] volatile-qualified? A [Store]'s type is the
+     lvalue's own type and carries the qualifier, but C++ strips cv-qualifiers from the prvalue of
+     a non-class lvalue-to-rvalue conversion, so a [Load]'s type never does: for a field access the
+     qualifier is recovered from the field's declared type instead. A dereference of a bare
+     volatile pointer keeps no pointer type at all in SIL, so there is nothing left to recover it
+     from -- see FP_volatile_scalar_read_ok in the tests. *)
+  let rec accessed_lvalue_is_volatile tenv (typ : Typ.t) (exp : Exp.t) =
+    Typ.is_volatile typ.quals
+    ||
+    match exp with
+    | Lfield ({exp= _}, fieldname, struct_typ) ->
+        Struct.fld_typ_opt ~lookup:(Tenv.lookup tenv) fieldname struct_typ
+        |> Option.exists ~f:(fun (field_typ : Typ.t) -> Typ.is_volatile field_typ.quals)
+    | Cast (cast_typ, exp) ->
+        accessed_lvalue_is_volatile tenv cast_typ exp
+    | _ ->
+        false
+
+
   let and_type_info tenv path loc typ rhs_exp rhs_vo astate =
     let rhs_addr = ValueOrigin.value rhs_vo in
     and_is_int_if_integer_type typ rhs_addr astate
@@ -2031,7 +2050,9 @@ module PulseTransferFunctions = struct
                match model_opt with
                | None ->
                    (* no model found: evaluate the expression as normal *)
-                   PulseOperations.eval_deref_to_value_origin path loc rhs_exp astate
+                   PulseOperations.eval_deref_to_value_origin path
+                     ~volatile_access:(accessed_lvalue_is_volatile tenv typ rhs_exp)
+                     loc rhs_exp astate
                | Some model ->
                    (* we are loading from something modelled; apply the model *)
                    let++ astate, addr_hist = model {path; location= loc} astate in
@@ -2117,13 +2138,14 @@ module PulseTransferFunctions = struct
           in
           let astate_n = NonDisjDomain.set_captured_variables rhs_exp astate_n in
           let store_non_disj = ref astate_n in
+          let volatile_access = accessed_lvalue_is_volatile tenv typ lhs_exp in
           let exec_store astate =
             let** astate, rhs_value_origin =
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
             in
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
             let** astate, lhs_value_origin =
-              PulseOperations.eval_to_value_origin path Write loc lhs_exp astate
+              PulseOperations.eval_to_value_origin path ~volatile_access Write loc lhs_exp astate
             in
             let lhs_addr = ValueOrigin.value lhs_value_origin in
             let lhs_addr_hist = ValueOrigin.addr_hist lhs_value_origin in
@@ -2195,8 +2217,8 @@ module PulseTransferFunctions = struct
                        ~dst:lhs_addr_hist astate )
               | _ ->
                   Sat
-                    (PulseOperations.write_deref_with_origin path loc ~ref:lhs_value_origin
-                       ~obj:(rhs_addr, hist) astate )
+                    (PulseOperations.write_deref_with_origin path ~volatile_access loc
+                       ~ref:lhs_value_origin ~obj:(rhs_addr, hist) astate )
             in
             let* astate =
               PulseRetainCycleChecker.check_retain_cycles_store tenv loc (rhs_addr, hist) astate

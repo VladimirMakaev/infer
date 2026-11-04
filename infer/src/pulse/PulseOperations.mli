@@ -16,13 +16,18 @@ val check_addr_access :
      PathContext.t
   -> ?must_be_valid_reason:Invalidation.must_be_valid_reason
   -> ?origin:ValueOrigin.t
+  -> ?volatile_access:bool
   -> access_mode
   -> Location.t
   -> AbstractValue.t * ValueHistory.t
   -> t
   -> t AccessResult.t
 (** Check that the [address] is not known to be invalid. [origin], when the caller has one, only
-    names the address in the report: see {!PulseAbductiveDecompiler.find_from_origin}. *)
+    names the address in the report: see {!PulseAbductiveDecompiler.find_from_origin}.
+    [volatile_access] marks an access through a volatile-qualified lvalue: a memory-mapped register
+    rather than ordinary program memory. Such an access does not report a dereference of a NON-ZERO
+    constant address, which is how a device register is legitimately addressed. A null dereference
+    still reports. *)
 
 val check_non_null :
      PathContext.t
@@ -95,6 +100,7 @@ val forget_file_descriptors_passed_by_value : (AbstractValue.t * Typ.t) list -> 
 
 val eval :
      PathContext.t
+  -> ?volatile_access:bool
   -> access_mode
   -> Location.t
   -> Exp.t
@@ -108,6 +114,7 @@ val eval :
 
 val eval_to_value_origin :
      PathContext.t
+  -> ?volatile_access:bool
   -> access_mode
   -> Location.t
   -> Exp.t
@@ -144,6 +151,7 @@ val eval_deref :
 val eval_deref_to_value_origin :
      PathContext.t
   -> ?must_be_valid_reason:Invalidation.must_be_valid_reason
+  -> ?volatile_access:bool
   -> Location.t
   -> Exp.t
   -> t
@@ -164,6 +172,7 @@ val eval_access :
 val eval_access_to_value_origin :
      PathContext.t
   -> ?must_be_valid_reason:Invalidation.must_be_valid_reason
+  -> ?volatile_access:bool
   -> access_mode
   -> Location.t
   -> AbstractValue.t * ValueHistory.t
@@ -244,6 +253,7 @@ val write_arr_index :
 
 val write_deref :
      PathContext.t
+  -> ?volatile_access:bool
   -> Location.t
   -> ref:AbstractValue.t * ValueHistory.t
   -> obj:AbstractValue.t * ValueHistory.t
@@ -253,6 +263,7 @@ val write_deref :
 
 val write_deref_with_origin :
      PathContext.t
+  -> ?volatile_access:bool
   -> Location.t
   -> ref:ValueOrigin.t
   -> obj:AbstractValue.t * ValueHistory.t
