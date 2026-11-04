@@ -29,6 +29,12 @@ type thread = BackgroundThread | MainThread | MainThreadIfTrue | UnknownThread
 val get_lock_effect : Procname.t -> HilExp.t list -> lock_effect
 (** describe how this procedure behaves with respect to locking *)
 
+val get_scoped_capability_lock_effect : Tenv.t -> Procname.t -> HilExp.t list -> lock_effect
+(** the effect that the constructor or destructor of a [scoped_lockable] class declares through its
+    thread-safety attribute, believed even when the function is defined because the class exists to
+    hold that capability for an instance's lifetime. [NoEffect] for anything else, including
+    ordinary annotated methods, whose body stays authoritative. *)
+
 val get_thread_assert_effect : Procname.t -> thread
 (** In Java, certain methods can be used to assert execution on a specific kind of thread, or return
     a boolean equivalent to such a fact. *)
