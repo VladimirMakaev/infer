@@ -32,8 +32,9 @@ val get_lock_effect : Procname.t -> HilExp.t list -> lock_effect
 val get_scoped_capability_lock_effect : Tenv.t -> Procname.t -> HilExp.t list -> lock_effect
 (** the effect that the constructor or destructor of a [scoped_lockable] class declares through its
     thread-safety attribute, believed even when the function is defined because the class exists to
-    hold that capability for an instance's lifetime. A defined constructor with only local
-    bookkeeping is an assertion and has no acquisition effect. Also returns the contracts of
+    hold that capability for an instance's lifetime. A defined constructor without calls or atomic
+    operations is an assertion and has no acquisition effect when capture certifies that body.
+    Unmarked bodies keep the conservative local-bookkeeping rule. Also returns the contracts of
     no-argument [lock] and [unlock] methods, for a tracked guard with an empty lock-state summary.
     Other ordinary annotated methods keep their body semantics. *)
 
