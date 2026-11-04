@@ -218,6 +218,10 @@ type t =
           the fields of the destroyed object exist and the callee's state has none of them.
           [invalidate] drops it again, so whichever of the two happened last wins. ALSO LAST, for
           the rank reason above. *)
+  | FileDescriptorOwnershipTransferred of CallEvent.t * ValueHistory.t
+      (** an unknown constructor adopted this integral value's descriptor. Reapplied to descriptor
+          allocations in callers, preserving cast memory obligations. Appended to preserve existing
+          attribute ranks. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -253,6 +257,8 @@ module Attributes : sig
   val get_unknown_effect : t -> (CallEvent.t * ValueHistory.t) option
 
   val get_ownership_transferred : t -> (CallEvent.t * ValueHistory.t) option
+
+  val get_file_descriptor_ownership_transferred : t -> (CallEvent.t * ValueHistory.t) option
 
   val get_contents_overwritten : t -> ValueHistory.t option
 
