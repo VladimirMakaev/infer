@@ -257,6 +257,89 @@ module BinderStatus = struct
         write ~exception_code:failed ~error_code:status result ) ]
 end
 
+(** [android::hardware::details::return_status], the base of the HIDL [Return<T>].
+
+    A [Return<T>] carries a transport status that the caller is required to look at. Its destructor
+    enforces that: an unchecked return whose transport failed calls [LOG(FATAL)] and the process
+    dies, so code placed after the destructor runs only when the call succeeded or was checked.
+    Converting a [Return<T>] to its value is the same bargain - it aborts when the transport failed.
+
+    The destructor, [assertOk], [onValueRetrieval] and the move assignment all live in libhidlbase,
+    so Infer sees only their declarations and the abort is invisible: every status check stays
+    undecided and the code the abort was protecting is reported against a path that cannot happen.
+    These models supply the missing aborts by making the dying path unreachable.
+
+    Nothing on the reading side needs a model. [isOk], [isOkUnchecked] and [isDeadObject] are inline
+    in the header, so they already read [mStatus] and write [mCheckedStatus] themselves; these
+    models therefore read the class's OWN fields and agree with the inline accessors by construction
+    rather than by coincidence. *)
+module HidlReturn = struct
+  let return_status_type =
+    Typ.CppClass
+      { name= QualifiedCppName.of_qual_string "android::hardware::details::return_status"
+      ; template_spec_info= NoTemplate
+      ; is_union= false }
+
+
+  let status_type =
+    Typ.CppClass
+      { name= QualifiedCppName.of_qual_string "android::hardware::Status"
+      ; template_spec_info= NoTemplate
+      ; is_union= false }
+
+
+  let checked_field = Fieldname.make return_status_type "mCheckedStatus"
+
+  let status_field = Fieldname.make return_status_type "mStatus"
+
+  let exception_field = Fieldname.make status_type "mException"
+
+  let ex_none = 0
+
+  (* [mStatus] is an embedded object rather than a pointer, so reaching the exception is a field
+     access that is NOT dereferenced followed by one that is - exactly the shape the inline
+     [isOkUnchecked] produces. Reading with [no_access] records no validity requirement: the
+     receiver of a destructor is live, and demanding more here would make these models add reports
+     instead of removing them. *)
+  let read_exception this =
+    let open DSL.Syntax in
+    let* status = load_access ~no_access:true ~deref:false this (FieldAccess status_field) in
+    load_access ~no_access:true status (FieldAccess exception_field)
+
+
+  let read_checked this =
+    let open DSL.Syntax in
+    load_access ~no_access:true this (FieldAccess checked_field)
+
+
+  (* [LOG(FATAL)] does not return, so the failing branch simply does not exist for whatever follows *)
+  let abort_unless_ok this =
+    let open DSL.Syntax in
+    let* exception_code = read_exception this in
+    disj
+      [ prune_eq_int exception_code (IntLit.of_int ex_none) @@> ret ()
+      ; prune_ne_int exception_code (IntLit.of_int ex_none) @@> unreachable ]
+
+
+  (* [~return_status] aborts only when the status was never checked AND the transport failed, so a
+     caller that did check keeps both branches - that is what stops this from deciding everything *)
+  let destructor this : model =
+    let open DSL.Syntax in
+    start_named_model "android::hardware::details::return_status::~return_status"
+    @@ fun () ->
+    let this = to_aval this in
+    let* checked = read_checked this in
+    disj [prune_ne_zero checked @@> ret (); prune_eq_zero checked @@> abort_unless_ok this]
+
+
+  let assert_ok ~desc this : model =
+    let open DSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let this = to_aval this in
+    abort_unless_ok this
+end
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   [ -"AStatus_newOk" <>--> NdkStatus.new_ok
@@ -289,4 +372,16 @@ let matchers : matcher list =
   ; -"android" &:: "binder" &:: "Status" &:: "fromServiceSpecificError" <>$ capt_arg_payload
     $+ any_arg $+ capt_arg_payload $--> BinderStatus.from_service_specific_error
   ; -"android" &:: "binder" &:: "Status" &:: "fromStatusT" <>$ capt_arg_payload $+ capt_arg_payload
-    $--> BinderStatus.from_status_t ]
+    $--> BinderStatus.from_status_t
+    (* the destructor Infer actually calls is the inner one it splits out *)
+  ; -"android" &:: "hardware" &:: "details" &:: "return_status"
+    &:: "__infer_inner_destructor_~return_status" <>$ capt_arg_payload
+    $+...$--> HidlReturn.destructor
+  ; -"android" &:: "hardware" &:: "details" &:: "return_status" &:: "~return_status"
+    <>$ capt_arg_payload $+...$--> HidlReturn.destructor
+  ; -"android" &:: "hardware" &:: "details" &:: "return_status" &:: "assertOk" <>$ capt_arg_payload
+    $+...$--> HidlReturn.assert_ok ~desc:"android::hardware::details::return_status::assertOk"
+  ; -"android" &:: "hardware" &:: "details" &:: "return_status" &:: "onValueRetrieval"
+    <>$ capt_arg_payload
+    $+...$--> HidlReturn.assert_ok
+                ~desc:"android::hardware::details::return_status::onValueRetrieval" ]
