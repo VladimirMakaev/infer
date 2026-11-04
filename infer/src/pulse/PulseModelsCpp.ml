@@ -3008,6 +3008,26 @@ module Vector = struct
             Ok exec )
 
 
+  (* fbvector's iterator is a raw pointer returned by value. Tie it to an element of the new
+     storage at an unknown index, as the class-typed iterator above is tied through its fields. *)
+  let return_insert_pointer vector (model : model_no_non_disj) : model_no_non_disj =
+   fun ({path; location; callee_procname; ret= ret_id, _} as model_data) astate ->
+    model model_data astate
+    |> List.map ~f:(fun exec_result ->
+        let* exec = exec_result in
+        match (exec : ExecutionDomain.t) with
+        | ContinueProgram astate ->
+            let+ astate, (element, history) =
+              GenericArrayBackedCollection.element path location vector (AbstractValue.mk_fresh ())
+                astate
+            in
+            let event = Hist.call_event path location (Procname.to_string callee_procname) in
+            PulseOperations.write_id ret_id (element, Hist.add_event event history) astate
+            |> ExecutionDomain.continue
+        | _ ->
+            Ok exec )
+
+
   let insert_one vector first iter : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
     let desc = "std::vector::insert()" in
@@ -4698,29 +4718,34 @@ let simple_matchers =
     ; -"folly" &:: "fbvector" &:: "cend" <>$ capt_arg_payload
       $--> Vector.end_pointer ~desc:"folly::fbvector::cend()"
       |> with_non_disj
-      (* [insert], [erase] and [emplace] do not take the trailing out-parameter the
-         [std::vector] models read, so the models used here are the ones that need only the
-         container and ignore the returned iterator. *)
+      (* [insert] and [emplace] return raw pointers into the post-operation storage. *)
     ; -"folly" &:: "fbvector" &:: "emplace" $ capt_arg_payload $+ any_arg $+ capt_arg
       $--> (fun vector value ->
-      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Emplace vector) )
+      Vector.tie_inserted_value vector value
+        (Vector.return_insert_pointer vector (Vector.invalidate_references_one_more Emplace vector)) )
       |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "emplace" $ capt_arg_payload
-      $+...$--> Vector.invalidate_references_one_more Emplace
+      $+...$--> (fun vector ->
+      Vector.return_insert_pointer vector (Vector.invalidate_references_one_more Emplace vector) )
       |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg
       $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
-      $--> Vector.insert_initializer_list |> with_non_disj
+      $--> (fun vector list ->
+      Vector.return_insert_pointer vector (Vector.insert_initializer_list vector list) )
+      |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ capt_arg
       $--> (fun vector count value ->
-      Vector.tie_inserted_value vector value (Vector.insert_count vector count) )
+      Vector.tie_inserted_value vector value
+        (Vector.return_insert_pointer vector (Vector.insert_count vector count)) )
       |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg
       $--> (fun vector value ->
-      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Insert vector) )
+      Vector.tie_inserted_value vector value
+        (Vector.return_insert_pointer vector (Vector.invalidate_references_one_more Insert vector)) )
       |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "insert" $ capt_arg_payload
-      $+...$--> Vector.invalidate_references_unknown_size Insert
+      $+...$--> (fun vector ->
+      Vector.return_insert_pointer vector (Vector.invalidate_references_unknown_size Insert vector) )
       |> with_non_disj
     ; -"folly" &:: "fbvector" &:: "erase" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_unknown_size Erase
