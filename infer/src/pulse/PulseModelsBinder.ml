@@ -338,10 +338,120 @@ module HidlReturn = struct
     @@ fun () ->
     let this = to_aval this in
     abort_unless_ok this
+
+
+  (** A transport call hands back a return it has just built, so its checked flag is false from the
+      member initialiser. That one fact is what the destructor is missing: without it the flag is
+      unconstrained, the "already checked" case stays feasible and the abort can never be proved.
+
+      The status itself is deliberately left unknown - whether the transport succeeded is exactly
+      what the caller still has to decide. *)
+  let returns_a_fresh_unchecked_status result : model =
+    let open DSL.Syntax in
+    start_named_model "a HIDL interface call returns a freshly constructed return_status"
+    @@ fun () ->
+    let result = to_aval result in
+    let* unchecked = int 0 in
+    store_field ~ref:result checked_field unchecked
+
+
+  (** A model REPLACES the call it matches, so the claim above may only be made about a method the
+      program has no body for. A generated interface carries defined methods too - the static
+      [castFrom], and defaulted helpers - and claiming a freshly built return for one of those would
+      discard whatever its body established.
+
+      A static never reaches here at all: the matchers require the first actual to BE the interface,
+      and a static has no receiver. A defined instance method does, and then the model steps aside
+      and analyses the real body, exactly as Pulse would have without it. Writing an unknown effect
+      instead would not be enough: the call would still have been displaced, and the body's facts
+      lost with it. *)
+  let fresh_return actuals (result : _ FuncArg.t) : model =
+   fun ({callee_procname; analysis_data; path; location; ret; call_flags} as model_data) astate
+       non_disj ->
+    let has_a_body =
+      Option.exists (Attributes.load callee_procname) ~f:(fun attrs ->
+          attrs.ProcAttributes.is_defined )
+    in
+    if has_a_body then
+      let actuals =
+        List.map actuals ~f:(fun {FuncArg.arg_payload; typ} ->
+            (PulseValueOrigin.addr_hist arg_payload, typ) )
+      in
+      let astates, non_disj, _, _ =
+        PulseCallOperations.call analysis_data path location callee_procname ~ret ~actuals
+          ~formals_opt:None PulseOperations.ResolvedCall call_flags astate non_disj
+      in
+      (astates, non_disj)
+    else returns_a_fresh_unchecked_status result.FuncArg.arg_payload model_data astate non_disj
+
+
+  let write_exception obj value =
+    let open DSL.Syntax in
+    let* status = load_access ~no_access:true ~deref:false obj (FieldAccess status_field) in
+    store_field ~ref:status exception_field value
+
+
+  (* [operator=(return_status&&)] first makes the destination give up its own unchecked status -
+     the same abort the destructor would have done - and then SWAPS the status and the checked
+     flag with the source. The swap is the part that matters: the moved-from object is left
+     holding the destination's old state, which is why destroying it does not abort. *)
+  let move_assign this other : model =
+    let open DSL.Syntax in
+    start_named_model "android::hardware::details::return_status::operator=(return_status&&)"
+    @@ fun () ->
+    let this = to_aval this in
+    let other = to_aval other in
+    let* this_checked = read_checked this in
+    let* () =
+      disj
+        [prune_ne_zero this_checked @@> ret (); prune_eq_zero this_checked @@> abort_unless_ok this]
+    in
+    let* this_exception = read_exception this in
+    let* other_exception = read_exception other in
+    let* other_checked = read_checked other in
+    write_exception this other_exception
+    @@> write_exception other this_exception
+    @@> store_field ~ref:this checked_field other_checked
+    @@> store_field ~ref:other checked_field this_checked
+    @@> assign_ret this
 end
+
+(* A HIDL interface is generated as [android::hardware::<package>::V<major>_<minor>::I<Name>] and
+   its methods are pure virtual, so there is no body for a model to displace. The concrete classes
+   generated alongside it - [BpHw...], [BnHw...], [Bs...] - are deliberately NOT matched: those DO
+   have bodies in a capture, and a model replacing one would discard the analysis of everything it
+   does. *)
+let is_hidl_version _ name =
+  String.length name >= 2
+  && Char.equal name.[0] 'V'
+  && String.for_all (String.drop_prefix name 1) ~f:(fun c -> Char.is_digit c || Char.equal c '_')
+
+
+let is_hidl_interface _ name = String.length name >= 2 && Char.equal name.[0] 'I'
+
+let any_component _ (_ : string) = true
 
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
+  (* The return is handed to the callee as the last actual, and requiring its TYPE here rather
+     than testing it inside the model is what keeps this safe: an interface method that returns
+     anything else simply does not match, and is analysed exactly as it is today. HIDL methods
+     take few parameters, so the arities are enumerated; a longer one is a missed model, never a
+     wrong one.
+
+     The RECEIVER's type is required for the same reason, and it is what keeps a static method off
+     these matchers: a transport call is dispatched on an interface, while a static has no
+     receiver, so its first actual is an ordinary parameter of some other type. Every actual is
+     captured rather than eaten because the model needs them all - a method that turns out to have
+     a body is handed back to the ordinary analysis, which needs its arguments. *)
+  let hidl_return () = -"android" &:: "hardware" &:: "Return" in
+  let hidl_iface1 () =
+    -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+  in
+  let hidl_iface2 () =
+    -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface
+  in
   [ -"AStatus_newOk" <>--> NdkStatus.new_ok
   ; -"AStatus_fromExceptionCode" <>$ capt_arg_payload $--> NdkStatus.from_exception_code
   ; -"AStatus_fromExceptionCodeWithMessage"
@@ -384,4 +494,66 @@ let matchers : matcher list =
   ; -"android" &:: "hardware" &:: "details" &:: "return_status" &:: "onValueRetrieval"
     <>$ capt_arg_payload
     $+...$--> HidlReturn.assert_ok
-                ~desc:"android::hardware::details::return_status::onValueRetrieval" ]
+                ~desc:"android::hardware::details::return_status::onValueRetrieval"
+  ; -"android" &:: "hardware" &:: "details" &:: "return_status" &:: "operator=" <>$ capt_arg_payload
+    $+ capt_arg_payload $--> HidlReturn.move_assign
+    (* one-component package, e.g. android::hardware::sensors::V1_0::ISensors *)
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+    &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface1 ())
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this r -> HidlReturn.fresh_return [this; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+    &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface1 ())
+    $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 r -> HidlReturn.fresh_return [this; a1; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+    &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface1 ())
+    $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 r -> HidlReturn.fresh_return [this; a1; a2; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+    &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface1 ())
+    $+ capt_arg $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 a3 r -> HidlReturn.fresh_return [this; a1; a2; a3; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ is_hidl_version &::+ is_hidl_interface
+    &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface1 ())
+    $+ capt_arg $+ capt_arg $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 a3 a4 r -> HidlReturn.fresh_return [this; a1; a2; a3; a4; r] r )
+    (* two-component package, e.g. android::hardware::graphics::composer::V2_1::IComposer *)
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface2 ())
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this r -> HidlReturn.fresh_return [this; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface2 ())
+    $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 r -> HidlReturn.fresh_return [this; a1; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface2 ())
+    $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 r -> HidlReturn.fresh_return [this; a1; a2; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface2 ())
+    $+ capt_arg $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 a3 r -> HidlReturn.fresh_return [this; a1; a2; a3; r] r )
+  ; ( -"android" &:: "hardware" &::+ any_component &::+ any_component &::+ is_hidl_version
+    &::+ is_hidl_interface &::+ any_component
+    <>$ capt_arg_of_typ (hidl_iface2 ())
+    $+ capt_arg $+ capt_arg $+ capt_arg $+ capt_arg
+    $+ capt_arg_of_typ (hidl_return ())
+    $--> fun this a1 a2 a3 a4 r -> HidlReturn.fresh_return [this; a1; a2; a3; a4; r] r ) ]
