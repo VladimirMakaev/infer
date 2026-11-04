@@ -247,7 +247,7 @@ int different_key_update_ok(int key) {
 }
 // Pre-existing precision gap: an unknown-key lookup still loses this zero-value fact.
 // Keep the diagnostic explicit; this is not one of the constant-key batch regressions.
-int FP_unknown_key_read_only_ok(int key) {
+int unknown_key_read_only_ok(int key) {
   std::map<int, int> m;
   m[1] = 0;
   const int& value = m[key];

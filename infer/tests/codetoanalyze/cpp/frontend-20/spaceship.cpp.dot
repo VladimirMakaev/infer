@@ -7,7 +7,7 @@ digraph cfg {
 "builtin_three_way#166691408812417.78ede2e1b32b6aa1_2" [label="2: Exit builtin_three_way \n  " color=yellow style=filled]
 	
 
-"builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" [label="3:  Compound statement \n   _=_fun___infer_skip(&c:std::strong_ordering) [line 31, column 3]\n " shape="box"]
+"builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" [label="3:  Compound statement \n   _=_fun___infer_skip_discard_value(&c:std::strong_ordering) [line 31, column 3]\n " shape="box"]
 	
 
 	 "builtin_three_way#166691408812417.78ede2e1b32b6aa1_3" -> "builtin_three_way#166691408812417.78ede2e1b32b6aa1_2" ;
@@ -37,7 +37,7 @@ digraph cfg {
 "defaulted_three_way#7091206960806.e6d4937054c6c6a7_2" [label="2: Exit defaulted_three_way \n  " color=yellow style=filled]
 	
 
-"defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" [label="3:  Compound statement \n   _=_fun___infer_skip(&c:std::strong_ordering) [line 43, column 3]\n " shape="box"]
+"defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" [label="3:  Compound statement \n   _=_fun___infer_skip_discard_value(&c:std::strong_ordering) [line 43, column 3]\n " shape="box"]
 	
 
 	 "defaulted_three_way#7091206960806.e6d4937054c6c6a7_3" -> "defaulted_three_way#7091206960806.e6d4937054c6c6a7_2" ;
