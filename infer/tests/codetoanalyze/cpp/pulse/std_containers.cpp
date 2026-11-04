@@ -13,6 +13,7 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 int map_find_empty_bad() {
   std::map<int, int> map;
@@ -516,6 +517,23 @@ int* map_lookup_or_null(std::map<int, int*>& map, int key) {
 int FP_lookup_after_insert_ok(std::map<int, int*>& map) {
   map.emplace(1, &map_value);
   return *map_lookup_or_null(map, 1);
+}
+
+static int vector_value;
+
+int* vector_find_or_null(std::vector<int*>& vec, int* key) {
+  auto it = std::find(vec.begin(), vec.end(), key);
+  if (it == vec.end()) {
+    return nullptr;
+  }
+  return *it;
+}
+
+// the same limitation on a sequence container: an element that was just pushed is
+// not known to be findable, so a lookup that cannot fail still looks as if it can
+int FP_find_after_push_back_ok(std::vector<int*>& vec) {
+  vec.push_back(&vector_value);
+  return *vector_find_or_null(vec, &vector_value);
 }
 
 void clear_map(std::map<int, int>& map) { map.clear(); }
