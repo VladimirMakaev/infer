@@ -2989,9 +2989,31 @@ module Vector = struct
           astate
 
 
+  (* An insertion returns an iterator into the new storage even when old references were
+     invalidated. Its index is unknown on the conservative paths. *)
+  let return_insert_iterator vector iter (model : model_no_non_disj) : model_no_non_disj =
+   fun ({path; location; callee_procname} as model_data) astate ->
+    model model_data astate
+    |> List.map ~f:(fun exec_result ->
+        let* exec = exec_result in
+        match (exec : ExecutionDomain.t) with
+        | ContinueProgram astate ->
+            let+ astate =
+              GenericArrayBackedCollection.Iterator.point_into path location
+                (Hist.call_event path location (Procname.to_string callee_procname))
+                ~collection:vector ~iter ~index:(AbstractValue.mk_fresh ()) astate
+            in
+            ExecutionDomain.ContinueProgram astate
+        | _ ->
+            Ok exec )
+
+
   let insert_one vector first iter : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
     let desc = "std::vector::insert()" in
+    let fallback =
+      return_insert_iterator vector iter (invalidate_references_one_more Insert vector)
+    in
     let no_reallocation =
       match
         ( capacity_lower_bound vector astate
@@ -3003,7 +3025,7 @@ module Vector = struct
       | _ ->
           false
     in
-    if not no_reallocation then invalidate_references_one_more Insert vector model_data astate
+    if not no_reallocation then fallback model_data astate
     else
       let<*> astate, pointer =
         GenericArrayBackedCollection.Iterator.to_internal_pointer path Read location first astate
@@ -3022,7 +3044,7 @@ module Vector = struct
                      (AbstractValueOperand size) astate
                    |> SatUnsat.sat |> Option.is_none ) )
       in
-      if not at_end then invalidate_references_one_more Insert vector model_data astate
+      if not at_end then fallback model_data astate
       else
         let old_size =
           post_size GenericArrayBackedCollection.size_field vector astate |> Option.value_exn
@@ -4491,9 +4513,12 @@ let simple_matchers =
       |> with_non_disj
       |> observe_matcher ~rule:"std.vector.data.1"
     ; (* [emplace(pos, value)], the one-value form: the element is the value *)
-      -"std" &:: "vector" &:: "emplace" $ capt_arg_payload $+ any_arg $+ capt_arg $+ any_arg
-      $--> (fun vector value ->
-      Vector.tie_inserted_value vector value (Vector.invalidate_references_one_more Emplace vector) )
+      -"std" &:: "vector" &:: "emplace" $ capt_arg_payload $+ any_arg $+ capt_arg
+      $+ capt_arg_payload
+      $--> (fun vector value iter ->
+      Vector.tie_inserted_value vector value
+        (Vector.return_insert_iterator vector iter
+           (Vector.invalidate_references_one_more Emplace vector) ) )
       |> with_non_disj
     ; -"std" &:: "vector" &:: "emplace" $ capt_arg_payload
       $+...$--> Vector.invalidate_references_one_more Emplace
@@ -4513,11 +4538,15 @@ let simple_matchers =
       |> observe_matcher ~rule:"std.vector.front.1"
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg
       $+ capt_arg_payload_of_typ (-"std" &:: "initializer_list")
-      $+ any_arg $--> Vector.insert_initializer_list |> with_non_disj
+      $+ capt_arg_payload
+      $--> (fun vector list iter ->
+      Vector.return_insert_iterator vector iter (Vector.insert_initializer_list vector list) )
+      |> with_non_disj
     ; -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ any_arg $+ capt_arg $+ capt_arg
-      $+ any_arg
-      $--> (fun vector count value ->
-      Vector.tie_inserted_value vector value (Vector.insert_count vector count) )
+      $+ capt_arg_payload
+      $--> (fun vector count value iter ->
+      Vector.tie_inserted_value vector value
+        (Vector.return_insert_iterator vector iter (Vector.insert_count vector count)) )
       |> with_non_disj
     ; (* [insert(pos, value)], the returned iterator is passed as the last argument *)
       -"std" &:: "vector" &:: "insert" $ capt_arg_payload $+ capt_arg_payload $+ capt_arg
