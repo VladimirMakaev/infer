@@ -503,6 +503,22 @@ end = struct
         false
 
 
+  let has_empty_constructor_body pname =
+    Procdesc.load pname
+    |> Option.exists ~f:(fun proc_desc ->
+        Procdesc.is_defined proc_desc
+        && Procdesc.fold_instrs proc_desc ~init:true ~f:(fun empty _ (instr : Sil.instr) ->
+            empty
+            &&
+            match instr with
+            | Load {e= Lvar pvar} | Store {e1= Lvar pvar} ->
+                not (Pvar.is_global pvar)
+            | Metadata _ ->
+                true
+            | _ ->
+                false ) )
+
+
   (* A [scoped_lockable] class exists to hold a capability for the lifetime of an instance, so
      what its constructor and destructor DECLARE is a statement about the whole object, and is
      believed even when they are defined. An ordinary annotated method is not that -- it may take
@@ -526,7 +542,15 @@ end = struct
       || Int.equal (List.length actuals) 1
          && List.mem ["lock"; "unlock"] (Procname.get_method pname) ~equal:String.equal )
       && is_scoped_lockable ()
-    then get_capability_lock_effect ~even_if_defined:true pname actuals
+    then
+      match get_capability_lock_effect ~even_if_defined:true pname actuals with
+      | GuardConstruct {acquire_now= true; _} when has_empty_constructor_body pname ->
+          (* An empty constructor only asserts the capability for thread-safety checking. An
+             empty lock summary is not enough: real guards can lock through member guards whose
+             acquisitions are dropped from their summary. *)
+          NoEffect
+      | lock_effect ->
+          lock_effect
     else NoEffect
 
 
