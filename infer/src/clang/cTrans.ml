@@ -1369,6 +1369,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
 
   and atomicExpr_trans trans_state atomic_expr_info stmt_info expr_info stmt_list =
     let context = trans_state.context in
+    context.CContext.has_atomic_expression := true ;
     let sil_loc =
       CLocation.location_of_stmt_info context.translation_unit_context.source_file stmt_info
     in
@@ -6731,6 +6732,23 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           if Mangled.Set.mem local.name vars_in_discarded_branches then
             {local with is_declared_unused= true}
           else local ) ;
+    (* Atomic builtins can lower to loads/stores and lose their node kind when merged into a
+       parent. Only fresh capture evidence can certify an annotated constructor as assertion-only. *)
+    let is_call = function Sil.Call _ -> true | _ -> false in
+    if
+      Procname.is_constructor procname
+      && List.exists attributes.ret_annots ~f:(fun {Annot.class_name} ->
+          String.equal class_name Annotations.acquire_capability )
+      && (not !(context.CContext.has_atomic_expression))
+      && (not (List.exists res_control.instrs ~f:is_call))
+      && Procdesc.fold_instrs context.CContext.procdesc ~init:true ~f:(fun no_calls _ instr ->
+          no_calls && not (is_call instr) )
+    then
+      Procdesc.set_attributes context.CContext.procdesc
+        { attributes with
+          ret_annots=
+            {Annot.class_name= Annotations.non_atomic_constructor; parameters= []}
+            :: attributes.ret_annots } ;
     if
       !(context.CContext.has_unmodeled_init_list)
       && has_reachable_dead_end ~exit_node res_control.root_nodes
