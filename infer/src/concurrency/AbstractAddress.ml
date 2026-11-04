@@ -296,29 +296,52 @@ let root_object (typ, (accesses : access_list)) =
 (* does the path reach an object of class [name] and then perform exactly [accesses] on it? The
    object must be the first of its class on the path: the next ones are usually linked to it, like
    the nodes of a list or a tree, and matching them too would report a deadlock between methods
-   that lock such nodes in the same order *)
-let reaches_object tenv (typ, (path_accesses : access_list)) (name, accesses) =
+   that lock such nodes in the same order. Returns whether getting to the object traverses a field,
+   ie whether it may be an object OTHER than the root of the path: a prefix of dereferences only,
+   as when a [T&] parameter is matched against the [this] of a method of [T], reaches the root
+   itself *)
+let reaches_object_through tenv (typ, (path_accesses : access_list)) (name, accesses) =
   let prefix_length = List.length path_accesses - List.length accesses in
-  prefix_length > 0
-  &&
-  let prefix, suffix = List.split_n path_accesses prefix_length in
-  equal_access_list suffix accesses
-  && (not (List.mem (classes_of_objects tenv typ prefix) name ~equal:Typ.Name.equal))
-  && Option.bind (get_path_typ tenv (typ, prefix)) ~f:Typ.name
-     |> Option.exists ~f:(Typ.Name.equal name)
+  if prefix_length <= 0 then None
+  else
+    let prefix, suffix = List.split_n path_accesses prefix_length in
+    if
+      equal_access_list suffix accesses
+      && (not (List.mem (classes_of_objects tenv typ prefix) name ~equal:Typ.Name.equal))
+      && Option.bind (get_path_typ tenv (typ, prefix)) ~f:Typ.name
+         |> Option.exists ~f:(Typ.Name.equal name)
+    then Some (List.exists prefix ~f:(function MemoryAccess.FieldAccess _ -> true | _ -> false))
+    else None
+
+
+type alias_direction = SameObject | SecondUnderFirst | FirstUnderSecond
+
+let may_alias_across_threads_direction tenv t1 t2 =
+  if equal_across_threads tenv t1 t2 then Some SameObject
+  else
+    match (t1, t2) with
+    | Parameter {path= (_, typ1), accesses1}, Parameter {path= (_, typ2), accesses2} -> (
+        let path1 = inner_class_normalise tenv (typ1, accesses1) in
+        let path2 = inner_class_normalise tenv (typ2, accesses2) in
+        let through_field direction = function
+          | true ->
+              Some direction
+          | false ->
+              (* no field was traversed, so the two roots are the same object *)
+              Some SameObject
+        in
+        match Option.bind (root_object path2) ~f:(reaches_object_through tenv path1) with
+        | Some reached ->
+            through_field SecondUnderFirst reached
+        | None ->
+            Option.bind (root_object path1) ~f:(reaches_object_through tenv path2)
+            |> Option.bind ~f:(through_field FirstUnderSecond) )
+    | _, _ ->
+        None
 
 
 let may_alias_across_threads tenv t1 t2 =
-  equal_across_threads tenv t1 t2
-  ||
-  match (t1, t2) with
-  | Parameter {path= (_, typ1), accesses1}, Parameter {path= (_, typ2), accesses2} ->
-      let path1 = inner_class_normalise tenv (typ1, accesses1) in
-      let path2 = inner_class_normalise tenv (typ2, accesses2) in
-      Option.exists (root_object path2) ~f:(reaches_object tenv path1)
-      || Option.exists (root_object path1) ~f:(reaches_object tenv path2)
-  | _, _ ->
-      false
+  may_alias_across_threads_direction tenv t1 t2 |> Option.is_some
 
 
 let normalise_across_threads tenv t =
