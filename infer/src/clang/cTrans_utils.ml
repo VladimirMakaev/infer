@@ -671,8 +671,15 @@ let cast_operation_of_kind ?objc_bridge_cast_kind integer_type_widths cast_kind
       ([], (Exp.null, cast_typ))
   | `ToVoid ->
       (* If exp is not used later, i.e. as in `(void) exp;` we miss reads *)
-      (* We create a call to skip function passing the exp as a parameter *)
-      let skip_builtin = Exp.Const (Const.Cfun BuiltinDecl.__infer_skip) in
+      (* We create a call to skip function passing the exp as a parameter.
+
+         This is [__infer_skip_discard_value] and NOT [__infer_skip]: the two other emitters of
+         [__infer_skip] (the pointer-to-member access in [CTrans] and [skip_unimplemented]) stand
+         for a genuinely unknown callee, so Pulse hands it ownership of its pointer arguments. A
+         cast to [void] has no callee at all and cannot store or free anything, so transferring
+         ownership here loses the allocation and silences the leak -- including when the operand
+         is still dereferenced afterwards. The call exists only to record the read. *)
+      let skip_builtin = Exp.Const (Const.Cfun BuiltinDecl.__infer_skip_discard_value) in
       let args = [(exp, typ)] in
       let no_id = Ident.create_none () in
       let call_instr =

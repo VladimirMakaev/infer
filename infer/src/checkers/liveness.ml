@@ -468,7 +468,10 @@ module PassedByRefTransferFunctions (CFG : ProcCfg.S) = struct
 
 
   let is_skip expr =
-    proc_name_of_expr expr |> Option.exists ~f:(Procname.equal BuiltinDecl.__infer_skip)
+    proc_name_of_expr expr
+    |> Option.exists ~f:(fun pname ->
+        Procname.equal pname BuiltinDecl.__infer_skip
+        || Procname.equal pname BuiltinDecl.__infer_skip_discard_value )
 
 
   let is_dangerous expr =
@@ -721,7 +724,11 @@ and body_writes_only_to_this ~depth pdesc =
   in
   let is_pure_builtin pname =
     List.mem ~equal:Procname.equal
-      [BuiltinDecl.__cast; BuiltinDecl.__infer_skip; BuiltinDecl.__new; BuiltinDecl.__new_array]
+      [ BuiltinDecl.__cast
+      ; BuiltinDecl.__infer_skip
+      ; BuiltinDecl.__infer_skip_discard_value
+      ; BuiltinDecl.__new
+      ; BuiltinDecl.__new_array ]
       pname
   in
   let instr_writes_only_to_this (instr : Sil.instr) =

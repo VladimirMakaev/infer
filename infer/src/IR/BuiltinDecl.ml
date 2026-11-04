@@ -166,6 +166,8 @@ let __infer_ptr_to_member_call = create_procname "__infer_ptr_to_member_call"
 
 let __infer_skip = create_procname "__infer_skip"
 
+let __infer_skip_discard_value = create_procname "__infer_skip_discard_value"
+
 let __infer_skip_function = Procname.from_string_c_fun "__infer_skip_function"
 
 let __infer_skip_gcc_asm_stmt = Procname.from_string_c_fun "__infer_skip_gcc_asm_stmt"

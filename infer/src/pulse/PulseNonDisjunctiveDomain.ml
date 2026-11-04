@@ -945,6 +945,7 @@ module IntraDomElt = struct
             (* A discarded expression evaluates its address through this pure frontend builtin;
                it neither invokes nor retains the callback. *)
             || Procname.equal pname BuiltinDecl.__infer_skip
+            || Procname.equal pname BuiltinDecl.__infer_skip_discard_value
             || Option.exists (IRAttributes.load pname) ~f:(fun attrs ->
                 attrs.ProcAttributes.is_cpp_copy_ctor || attrs.ProcAttributes.is_cpp_copy_assignment
                 || attrs.ProcAttributes.is_cpp_move_ctor ) )

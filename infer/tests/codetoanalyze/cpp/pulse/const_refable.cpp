@@ -258,7 +258,7 @@ void call_modify_string_ok(std::string s) { modify_string(s); }
 void void_cast(std::string* s) { (void)s; }
 
 // FN because now infer_skip is addressed as an unknown call
-void call_void_cast_bad_FN(std::string s) { void_cast(&s); }
+void call_void_cast_bad(std::string s) { void_cast(&s); }
 
 void read_chars(const char* p);
 
@@ -266,7 +266,7 @@ void read_c_str_bad(std::string s) { read_chars(s.c_str()); }
 
 // [(void)p] is translated to an unknown call that is considered to write to
 // what [p] points to
-void void_cast_c_str_bad_FN(std::string s) {
+void void_cast_c_str_bad(std::string s) {
   const char* p = s.c_str();
   (void)p;
 }
