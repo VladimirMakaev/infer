@@ -85,6 +85,8 @@ let requires_capability = "RequiresCapability"
 
 let acquire_capability = "AcquireCapability"
 
+let non_atomic_constructor = "NonAtomicConstructor"
+
 let release_capability = "ReleaseCapability"
 
 let try_acquire_capability = "TryAcquireCapability"
