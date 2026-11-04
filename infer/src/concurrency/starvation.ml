@@ -532,6 +532,16 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
           Domain.unlock_guard astate guard
         else if has_single_guard_lock Domain.LockState.get_single_held_lock then
           Domain.lock_guard ~procname ~loc tenv astate guard
+        else if Option.exists lock_state ~f:Domain.LockState.is_top then
+          (* A wrapped built-in guard can leave no lock state in its method summary. Keep the
+             body's critical pairs, but use its scoped capability contract for this guard. *)
+          match ConcurrencyModels.get_scoped_capability_lock_effect tenv callee actuals with
+          | Unlock [declared_guard] when HilExp.equal declared_guard guard ->
+              Domain.unlock_guard astate guard
+          | Lock [declared_guard] when HilExp.equal declared_guard guard ->
+              Domain.lock_guard ~procname ~loc tenv astate guard
+          | _ ->
+              astate
         else astate
     | _ -> (
       match initialised_object with
@@ -752,7 +762,9 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         let astate = forget_field_aliases_reachable_from tenv actuals astate in
         let lock_effect =
           match get_lock_effect callee actuals with
-          | NoEffect when not is_java ->
+          | NoEffect
+            when (not is_java) && (Procname.is_constructor callee || Procname.is_destructor callee)
+            ->
               (* a guard whose constructor or destructor is defined: believe what it declares *)
               ConcurrencyModels.get_scoped_capability_lock_effect tenv callee actuals
           | lock_effect ->
@@ -762,6 +774,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         | Lock [guard] when Domain.is_guard astate guard ->
             (* a method of a scoped capability with [acquire_capability] and no argument *)
             Domain.lock_guard tenv astate guard ~procname ~loc
+        | Lock [guard] when is_guard_parameter guard ->
+            get_lock_path guard
+            |> Option.value_map ~default:astate
+                 ~f:(Domain.acquire_or_restore ~tenv astate ~procname ~loc)
         | Lock locks ->
             do_lock locks loc astate
         | GuardLock guard when is_guard_parameter guard ->
