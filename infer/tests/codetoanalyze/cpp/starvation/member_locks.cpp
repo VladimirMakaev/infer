@@ -304,7 +304,7 @@ class GatedB;
 class GatedA {
  public:
   void lock_a() { std::lock_guard<std::mutex> l(mutex_); }
-  void FP_lock_shared_then_call_b_ok();
+  void lock_shared_then_call_b_ok();
 
   Shared* shared_;
   GatedB* b_;
@@ -316,7 +316,7 @@ class GatedA {
 class GatedB {
  public:
   void lock_b() { std::lock_guard<std::mutex> l(mutex_); }
-  void FP_lock_shared_then_call_a_ok() {
+  void lock_shared_then_call_a_ok() {
     shared_->lock();
     {
       std::lock_guard<std::mutex> l(mutex_);
@@ -332,7 +332,7 @@ class GatedB {
   std::mutex mutex_;
 };
 
-void GatedA::FP_lock_shared_then_call_b_ok() {
+void GatedA::lock_shared_then_call_b_ok() {
   shared_->lock();
   {
     std::lock_guard<std::mutex> l(mutex_);
