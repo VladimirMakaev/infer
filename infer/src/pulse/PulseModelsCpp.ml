@@ -4352,6 +4352,12 @@ let simple_matchers =
       |> with_non_disj
     ; +BuiltinDecl.(match_builtin __infer_skip)
       &++> Basic.unknown_call "__infer_skip" |> with_non_disj
+    ; (* [(void) e] only reads [e]. Modelling it as an unknown call would hand the callee
+         ownership of a pointer operand and drop its allocation, so a leak whose pointer passes
+         through a discarded-value expression would never be reported. *)
+      +BuiltinDecl.(match_builtin __infer_skip_discard_value)
+      &++> (fun _args -> Basic.skip)
+      |> with_non_disj
     ; +BuiltinDecl.(match_builtin __infer_ptr_to_member_call)
       &++> Basic.unknown_call "__infer_ptr_to_member_call"
       |> with_non_disj

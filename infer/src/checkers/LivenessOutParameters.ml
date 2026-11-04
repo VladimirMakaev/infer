@@ -93,7 +93,8 @@ let successful_values pdesc formal output_typ disjoint_formals =
         | Some (Store _) ->
             None
         | Some (Call (_, Const (Cfun callee), _, _, _))
-          when Procname.equal callee BuiltinDecl.__infer_skip ->
+          when Procname.equal callee BuiltinDecl.__infer_skip
+               || Procname.equal callee BuiltinDecl.__infer_skip_discard_value ->
             walk_predecessors seen node
         | Some (Call _) ->
             None

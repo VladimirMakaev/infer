@@ -46,7 +46,7 @@ digraph cfg {
 	
 
 	 "attributed_statements_without_nod.e7a8053aa387a39c_7" -> "attributed_statements_without_nod.e7a8053aa387a39c_5" ;
-"attributed_statements_without_nod.e7a8053aa387a39c_8" [label="8:  IfStmt Branch \n   _=_fun___infer_skip(&n:int) [line 53, column 5]\n " shape="box"]
+"attributed_statements_without_nod.e7a8053aa387a39c_8" [label="8:  IfStmt Branch \n   _=_fun___infer_skip_discard_value(&n:int) [line 53, column 5]\n " shape="box"]
 	
 
 	 "attributed_statements_without_nod.e7a8053aa387a39c_8" -> "attributed_statements_without_nod.e7a8053aa387a39c_5" ;

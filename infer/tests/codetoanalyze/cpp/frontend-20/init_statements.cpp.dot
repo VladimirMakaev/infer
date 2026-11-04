@@ -390,7 +390,7 @@ digraph cfg {
 	
 
 	 "switch_init_discarded_load#init_s.a0b4282010f3cce5_8" -> "switch_init_discarded_load#init_s.a0b4282010f3cce5_9" ;
-"switch_init_discarded_load#init_s.a0b4282010f3cce5_9" [label="9:  Compound statement \n   _=_fun___infer_skip(n$1:int) [line 67, column 11]\n " shape="box"]
+"switch_init_discarded_load#init_s.a0b4282010f3cce5_9" [label="9:  Compound statement \n   _=_fun___infer_skip_discard_value(n$1:int) [line 67, column 11]\n " shape="box"]
 	
 
 	 "switch_init_discarded_load#init_s.a0b4282010f3cce5_9" -> "switch_init_discarded_load#init_s.a0b4282010f3cce5_3" ;
