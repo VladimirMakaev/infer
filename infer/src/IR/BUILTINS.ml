@@ -55,6 +55,11 @@ module type S = sig
   val __infer_skip : t
   (** used to represent behavior that is not modeled in infer *)
 
+  val __infer_skip_discard_value : t
+  (** marks the operand of a discarded-value expression, i.e. [(void) e], as read. Unlike
+      [__infer_skip] this is a *pure* read: a cast to [void] cannot store, free or otherwise take
+      ownership of its operand, so analyses must not treat the operand as having escaped. *)
+
   val __instanceof : t
   (** [__instanceof(val,typ)] implements java's [val instanceof typ] *)
 

@@ -386,7 +386,7 @@ void discard_ref(const std::shared_ptr<int>& s) { (void)s; }
 
 // `(void)s` in `discard` and `discard_ref` is modelled as an unknown call on
 // `s`, which forgets the reference count of `a`, so lock() may return null
-void FP_lock_after_discarding_copy_ok() {
+void lock_after_discarding_copy_ok() {
   auto a = std::make_shared<int>(0);
   std::weak_ptr<int> p = a;
   discard(a);
@@ -394,7 +394,7 @@ void FP_lock_after_discarding_copy_ok() {
   *a = 2;
 }
 
-void FP_lock_after_discarding_ref_ok() {
+void lock_after_discarding_ref_ok() {
   auto a = std::make_shared<int>(0);
   std::weak_ptr<int> p = a;
   discard_ref(a);
