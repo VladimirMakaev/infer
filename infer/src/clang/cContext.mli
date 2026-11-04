@@ -69,7 +69,9 @@ type t =
         (** local variables referenced in the discarded, untranslated branch of an [if constexpr] *)
   ; has_unmodeled_init_list: bool ref
         (** whether the procedure brace-initializes a value of a type that is not modeled, e.g. a
-            vector *) }
+            vector *)
+  ; has_atomic_expression: bool ref
+        (** whether an atomic expression was translated, even if its node merged into a parent *) }
 
 val get_curr_class : t -> curr_class
 

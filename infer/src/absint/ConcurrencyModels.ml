@@ -503,15 +503,25 @@ end = struct
         false
 
 
-  let has_empty_constructor_body pname =
+  let has_assertion_constructor_body pname =
     Procdesc.load pname
     |> Option.exists ~f:(fun proc_desc ->
+        let certified_non_atomic =
+          List.exists (Procdesc.get_attributes proc_desc).ret_annots ~f:(fun {Annot.class_name} ->
+              String.equal class_name Annotations.non_atomic_constructor )
+        in
         Procdesc.is_defined proc_desc
-        && Procdesc.fold_instrs proc_desc ~init:true ~f:(fun empty _ (instr : Sil.instr) ->
-            empty
+        && Procdesc.fold_instrs proc_desc ~init:true ~f:(fun assertion _ (instr : Sil.instr) ->
+            assertion
             &&
             match instr with
+            | Call _ ->
+                false
+            | _ when certified_non_atomic ->
+                true
             | Load {e= Lvar pvar} | Store {e1= Lvar pvar} ->
+                (* Unmarked captures keep the conservative rule: absence of Call instructions
+                   alone does not rule out atomic lock primitives lowered to loads/stores. *)
                 not (Pvar.is_global pvar)
             | Metadata _ ->
                 true
@@ -544,8 +554,8 @@ end = struct
       && is_scoped_lockable ()
     then
       match get_capability_lock_effect ~even_if_defined:true pname actuals with
-      | GuardConstruct {acquire_now= true; _} when has_empty_constructor_body pname ->
-          (* An empty constructor only asserts the capability for thread-safety checking. An
+      | GuardConstruct {acquire_now= true; _} when has_assertion_constructor_body pname ->
+          (* A constructor without calls or atomic operations only asserts the capability. An
              empty lock summary is not enough: real guards can lock through member guards whose
              acquisitions are dropped from their summary. *)
           NoEffect

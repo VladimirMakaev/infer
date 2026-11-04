@@ -51,6 +51,9 @@ val requires_capability : string
 val acquire_capability : string
 (** annotation of a clang function with an [acquire_capability] attribute *)
 
+val non_atomic_constructor : string
+(** capture evidence that an acquiring constructor contains neither calls nor atomic expressions *)
+
 val release_capability : string
 (** annotation of a clang function with a [release_capability] attribute *)
 
