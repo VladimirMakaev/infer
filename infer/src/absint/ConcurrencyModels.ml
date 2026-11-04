@@ -507,7 +507,9 @@ end = struct
      what its constructor and destructor DECLARE is a statement about the whole object, and is
      believed even when they are defined. An ordinary annotated method is not that -- it may take
      the lock in one of several branches, or take others besides -- so it keeps being read from
-     its body, which is also what keeps the lock names such a method produces unchanged.
+     its body, which is also what keeps the lock names such a method produces unchanged. The
+     no-argument [lock] and [unlock] contracts are also available to a caller that has already
+     tracked the object as a guard and finds no lock state in the method's body summary.
 
      Without this, a guard whose constructor is defined in a header acquires nothing: its body
      builds a guard of its own over a member, and guarded locks are dropped from a summary
@@ -519,8 +521,12 @@ end = struct
       |> Option.exists ~f:(fun {Struct.annots} ->
           Annotations.ia_ends_with annots Annotations.scoped_lockable )
     in
-    if (Procname.is_constructor pname || Procname.is_destructor pname) && is_scoped_lockable () then
-      get_capability_lock_effect ~even_if_defined:true pname actuals
+    if
+      ( Procname.is_constructor pname || Procname.is_destructor pname
+      || Int.equal (List.length actuals) 1
+         && List.mem ["lock"; "unlock"] (Procname.get_method pname) ~equal:String.equal )
+      && is_scoped_lockable ()
+    then get_capability_lock_effect ~even_if_defined:true pname actuals
     else NoEffect
 
 
