@@ -105,8 +105,6 @@ let get_thread_assert_effect = function
 module Clang : sig
   val get_lock_effect : Procname.t -> HilExp.t list -> lock_effect
 
-  val get_scoped_capability_lock_effect : Tenv.t -> Procname.t -> HilExp.t list -> lock_effect
-
   val is_recursive_lock_type : QualifiedCppName.t -> bool
 
   val lock_type_recursion : QualifiedCppName.t -> bool option
@@ -389,12 +387,12 @@ end = struct
       gets its effect from its summary instead. A capability is ["this"], a formal [f], a field
       [f->g] or [f.g] of a formal, or a field of [this]. Other capabilities, eg globals, are counted
       as locks but have no lock path. *)
-  let get_capability_lock_effect ?(even_if_defined = false) pname actuals =
+  let get_capability_lock_effect pname actuals =
     (* builtins have no attributes, and missing attributes are not cached *)
     let attributes = if BuiltinDecl.is_declared pname then None else Attributes.load pname in
     match attributes with
-    | Some {ProcAttributes.is_defined; formals; ret_annots}
-      when (even_if_defined || not is_defined) && not (List.is_empty ret_annots) -> (
+    | Some {ProcAttributes.is_defined= false; formals; ret_annots}
+      when not (List.is_empty ret_annots) -> (
         let find_annot class_name =
           List.find ret_annots ~f:(fun {Annot.class_name= name} -> String.equal name class_name)
         in
@@ -501,27 +499,6 @@ end = struct
         Typ.Name.equal guard_class from_class
     | _ ->
         false
-
-
-  (* A [scoped_lockable] class exists to hold a capability for the lifetime of an instance, so
-     what its constructor and destructor DECLARE is a statement about the whole object, and is
-     believed even when they are defined. An ordinary annotated method is not that -- it may take
-     the lock in one of several branches, or take others besides -- so it keeps being read from
-     its body, which is also what keeps the lock names such a method produces unchanged.
-
-     Without this, a guard whose constructor is defined in a header acquires nothing: its body
-     builds a guard of its own over a member, and guarded locks are dropped from a summary
-     because interprocedural handling of guards does not exist. *)
-  let get_scoped_capability_lock_effect tenv pname actuals =
-    let is_scoped_lockable () =
-      Procname.get_class_type_name pname
-      |> Option.bind ~f:(Tenv.lookup tenv)
-      |> Option.exists ~f:(fun {Struct.annots} ->
-          Annotations.ia_ends_with annots Annotations.scoped_lockable )
-    in
-    if (Procname.is_constructor pname || Procname.is_destructor pname) && is_scoped_lockable () then
-      get_capability_lock_effect ~even_if_defined:true pname actuals
-    else NoEffect
 
 
   let get_lock_effect pname actuals =
@@ -747,8 +724,6 @@ let runs_on_ui_thread tenv pname =
   || overrides_input_method_callback tenv pname
   || annotated_as_uithread_equivalent tenv pname
 
-
-let get_scoped_capability_lock_effect = Clang.get_scoped_capability_lock_effect
 
 let is_recursive_lock_type (typename : Typ.name) =
   match typename with
