@@ -46,6 +46,35 @@ void insert_initializer_list_ok(std::vector<int*>& v) {
   *it = static_cast<int*>(malloc(sizeof(int)));
 }
 
+void insert_range_ok(std::vector<int*>& v) {
+  int* values[] = {nullptr};
+  auto it = v.insert(v.begin(), values, values + 1);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+void local_insert_range_bad() {
+  std::vector<int*> v;
+  int* values[] = {nullptr};
+  auto it = v.insert(v.begin(), values, values + 1);
+  *it = static_cast<int*>(malloc(sizeof(int)));
+}
+
+int range_old_iterator_invalidated_bad() {
+  std::vector<int> v;
+  v.push_back(1);
+  auto old = v.begin();
+  int values[] = {2};
+  v.insert(v.begin(), values, values + 1);
+  return *old;
+}
+
+int range_returned_iterator_invalidated_bad(std::vector<int>& v) {
+  int values[] = {1};
+  auto it = v.insert(v.begin(), values, values + 1);
+  v.clear();
+  return *it;
+}
+
 void local_insert_bad() {
   std::vector<int*> v;
   auto it = v.insert(v.begin(), nullptr);
