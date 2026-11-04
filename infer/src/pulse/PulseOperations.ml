@@ -44,8 +44,28 @@ let null_invalidation_of_history history (invalidation : Invalidation.t) =
       invalidation
 
 
-let check_addr_access path ?must_be_valid_reason ?origin access_mode location (address, history)
-    astate =
+(* An access through a volatile-qualified lvalue is the language's own statement that the memory
+   is not ordinary program memory -- a memory-mapped register overlay rather than something the
+   program allocated. Dereferencing a fixed address is exactly how such a device is addressed, so
+   a constant address is not evidence of a bug there. Pulse already honours volatile this way for
+   globals, where it refuses to propagate a constant initialiser.
+
+   Only a NON-ZERO constant is excused. [ConstantDereference IntLit.zero] is a null dereference,
+   which is a bug through a volatile pointer just as much as through any other, so it keeps
+   reporting. The test is applied to the invalidation AFTER [null_invalidation_of_history], so a
+   constant that is really a null arriving through this value cannot slip through either. *)
+let is_volatile_excused_constant history volatile_access (invalidation : Invalidation.t) =
+  volatile_access
+  &&
+  match null_invalidation_of_history history invalidation with
+  | ConstantDereference i ->
+      not (IntLit.iszero i)
+  | _ ->
+      false
+
+
+let check_addr_access path ?must_be_valid_reason ?origin ?(volatile_access = false) access_mode
+    location (address, history) astate =
   let access_trace = Trace.Immediate {location; history} in
   let decompile astate =
     match origin with
@@ -55,7 +75,19 @@ let check_addr_access path ?must_be_valid_reason ?origin access_mode location (a
         Decompiler.find address astate
   in
   let* astate =
-    AddressAttributes.check_valid path ?must_be_valid_reason access_trace address astate
+    let check_valid_result =
+      match
+        AddressAttributes.check_valid path ?must_be_valid_reason access_trace address astate
+      with
+      | Error (invalidation, _)
+        when is_volatile_excused_constant history volatile_access invalidation ->
+          (* volatile access to a constant address: an MMIO register, not a bug. [Result.Ok], not
+             [Ok]: in this file the latter resolves to [PulseResult.Ok]. *)
+          Result.Ok astate
+      | result ->
+          result
+    in
+    check_valid_result
     |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
         let invalidation = null_invalidation_of_history history invalidation in
         let astate =
@@ -267,8 +299,11 @@ let forget_file_descriptors_passed_by_value args astate =
           astate )
 
 
-let eval_access_to_value_origin path ?must_be_valid_reason mode location addr_hist access astate =
-  let+ astate = check_addr_access path ?must_be_valid_reason mode location addr_hist astate in
+let eval_access_to_value_origin path ?must_be_valid_reason ?volatile_access mode location addr_hist
+    access astate =
+  let+ astate =
+    check_addr_access path ?must_be_valid_reason ?volatile_access mode location addr_hist astate
+  in
   let astate, dest = Memory.eval_edge addr_hist access astate in
   (astate, ValueOrigin.InMemory {src= addr_hist; access; dest})
 
@@ -310,17 +345,19 @@ let va_args_global n =
   Pvar.mk_global (Mangled.from_string (F.sprintf "__infer_va_args_global_%d" n))
 
 
-let write_access path location addr_trace_ref access addr_trace_obj astate =
-  check_addr_access path Write location addr_trace_ref astate
+let write_access path ?volatile_access location addr_trace_ref access addr_trace_obj astate =
+  check_addr_access path ?volatile_access Write location addr_trace_ref astate
   >>| Memory.add_edge path addr_trace_ref access addr_trace_obj location
 
 
-let write_deref path location ~ref:addr_trace_ref ~obj:addr_trace_obj astate =
-  write_access path location addr_trace_ref Dereference addr_trace_obj astate
+let write_deref path ?volatile_access location ~ref:addr_trace_ref ~obj:addr_trace_obj astate =
+  write_access path ?volatile_access location addr_trace_ref Dereference addr_trace_obj astate
 
 
-let write_deref_with_origin path location ~ref ~obj astate =
-  let+ astate = write_deref path location ~ref:(ValueOrigin.addr_hist ref) ~obj astate in
+let write_deref_with_origin path ?volatile_access location ~ref ~obj astate =
+  let+ astate =
+    write_deref path ?volatile_access location ~ref:(ValueOrigin.addr_hist ref) ~obj astate
+  in
   match (ref : ValueOrigin.t) with
   | InMemory {src= addr, _; access= ArrayAccess (_, index)} ->
       (* A subscript store can initialize a scalar passed by address, e.g. [p[0] = 42]. Keep the
@@ -390,9 +427,11 @@ let eval_integral_cast typ value_origin astate =
           (astate, value_origin) )
 
 
-let rec eval (path : PathContext.t) mode location exp astate :
+let rec eval (path : PathContext.t) ?volatile_access mode location exp astate :
     (t * (AbstractValue.t * ValueHistory.t)) PulseOperationResult.t =
-  let++ astate, value_origin = eval_to_value_origin path mode location exp astate in
+  let++ astate, value_origin =
+    eval_to_value_origin path ?volatile_access mode location exp astate
+  in
   (astate, ValueOrigin.addr_hist value_origin)
 
 
@@ -449,7 +488,10 @@ and record_closure astate (path : PathContext.t) loc procname
   (astate, ValueOrigin.Unknown (closure_addr, closure_hist))
 
 
-and eval_to_value_origin (path : PathContext.t) mode location exp astate :
+(* [volatile_access] marks the lvalue being addressed as volatile-qualified; it follows the
+   addressing chain (field bases, subscript bases, casts) down to every access check that reaching
+   that lvalue performs, since all of them are part of reaching a device register. *)
+and eval_to_value_origin (path : PathContext.t) ?volatile_access mode location exp astate :
     (t * ValueOrigin.t) PulseOperationResult.t =
   match (exp : Exp.t) with
   | Var id ->
@@ -467,7 +509,9 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
            [offsetof]-like macros, does not access memory and gives another constant *)
         Sat (Ok (constant_address path location i (astate, AbstractValue.mk_fresh ())))
     | None ->
-        let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
+        let+* astate, ((addr, _) as addr_hist) =
+          eval path ?volatile_access Read location exp' astate
+        in
         (* Field-address evaluation must not read the backing object. Preserve the existing write
            effects for construction and Python's captured-field value convention. *)
         let mode =
@@ -477,12 +521,13 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
           | Read | Write | NoAccess ->
               degrade_mode addr astate mode
         in
-        eval_access_to_value_origin path mode location addr_hist (FieldAccess field) astate )
+        eval_access_to_value_origin path ?volatile_access mode location addr_hist
+          (FieldAccess field) astate )
   | Lindex (exp', exp_index) ->
       let** astate, addr_hist_index = eval path Read location exp_index astate in
-      let+* astate, addr_hist = eval path Read location exp' astate in
+      let+* astate, addr_hist = eval path ?volatile_access Read location exp' astate in
       (* An array subscript computes an address, not a read or write of the contents. *)
-      eval_access_to_value_origin path NoAccess location addr_hist
+      eval_access_to_value_origin path ?volatile_access NoAccess location addr_hist
         (ArrayAccess (StdTyp.void, fst addr_hist_index))
         astate
   | Closure {name; captured_vars} ->
@@ -512,7 +557,9 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
       let++ astate, v_hist = record_closure astate path location proc_name [] in
       (astate, v_hist)
   | Cast (typ, exp') ->
-      let++ astate, value_origin = eval_to_value_origin path mode location exp' astate in
+      let++ astate, value_origin =
+        eval_to_value_origin path ?volatile_access mode location exp' astate
+      in
       eval_integral_cast typ value_origin astate
   | Const (Cint i) ->
       Sat (Ok (constant_address path location i (PulseArithmetic.absval_of_int astate i)))
@@ -732,15 +779,17 @@ let prune pdesc path location ~condition astate =
   List.map (unsigned_comparison_cases condition) ~f:prune_all
 
 
-let degrade_mode_exp path location exp astate mode =
+let degrade_mode_exp path ?volatile_access location exp astate mode =
+  (* this walk re-evaluates the prefixes of [exp], so it repeats their access checks and must be
+     told about the volatile lvalue too, or a nested field access reports from here *)
   let rec has_unknown_effect exp =
     match (exp : Exp.t) with
     | Lfield ({exp}, _, _) | Lindex (exp, _) ->
-        let** astate, (addr, _) = eval path NoAccess location exp astate in
+        let** astate, (addr, _) = eval path ?volatile_access NoAccess location exp astate in
         if AddressAttributes.has_unknown_effect addr astate then Sat (Ok true)
         else has_unknown_effect exp
     | _ ->
-        let** astate, (addr, _) = eval path NoAccess location exp astate in
+        let** astate, (addr, _) = eval path ?volatile_access NoAccess location exp astate in
         Sat (Ok (AddressAttributes.has_unknown_effect addr astate))
   in
   match mode with
@@ -751,12 +800,14 @@ let degrade_mode_exp path location exp astate mode =
       Sat (Ok mode)
 
 
-let eval_deref_to_value_origin path ?must_be_valid_reason location exp astate =
-  let** astate, addr_hist = eval path Read location exp astate in
-  let+* mode = degrade_mode_exp path location exp astate Read in
+let eval_deref_to_value_origin path ?must_be_valid_reason ?volatile_access location exp astate =
+  let** astate, addr_hist = eval path ?volatile_access Read location exp astate in
+  let+* mode = degrade_mode_exp path ?volatile_access location exp astate Read in
   (* An opaque call may affect this element without affecting its parent allocation. *)
   let mode = degrade_mode (fst addr_hist) astate mode in
-  let+ astate = check_addr_access path ?must_be_valid_reason mode location addr_hist astate in
+  let+ astate =
+    check_addr_access path ?must_be_valid_reason ?volatile_access mode location addr_hist astate
+  in
   let astate, dest_addr_hist = Memory.eval_edge addr_hist Dereference astate in
   (astate, ValueOrigin.InMemory {src= addr_hist; access= Dereference; dest= dest_addr_hist})
 
