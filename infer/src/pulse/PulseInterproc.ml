@@ -831,6 +831,15 @@ let add_attributes pre_or_post {PathContext.timestamp} callee_attributes call_st
              from an earlier call describes an object that is no longer there. The callee clears
              its own marks when it invalidates; ours have to be cleared here. *)
           AddressAttributes.remove_cpp_lifetime_begun addr_caller astate
+      | `Post when Attributes.is_cpp_lifetime_begun attrs_caller ->
+          (* The mirror image, and the invalidation above takes precedence over it. The callee
+             began a new lifetime in this storage, so an invalidation we are holding from an
+             earlier call describes the PREVIOUS occupant and is no longer the most recent fact
+             about that storage. A callee renewing a lifetime clears its own invalidation as it
+             goes; the caller's has to be cleared here. Without this, destroy-in-callee followed
+             by construct-in-callee -- the whole manual_lifetime idiom -- reports a use of the
+             new object. *)
+          AddressAttributes.begin_cpp_lifetime addr_caller astate
       | _ ->
           astate
     in
@@ -1446,9 +1455,13 @@ let check_all_valid path call_state =
       | `MustBeValid (_timestamp, callee_access_trace, must_be_valid_reason) ->
           let access_trace = mk_access_trace callee_access_trace in
           (* a file descriptor passed by the caller, e.g. the constant [STDIN_FILENO], must not be
-             checked as a pointer, neither here nor in the callers of the caller *)
+             checked as a pointer, neither here nor in the callers of the caller. A requirement
+             the callee recorded as storage-only has to keep saying so too, or the caller that
+             destroyed the previous occupant -- the one placement new exists for -- fails it. *)
           let caller_must_be_valid_reason =
-            Option.filter must_be_valid_reason ~f:Invalidation.is_file_descriptor_reason
+            Option.filter must_be_valid_reason ~f:(fun reason ->
+                Invalidation.is_file_descriptor_reason reason
+                || Invalidation.equal_must_be_valid_reason reason CppStorageOnly )
           in
           AddressAttributes.check_valid path ?must_be_valid_reason:caller_must_be_valid_reason
             access_trace addr_caller astate

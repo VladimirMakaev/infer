@@ -460,6 +460,22 @@ module Internal = struct
 
     (** if [address] is in [pre] then add the attribute [attr] *)
     let abduce_one (address : CanonValue.t) attribute astate =
+      let attribute =
+        (* this procedure began a new object's lifetime in this storage, so an access requiring it
+           to be valid belongs to the occupant being built here, not to whatever the caller left
+           behind. Record what is actually required -- the storage, not a live object in it --
+           rather than dropping the requirement: dropping it would also stop catching the caller
+           who passes null or freed storage, which is a real bug at the placement new. Both the
+           direct checks and the attributes copied in wholesale from a callee's precondition come
+           through here. The companion rule for the storage's subobject EDGES is in [eval_edge]. *)
+        match (attribute : Attribute.t) with
+        | MustBeValid (timestamp, trace, None)
+          when BaseAddressAttributes.has_cpp_lifetime_begun address
+                 (astate.post :> base_domain).attrs ->
+            Attribute.MustBeValid (timestamp, trace, Some Invalidation.CppStorageOnly)
+        | _ ->
+            attribute
+      in
       let is_must_be_initialized_on_written =
         match (attribute : Attribute.t) with
         | MustBeInitialized _ ->
@@ -3134,14 +3150,27 @@ module AddressAttributes = struct
     remove_cpp_lifetime_begun_canon (CanonValue.canon' astate v) astate
 
 
+  (* Which invalidations end a lifetime in storage a new one may begin in. [CppDelete] frees the
+     storage and [CppDestructedInPlace] leaves it untouched, but in both the storage is the thing
+     placement new reuses. Anything else -- going out of scope, a container invalidating its
+     elements -- describes storage that is gone or not ours and must survive. Miss a kind here and
+     every reconstruct-then-use starts reporting. *)
+  let ends_cpp_lifetime_in_storage (kind : Invalidation.t) =
+    match kind with CppDelete | CppDestructedInPlace -> true | _ -> false
+
+
   let begin_cpp_lifetime v astate =
     let v = CanonValue.canon' astate v in
     match SafeAttributes.find_opt `Post v astate with
     | Some attrs
       when Option.exists (Attributes.get_invalid attrs) ~f:(fun (kind, _) ->
-               Invalidation.equal kind CppDelete ) ->
+               ends_cpp_lifetime_in_storage kind ) ->
         let attrs =
-          Attributes.filter attrs ~f:(function Invalid (CppDelete, _) -> false | _ -> true)
+          Attributes.filter attrs ~f:(function
+            | Invalid (kind, _) ->
+                not (ends_cpp_lifetime_in_storage kind)
+            | _ ->
+                true )
         in
         SafeAttributes.map_post_attrs astate ~f:(fun memory ->
             BaseAddressAttributes.add v Attributes.empty memory |> BaseAddressAttributes.add v attrs )

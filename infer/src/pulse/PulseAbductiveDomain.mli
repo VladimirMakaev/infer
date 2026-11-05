@@ -247,8 +247,9 @@ module AddressAttributes : sig
   val invalidate : AbstractValue.t * ValueHistory.t -> Invalidation.t -> Location.t -> t -> t
 
   val begin_cpp_lifetime : AbstractValue.t -> t -> t
-  (** Remove only a post-state CppDelete invalidation when the caller has proved same-storage
-      transparent replacement. This does not renew the object's owned pointees. *)
+  (** Remove only a post-state invalidation that ended a lifetime in storage that is still there --
+      [CppDelete] or [CppDestructedInPlace] -- when the caller has proved same-storage transparent
+      replacement. This does not renew the object's owned pointees. *)
 
   val remove_cpp_lifetime_begun : AbstractValue.t -> t -> t
   (** forget that a new lifetime began in the storage at this address, because something has since

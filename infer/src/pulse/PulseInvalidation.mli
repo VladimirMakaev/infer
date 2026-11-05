@@ -116,6 +116,10 @@ type t =
   | OutOfBounds of viewed_sequence
       (** the address was derived from a view, such as a [std::span] or a [std::string_view], by
           leaving the bounds of the sequence that view covers *)
+  | CppDestructedInPlace
+      (** an explicit destructor call [p->~T()] ended the object's lifetime. Unlike [CppDelete] the
+          storage is untouched and placement new may start a new lifetime in it, so
+          [PulseAbductiveDomain.begin_cpp_lifetime] clears this. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -143,6 +147,11 @@ type must_be_valid_reason =
   | FileDescriptorRelease
       (** the value is a file descriptor that gets closed or handed over to a stream: [FClose] and
           [HandedOverToStream] make it invalid *)
+  | CppStorageOnly
+      (** the access only needs the STORAGE to be there, not a live object in it: it is the new
+          occupant's own initialisation, reached after a lifetime began here. Null and freed storage
+          still fail it; an occupant destroyed in place does not, because leaving that behind is
+          what placement new is for. *)
 [@@deriving compare, equal, yojson_of]
 
 val is_file_descriptor_reason : must_be_valid_reason -> bool

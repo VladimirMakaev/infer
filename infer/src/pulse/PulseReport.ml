@@ -427,7 +427,8 @@ let is_constant_deref_without_invalidation (invalidation : Invalidation.t) acces
     | StdVector _
     | StdString _
     | CppMap _
-    | StdContainer _ ->
+    | StdContainer _
+    | CppDestructedInPlace ->
         false
   in
   if res then
