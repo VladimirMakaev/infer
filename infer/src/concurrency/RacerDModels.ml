@@ -418,6 +418,63 @@ let is_thread_confined_method tenv pname =
   |> Option.is_some
 
 
+(* Framework entry points whose CONTRACT is that the framework calls them back on one thread, so
+   they cannot run concurrently with themselves. Without this, any lock a callback takes promotes
+   its own later accesses to AnyThread (RacerDDomain.update_for_lock_use, which fires on release
+   too) and the callback is then reported as racing with itself on a field no other thread ever
+   touches.
+
+   This says exactly what @ThreadConfined says, read from an API contract instead of an
+   annotation, and it carries the same caveat as @ThreadConfined: it states that a method does
+   not race with ITSELF, not that two instances living on two different threads cannot share
+   state. A method here still races with any OTHER method that is not confined, which is what
+   keeps a confined callback reported against an unconfined public sibling.
+
+   Each entry must be a guarantee of the API, not a convention observed at some call site: a
+   framework we do not model keeps reporting, so a missing entry is conservative, while a wrong
+   entry silences real races. *)
+let is_confined_callback =
+  let open MethodMatcher in
+  [ (* A Handler is bound to one Looper when it is constructed and dispatches to it serially,
+       whichever Looper that is. *)
+    { default with
+      search_superclasses= true
+    ; classname= "android.os.Handler"
+    ; methods= ["handleMessage"; "dispatchMessage"] }
+  ; { default with
+      search_superclasses= true
+    ; classname= "android.os.Handler$Callback"
+    ; methods= ["handleMessage"] }
+    (* StateMachine owns an SmHandler on a single thread and runs every State callback there. *)
+  ; { default with
+      search_superclasses= true
+    ; classname= "com.android.internal.util.State"
+    ; methods= ["enter"; "exit"; "processMessage"] }
+    (* WorkManager constructs a fresh Worker for each run and calls it once on that instance, so
+       one instance's fields are never touched by two threads. @WorkerThread says the opposite of
+       what it looks like: it names a background thread, not a shared one. *)
+  ; {default with search_superclasses= true; classname= "androidx.work.Worker"; methods= ["doWork"]}
+  ; { default with
+      search_superclasses= true
+    ; classname= "androidx.work.ListenableWorker"
+    ; methods= ["startWork"] }
+    (* ExoPlayer drives a Renderer only from the playback thread. *)
+  ; { default with
+      search_superclasses= true
+    ; classname= "com.google.android.exoplayer2.Renderer"
+    ; methods=
+        [ "render"
+        ; "onPositionReset"
+        ; "onEnabled"
+        ; "onDisabled"
+        ; "onStarted"
+        ; "onStopped"
+        ; "setCurrentStreamFinal" ] } ]
+  |> of_records
+
+
+let is_confined_by_contract tenv pname = is_confined_callback tenv pname []
+
 let threadsafe_annotations =
   Annotations.thread_safe :: AnnotationAliases.of_json Config.threadsafe_aliases
 
