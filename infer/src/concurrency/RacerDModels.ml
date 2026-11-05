@@ -623,6 +623,7 @@ let synchronized_container_classes =
   ; "java.util.concurrent.BlockingDeque"
   ; "java.util.concurrent.BlockingQueue"
   ; "java.util.concurrent.ConcurrentLinkedDeque"
+  ; "java.util.concurrent.ConcurrentLinkedQueue"
   ; "java.util.concurrent.ConcurrentMap"
   ; "java.util.concurrent.ConcurrentSkipListSet"
   ; "java.util.concurrent.CopyOnWriteArrayList"
@@ -661,7 +662,17 @@ let is_synchronized_container callee_pname (access_exp : HilExp.AccessExpression
     | _ ->
         false
   in
-  if is_threadsafe_collection callee_pname tenv then true
+  let has_concurrent_queue_receiver =
+    Procname.is_java callee_pname
+    &&
+    match HilExp.AccessExpression.get_typ access_exp tenv with
+    | Some {Typ.desc= Tstruct typename | Tptr ({Typ.desc= Tstruct typename}, _)} ->
+        String.equal (Typ.Name.name typename) "java.util.concurrent.ConcurrentLinkedQueue"
+    | _ ->
+        false
+  in
+  (* Inherited methods such as [AbstractQueue.clear] have a different declaring class. *)
+  if is_threadsafe_collection callee_pname tenv || has_concurrent_queue_receiver then true
   else
     let is_annotated_synchronized base_typename container_field tenv =
       match Tenv.lookup tenv base_typename with
