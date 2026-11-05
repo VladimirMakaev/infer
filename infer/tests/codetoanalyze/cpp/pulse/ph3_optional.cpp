@@ -110,7 +110,11 @@ int emplace_owned_old_pointee_bad() {
   o.emplace(new int(9));
   return *p;
 }
-int emplace_owned_object_alias_ok() {
+// FALSE POSITIVE: `emplace` destroys the contained object and builds a new one
+// of the same type in the same storage, which leaves the reference usable. The
+// `reset` then `emplace` version just below is the same shape and stays silent,
+// so the report is an inconsistency rather than a rule.
+int FP_emplace_owned_object_alias_ok() {
   std::optional<std::unique_ptr<int>> o(std::in_place, new int(7));
   auto& old_object = *o;
   o.emplace(new int(9));

@@ -15,7 +15,9 @@ module F = Format
 type t =
   { cf_assign_last_arg: bool
   ; cf_injected_destructor: bool
-        (** true if this is an implicit C++ destructor call injected by the clang frontend *)
+        (** true if this is an implicit C++ destructor call that the programmer did not write:
+            either injected by the clang frontend at a scope exit, or synthesised by an analysis for
+            a [delete] expression, which the frontend translates to the builtin alone *)
   ; cf_interface: bool
   ; cf_is_objc_block: bool
   ; cf_is_objc_getter_setter: bool

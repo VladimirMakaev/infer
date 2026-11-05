@@ -727,7 +727,7 @@ let get_message_and_suggestion diagnostic =
                    "%a is passed as argument to %a; this function requires a non-%s argument"
                    pp_prefix null CallEvent.pp call_event null ;
                  Option.iter index ~f:(fun index -> F.fprintf fmt " at position #%i" index)
-             | None | Some (FileDescriptorUse | FileDescriptorRelease) ->
+             | None | Some (FileDescriptorUse | FileDescriptorRelease | CppStorageOnly) ->
                  F.fprintf fmt "%a is dereferenced%a" pp_prefix "null" pp_access_trace access_trace
            in
            F.asprintf "%a%a" pp_calling_context_prefix calling_context pp_must_be_valid_reason
@@ -1160,7 +1160,8 @@ let invalidation_titles (invalidation : Invalidation.t) =
   | StdVector _
   | StdString _
   | CppMap _
-  | StdContainer _ ->
+  | StdContainer _
+  | CppDestructedInPlace ->
       ( "invalidation part of the trace starts here"
       , "use-after-lifetime part of the trace starts here" )
 
