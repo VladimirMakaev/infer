@@ -25,6 +25,7 @@ type t =
   | QualifierContainsPotentialExceptionNote
   | MayDependOnAnUnknownValue
   | TaintExtra
+  | RacerDAccessExtra
   | TransitiveCalleesExtra
   | Suppressed
   | Autofix

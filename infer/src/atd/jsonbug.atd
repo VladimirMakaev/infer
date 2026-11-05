@@ -36,6 +36,15 @@ type taint_extra = {
   ?report_as_category: string option;
 }
 
+type racerd_access = {
+  field_class : string;  (* declaring class of the accessed field, fully qualified *)
+  field_name : string;
+  access_path : string;  (* as printed in the qualifier: this.count, Counter.shared, this.mgr.state *)
+  kind : string;         (* read | write | container_read | container_write *)
+  lock_held : bool;      (* a lock acquired since entry is held at the access *)
+  thread : string;       (* no_thread | any_but_self | any, from the access snapshot's ThreadsDomain *)
+}
+
 type transitive_callee_kind = [Static | Virtual | Closure]
 
 type transitive_callee_resolution = [ResolvedUsingDynamicType | ResolvedUsingStaticType | Unresolved]
@@ -63,6 +72,7 @@ type extra = {
   ?copy_type : string option;
   ?config_usage_extra : config_usage_extra option;
   ?taint_extra : taint_extra option;
+  ?racerd_access : racerd_access option;
   ?may_depend_on_an_unknown_value : may_depend_on_an_unknown_value option;
   ?reachable_from: string option;
   ~transitive_callees: transitive_callee list;

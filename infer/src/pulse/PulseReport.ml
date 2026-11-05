@@ -151,6 +151,7 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
       ; may_depend_on_an_unknown_value
       ; reachable_from
       ; taint_extra
+      ; racerd_access= None
       ; transitive_callees
       ; transitive_missed_captures }
     in
