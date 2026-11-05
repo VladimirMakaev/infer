@@ -25,6 +25,7 @@ type t =
   | QualifierContainsPotentialExceptionNote
   | MayDependOnAnUnknownValue
   | TaintExtra
+  | RacerDAccessExtra
   | TransitiveCalleesExtra
   | Suppressed
   | Autofix
@@ -48,6 +49,7 @@ let all_symbols =
   ; ("qualifier_contains_potential_exception_note", QualifierContainsPotentialExceptionNote)
   ; ("may_depend_on_an_unknown_value", MayDependOnAnUnknownValue)
   ; ("taint_extra", TaintExtra)
+  ; ("racerd_access_extra", RacerDAccessExtra)
   ; ("transitive_callees_extra", TransitiveCalleesExtra)
   ; ("suppressed", Suppressed)
   ; ("autofix", Autofix) ]

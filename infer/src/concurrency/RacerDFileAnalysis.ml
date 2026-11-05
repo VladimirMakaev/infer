@@ -388,8 +388,80 @@ let get_reporting_explanation report_kind tenv pname thread =
   else get_reporting_explanation_cpp report_kind
 
 
-let log_issue current_pname ~issue_log ~loc ~ltr ~access issue_type error_message =
-  Reporting.log_issue_external current_pname ~issue_log ~loc ~ltr ~access issue_type error_message
+(** The field a reported access touches, as structured data rather than only as text inside the
+    qualifier. Consumers that group reports by field (one message per declaring class and field)
+    would otherwise have to parse the message, which the qualifier is not a stable interface for.
+
+    [None] when there is no single field to name: an [InterfaceCall] has none, and an access rooted
+    at a local or a bare array element has none either. *)
+let make_racerd_access_extra (snapshot : RacerDDomain.AccessSnapshot.t) =
+  let open RacerDDomain in
+  let kind_opt =
+    match snapshot.elem.access with
+    | Access.Read _ ->
+        Some "read"
+    | Access.Write _ ->
+        Some "write"
+    | Access.ContainerRead _ ->
+        Some "container_read"
+    | Access.ContainerWrite _ ->
+        Some "container_write"
+    | Access.InterfaceCall _ ->
+        None
+  in
+  (* the outermost field of the expression is the one that is accessed: for [this.mgr.state] that
+     is [state], declared in [mgr]'s class, not [mgr] declared in [this]'s class *)
+  let rec accessed_field (exp : AccessExpression.t) =
+    match exp with
+    | FieldOffset (_, fieldname) ->
+        Some fieldname
+    | ArrayOffset (exp, _, _) | AddressOf exp | Dereference exp ->
+        accessed_field exp
+    | Base _ ->
+        None
+  in
+  let exp = Access.get_access_exp snapshot.elem.access in
+  match (kind_opt, accessed_field exp) with
+  | Some kind, Some fieldname ->
+      Some
+        { Jsonbug_t.field_class= Fieldname.get_class_name fieldname |> Typ.Name.name
+        ; field_name= Fieldname.get_field_name fieldname
+        ; access_path= F.asprintf "%a" pp_exp exp
+        ; kind
+        ; lock_held= LockDomain.is_locked snapshot.elem.lock
+        ; thread=
+            ( match snapshot.elem.thread with
+            | ThreadsDomain.NoThread ->
+                "no_thread"
+            | ThreadsDomain.AnyThreadButSelf ->
+                "any_but_self"
+            | ThreadsDomain.AnyThread ->
+                "any" ) }
+  | _, _ ->
+      None
+
+
+let make_extras snapshot =
+  match make_racerd_access_extra snapshot with
+  | None ->
+      None
+  | Some _ as racerd_access ->
+      Some
+        { Jsonbug_t.cost_polynomial= None
+        ; cost_degree= None
+        ; copy_type= None
+        ; config_usage_extra= None
+        ; taint_extra= None
+        ; racerd_access
+        ; may_depend_on_an_unknown_value= None
+        ; reachable_from= None
+        ; transitive_callees= []
+        ; transitive_missed_captures= [] }
+
+
+let log_issue current_pname ~issue_log ~loc ~ltr ~access ?extras issue_type error_message =
+  Reporting.log_issue_external current_pname ~issue_log ~loc ~ltr ~access ?extras issue_type
+    error_message
 
 
 let report_thread_safety_violation ~make_description ~report_kind
@@ -407,7 +479,8 @@ let report_thread_safety_violation ~make_description ~report_kind
   let error_message = F.sprintf "%s%s" description explanation in
   let end_locs = Option.to_list original_end @ Option.to_list conflict_end in
   let access = IssueAuxData.encode end_locs in
-  log_issue pname ~issue_log ~loc ~ltr ~access RacerD issue_type error_message
+  let extras = make_extras snapshot in
+  log_issue pname ~issue_log ~loc ~ltr ~access ?extras RacerD issue_type error_message
 
 
 let report_unannotated_interface_violation reported_pname reported_access issue_log =

@@ -18,6 +18,11 @@ let pp_taint_extra fmt
       F.fprintf fmt ", privacy effect: %s" privacy_effect )
 
 
+let pp_racerd_access fmt Jsonbug_t.{field_class; field_name; access_path; kind; lock_held; thread} =
+  F.fprintf fmt "field: %s.%s, path: %s, kind: %s, lock_held: %b, thread: %s" field_class field_name
+    access_path kind lock_held thread
+
+
 let pp_trace fmt trace comma =
   let pp_trace_elem fmt Jsonbug_t.{description} = F.pp_print_string fmt description in
   let trace_without_empty_descs =
@@ -93,6 +98,10 @@ let pp_custom_of_report fmt report fields =
           let taint_extra = Option.bind issue.extras ~f:(fun extras -> extras.taint_extra) in
           Option.iter taint_extra ~f:(fun taint_extra ->
               F.fprintf fmt "%s%a" (comma_separator index) pp_taint_extra taint_extra )
+      | RacerDAccessExtra ->
+          let racerd_access = Option.bind issue.extras ~f:(fun extras -> extras.racerd_access) in
+          Option.iter racerd_access ~f:(fun racerd_access ->
+              F.fprintf fmt "%s%a" (comma_separator index) pp_racerd_access racerd_access )
       | MayDependOnAnUnknownValue ->
           Option.iter issue.extras ~f:(fun {may_depend_on_an_unknown_value} ->
               Option.iter may_depend_on_an_unknown_value ~f:(fun {value} ->
