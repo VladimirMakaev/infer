@@ -603,6 +603,41 @@ module PulseTransferFunctions = struct
         Sat (Ok exec_state)
 
 
+  (** has an object just been destroyed by an EXPLICIT destructor call, [p->~T()]?
+
+      An injected destructor marks a scope exit and is handled by [get_out_of_scope_object] above;
+      this is the one the programmer wrote, after which the object is gone but its storage is not,
+      so placement new may start a new lifetime there. Inner destructors run on sub-objects while
+      the whole object is still alive and must not invalidate anything. *)
+  let get_explicitly_destructed_object callee_pname actuals (flags : CallFlags.t) =
+    if flags.cf_injected_destructor then None
+    else
+      match (callee_pname, actuals) with
+      | Some (Procname.ObjC_Cpp pname), (receiver, _) :: _
+        when Procname.ObjC_Cpp.is_destructor pname
+             && not (Procname.ObjC_Cpp.is_inner_destructor pname) ->
+          Some receiver
+      | _ ->
+          None
+
+
+  (** the object the receiver points at was destroyed in place: its lifetime has ended, though the
+      storage is still there *)
+  let exec_object_destructed_in_place path call_loc receiver exec_state =
+    match (exec_state : ExecutionDomain.t) with
+    | ContinueProgram astate | ExceptionRaised astate ->
+        let++ astate, destructed_base =
+          PulseOperations.eval path NoAccess call_loc receiver astate
+        in
+        (* the receiver is a pointer value, not a named stack slot, so there is no access path to
+           blame the invalidation on *)
+        PulseOperations.invalidate path UntraceableAccess call_loc Invalidation.CppDestructedInPlace
+          destructed_base astate
+        |> ExecutionDomain.continue
+    | Stopped _ ->
+        Sat (Ok exec_state)
+
+
   (** [pthread_exit] and [thrd_exit] end only the calling thread: unlike at [exit()], memory
       reachable only from its stack is leaked *)
   let is_thread_exit pname =
@@ -1512,6 +1547,15 @@ module PulseTransferFunctions = struct
           L.d_printfln "%a is going out of scope" Pvar.pp_value (fst pvar_typ) ;
           List.filter_map exec_states_res ~f:(fun exec_state ->
               exec_state >>>= exec_object_out_of_scope path call_loc pvar_typ |> SatUnsat.sat )
+      | None ->
+          exec_states_res
+    in
+    let exec_states_res =
+      match get_explicitly_destructed_object callee_pname actuals call_flags with
+      | Some receiver ->
+          L.d_printfln "%a was destroyed in place" Exp.pp receiver ;
+          List.filter_map exec_states_res ~f:(fun exec_state ->
+              exec_state >>>= exec_object_destructed_in_place path call_loc receiver |> SatUnsat.sat )
       | None ->
           exec_states_res
     in

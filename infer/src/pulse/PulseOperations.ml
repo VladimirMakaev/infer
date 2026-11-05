@@ -115,7 +115,8 @@ let check_addr_access path ?must_be_valid_reason ?origin ?(volatile_access = fal
           | StdVector _
           | StdString _
           | CppMap _
-          | StdContainer _ ->
+          | StdContainer _
+          | CppDestructedInPlace ->
               astate
         in
         ReportableError

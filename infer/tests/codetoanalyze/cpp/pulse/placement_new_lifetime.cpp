@@ -194,15 +194,14 @@ void cross_procedure_reconstruct_then_double_destruct_bad() {
   s.destruct();
 }
 
-// KNOWN LIMITATION, AND IT IS OLDER AND WIDER THAN THIS CHANGE: reading an object
-// that was destroyed in place and NOT reconstructed is not reported, through a
-// callee or inline, for a union member or a plain buffer. Only `delete` followed
-// by a use is (heap_delete_then_read_bad above). Both of these are silent on the
-// parent commit too, so nothing here revived them; they are pinned because they
-// are the shapes a reader of this file will expect to be covered, and because
-// they are the controls that would catch the mark outliving what it describes --
-// in the first one the LAST thing to happen to the storage is a destruction.
-int FN_cross_procedure_reconstruct_then_destruct_then_read() {
+// Reading an object that was destroyed in place and NOT reconstructed, through a
+// callee, for a union member. These were pinned FN_ here because only `delete`
+// followed by a use was reported (heap_delete_then_read_bad above); an explicit
+// destructor call now ends the lifetime too, so both report. They are also the
+// controls that catch the mark outliving what it describes -- in the first one
+// the LAST thing to happen to the storage is a destruction, so a rule that let
+// the reconstruct in the middle win would make it silent again.
+int cross_procedure_reconstruct_then_destruct_then_read_bad() {
   Slot<Heavy> s;
   s.construct();
   s.destruct();
@@ -211,7 +210,7 @@ int FN_cross_procedure_reconstruct_then_destruct_then_read() {
   return (int)s.get().s.size();
 }
 
-int FN_cross_procedure_destruct_then_read() {
+int cross_procedure_destruct_then_read_bad() {
   Slot<Heavy> s;
   s.construct();
   s.destruct();

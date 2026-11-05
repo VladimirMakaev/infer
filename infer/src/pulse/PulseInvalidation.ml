@@ -256,6 +256,7 @@ type t =
   (* last so that giving it a payload does not renumber the constructors above it, which would
      change the serialised form of every invalidation already in use *)
   | OutOfBounds of viewed_sequence
+  | CppDestructedInPlace
 [@@deriving compare, equal, yojson_of, variants]
 
 let is_same_type invalidation1 invalidation2 =
@@ -263,7 +264,8 @@ let is_same_type invalidation1 invalidation2 =
 
 
 let releases_resource = function
-  | CFree | CppDelete | CppDeleteArray | FClose _ | HandedOverToStream _ ->
+  (* the destructor body runs, so whatever the object owned is released, exactly as for [delete] *)
+  | CFree | CppDelete | CppDeleteArray | CppDestructedInPlace | FClose _ | HandedOverToStream _ ->
       true
   | ComparedToNullInThisProcedure _
   | ConstantDereference _
@@ -286,12 +288,18 @@ type must_be_valid_reason =
   | NullArgumentWhereNonNullExpected of PulseCallEvent.t * int option
   | FileDescriptorUse
   | FileDescriptorRelease
+  | CppStorageOnly
+      (** the access only needs the STORAGE to be there, not a live object in it: it is the new
+          occupant's own initialisation, reached after a lifetime began here. Null and freed storage
+          still fail it; an occupant destroyed in place does not, because leaving that behind is
+          what placement new is for. *)
 [@@deriving compare, equal, yojson_of]
 
 let is_file_descriptor_reason = function
   | FileDescriptorUse | FileDescriptorRelease ->
       true
   | BlockCall
+  | CppStorageOnly
   | InsertionIntoCollectionKey
   | InsertionIntoCollectionValue
   | SelfOfNonPODReturnMethod _
@@ -312,6 +320,7 @@ let is_relevant_for_reason must_be_valid_reason invalidation =
     | ConstantDereference _
     | CppDelete
     | CppDeleteArray
+    | CppDestructedInPlace
     | EndIterator
     | GoneOutOfScope _
     | OptionalEmpty
@@ -321,6 +330,11 @@ let is_relevant_for_reason must_be_valid_reason invalidation =
     | StdContainer _
     | CppMap _ ->
         false )
+  | Some CppStorageOnly ->
+      (* only an occupant destroyed in place is tolerated: the storage outlives it by definition.
+         Everything else -- null, freed, deleted, out of scope -- means the storage itself is not
+         there to build in, which is a real bug at the placement new. *)
+      not (equal invalidation CppDestructedInPlace)
   | Some
       ( BlockCall
       | InsertionIntoCollectionKey
@@ -348,6 +362,8 @@ let pp_must_be_valid_reason f = function
       F.fprintf f "FileDescriptorUse"
   | Some FileDescriptorRelease ->
       F.fprintf f "FileDescriptorRelease"
+  | Some CppStorageOnly ->
+      F.fprintf f "CppStorageOnly"
 
 
 let issue_type_of_cause ~latent invalidation must_be_valid_reason =
@@ -358,7 +374,7 @@ let issue_type_of_cause ~latent invalidation must_be_valid_reason =
       IssueType.compared_to_null_and_dereferenced
   | ConstantDereference i when IntLit.iszero i -> (
     match must_be_valid_reason with
-    | None | Some (FileDescriptorUse | FileDescriptorRelease) ->
+    | None | Some (FileDescriptorUse | FileDescriptorRelease | CppStorageOnly) ->
         IssueType.nullptr_dereference ~latent
     | Some BlockCall ->
         IssueType.nil_block_call ~latent
@@ -377,7 +393,7 @@ let issue_type_of_cause ~latent invalidation must_be_valid_reason =
   | FClose _ | HandedOverToStream _ ->
       (* TODO: this probably deserves its own issue type *)
       IssueType.use_after_free ~latent
-  | GoneOutOfScope _ ->
+  | GoneOutOfScope _ | CppDestructedInPlace ->
       IssueType.use_after_lifetime ~latent
   | OptionalEmpty ->
       IssueType.optional_empty_access ~latent
@@ -416,6 +432,8 @@ let describe f cause =
         else F.fprintf f "is the address of a stack variable `%a`" Pvar.pp_value pvar
       in
       F.fprintf f "%a whose lifetime has ended" pp_var pvar
+  | CppDestructedInPlace ->
+      F.pp_print_string f "was destroyed by an explicit destructor call"
   | HandedOverToStream proc_name ->
       F.fprintf f "was handed over to the stream returned by `%a`" Procname.describe proc_name
   | OptionalEmpty ->
@@ -458,7 +476,7 @@ let pp f invalidation =
       F.fprintf f "ConstantDereference(%a)" describe invalidation
   | CppDelete | CppDeleteArray ->
       F.fprintf f "CppDelete(%a)" describe invalidation
-  | EndIterator | GoneOutOfScope _ | OptionalEmpty | OutOfBounds _ ->
+  | EndIterator | GoneOutOfScope _ | OptionalEmpty | OutOfBounds _ | CppDestructedInPlace ->
       describe f invalidation
   | FClose _ ->
       F.fprintf f "FClose(%a)" describe invalidation

@@ -304,7 +304,13 @@ module Basic = struct
           Logging.d_printfln "No destructor found for class %a@\n" Typ.Name.pp class_name ;
           (ok_continue astate, non_disj)
       | Some destructor ->
-          let callflags : CallFlags.t = CallFlags.default in
+          (* this destructor call is synthesised here, not written by the programmer: a [delete]
+             expression translates to the builtin alone. Flag it as injected so that the checks
+             keyed on a destructor the programmer wrote -- the in-place invalidation in
+             [Pulse.get_explicitly_destructed_object] -- do not fire for it. The storage does not
+             survive this one anyway: [free_or_delete] invalidates it with [CppDelete] next, and
+             that is the more informative cause to report. *)
+          let callflags : CallFlags.t = {CallFlags.default with cf_injected_destructor= true} in
           dispatch_call_eval_args analysis_data path ret exp [deleted_arg] location callflags astate
             non_disj (Some destructor) )
     | _ ->

@@ -36,7 +36,12 @@ void nested_scope_destructor_ok() {
   { S s(1); }
 }
 
-int reinit_after_explicit_destructor_ok() {
+// `reinit` assigns a fresh `f`, so there is no double delete and the name said
+// _ok. But the object's lifetime ended at the explicit destructor call and no
+// placement new started a new one, so calling a member on `s` and reading
+// `s.f` afterwards is a use of a dead object -- destroy-then-assign, which is
+// what the two cases below do through operator= instead of a member function.
+int reinit_member_after_explicit_destructor_bad() {
   S s(1);
   s.~S();
   s.reinit(S(2));
@@ -155,7 +160,10 @@ int* destruct_pointer_contents_then_placement_new1_ok(S* s) {
   return s->f;
 }
 
-int* destruct_pointer_contents_then_placement_new2_ok(S* s) {
+// unlike the case above, the placement new reuses the storage of a SUBOBJECT,
+// so `*s` itself is never reconstructed and reading `s->f` reads a member of an
+// object whose lifetime has ended.
+int* destruct_pointer_contents_then_placement_new2_bad(S* s) {
   s->~S();
   new (&(s->f)) S(1);
   return s->f;
