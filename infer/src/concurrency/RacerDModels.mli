@@ -28,6 +28,11 @@ val is_thread_confined_method : Tenv.t -> Procname.t -> bool
     completely different classes that don't necessarily run on the same thread as the confined
     object. *)
 
+val is_confined_by_contract : Tenv.t -> Procname.t -> bool
+(** the framework contract for this method guarantees it is called back on a single thread, so it
+    cannot run concurrently with itself. Like [@ThreadConfined], this does not say two instances on
+    two threads cannot share state, and it leaves a confined method racing with unconfined ones. *)
+
 val should_analyze_proc : Tenv.t -> Procname.t -> bool
 (** return true if we should compute a summary for the procedure. if this returns false, we won't
     analyze the procedure or report any warnings on it. note: in the future, we will want to analyze

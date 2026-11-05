@@ -350,7 +350,10 @@ let analyze ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
       else LockDomain.initial
     in
     let threads =
-      if runs_on_ui_thread tenv proc_name || RacerDModels.is_thread_confined_method tenv proc_name
+      if
+        runs_on_ui_thread tenv proc_name
+        || RacerDModels.is_thread_confined_method tenv proc_name
+        || RacerDModels.is_confined_by_contract tenv proc_name
       then ThreadsDomain.AnyThreadButSelf
       else if
         Procdesc.is_java_synchronized proc_desc
