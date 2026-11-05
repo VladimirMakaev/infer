@@ -152,7 +152,9 @@ struct UseAfterSelfDestruct {
     }
   }
 
-  void reset_ok() {
+  // destroys itself and then writes a member, with nothing reconstructed in
+  // between: the name predates the explicit destructor call ending the lifetime
+  void reset_bad() {
     this->~UseAfterSelfDestruct();
     x_ = a_.f(x_);
   }
