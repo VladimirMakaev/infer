@@ -13,7 +13,7 @@ CLANG_OPTIONS = -x c++ -std=c++17 -nostdinc++ -isystem$(CLANG_INCLUDES)/c++/v1/ 
 # global C shape, which must keep working.
 INFER_OPTIONS = --pulse-only --debug-exceptions --project-root $(TESTS_DIR) \
   --pulse-model-alloc-pattern '.*open_session.*' \
-  --pulse-model-free-pattern '.*close_session.*' \
+  --pulse-model-free-pattern '.*close.*' \
   --enable-issue-type MEMORY_LEAK_CPP
 
 INFERPRINT_OPTIONS = --issues-tests
