@@ -1,0 +1,3 @@
+codetoanalyze/cpp/pulse-alloc-free-pattern/namespaced_alloc_free.cpp, ns_leak_bad, 2, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `hw::open_session (custom malloc)` here,memory becomes unreachable here]
+codetoanalyze/cpp/pulse-alloc-free-pattern/namespaced_alloc_free.cpp, ns_wrapper_leak_bad, 2, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,when calling `ns_returns_ok` here,allocated by `hw::open_session (custom malloc)` here,memory becomes unreachable here]
+codetoanalyze/cpp/pulse-alloc-free-pattern/namespaced_alloc_free.cpp, plain_malloc_leak_bad, 3, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
