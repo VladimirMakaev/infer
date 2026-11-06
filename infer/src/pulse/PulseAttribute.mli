@@ -99,6 +99,25 @@ module ConfigUsage : sig
   [@@deriving equal]
 end
 
+(** Where a value that stands for a FAILURE came from. [source] has two cases by design though only
+    [NullableReturn] is produced today, so that adding the general failure contract later extends a
+    match rather than changing this type and its attribute rank. *)
+module FailureOrigin : sig
+  type source = NullableReturn | FailureOutcome [@@deriving compare, equal]
+
+  type t = {source: source; callee: Procname.t; location: Location.t} [@@deriving compare, equal]
+
+  val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
+end
+
+module FailureOriginSet : sig
+  include PrettyPrintable.PPSet with type elt = FailureOrigin.t
+
+  val union_capped : t -> t -> t
+  (** union, truncated deterministically to a small bound: the single definition of what merging two
+      sets of origins means, so a join and an attribute add cannot disagree. *)
+end
+
 module Builder : sig
   type t = Discardable | NonDiscardable [@@deriving compare, equal]
 
@@ -222,6 +241,9 @@ type t =
       (** an unknown constructor adopted this integral value's descriptor. Reapplied to descriptor
           allocations in callers, preserving cast memory obligations. Appended to preserve existing
           attribute ranks. *)
+  | FailureOutcome of FailureOriginSet.t
+      (** [v] is a value some call produced to mean failure; a set because two paths reaching [v]
+          can come from different calls. ALSO LAST, for the rank reason above. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit

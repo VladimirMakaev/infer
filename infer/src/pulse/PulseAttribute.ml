@@ -166,6 +166,52 @@ module Attribute = struct
           F.fprintf f "%s.%a" config_type AbstractValue.pp v
   end
 
+  (* Where a value that stands for a FAILURE came from. A checker that wants to say "the program
+     crashed because this call failed" needs to know which call, and that the value means failure
+     at all -- neither is recoverable from the value itself once it is just a zero.
+
+     [source] has two cases by design even though only one is produced today. [NullableReturn] is
+     a value a callee on the nullable-return list may return as null. [FailureOutcome] is the
+     general failure contract that is still held, and it is named here so that adding it later
+     extends a match rather than changing this type, its rank, and every summary with it. *)
+  module FailureOrigin = struct
+    type source = NullableReturn | FailureOutcome [@@deriving compare, equal, yojson_of]
+
+    type t = {source: source; callee: Procname.t; location: Location.t}
+    [@@deriving compare, equal, yojson_of]
+
+    let pp_source f = function
+      | NullableReturn ->
+          F.pp_print_string f "nullable-return"
+      | FailureOutcome ->
+          F.pp_print_string f "failure-outcome"
+
+
+    let pp f {source; callee; location} =
+      F.fprintf f "%a from %a at %a" pp_source source Procname.pp callee Location.pp location
+  end
+
+  module FailureOriginSet = struct
+    include PrettyPrintable.MakePPSet (FailureOrigin)
+
+    (* A value can be the failure of at most a handful of calls before the set stops carrying
+       information and starts costing summary size on every join. Capped rather than unbounded,
+       and the cap is applied in ONE place so that the join and [Attributes.add] cannot disagree
+       about what a union means. *)
+    let max_origins = 4
+
+    let union_capped set1 set2 =
+      let u = union set1 set2 in
+      if cardinal u <= max_origins then u
+      else
+        (* keep a deterministic subset: an arbitrary truncation would make summaries depend on
+           iteration order *)
+        fold
+          (fun origin (acc, n) -> if n >= max_origins then (acc, n) else (add origin acc, n + 1))
+          u (empty, 0)
+        |> fst
+  end
+
   module Builder = struct
     type t = Discardable | NonDiscardable [@@deriving compare, equal, show]
   end
@@ -295,6 +341,11 @@ module Attribute = struct
       (* An unknown constructor adopted this integral value's descriptor. Reapply the effect
          to descriptors in callers; a cast memory address keeps its allocation obligation.
          Appended to preserve existing attribute ranks. *)
+    | FailureOutcome of (FailureOriginSet.t[@yojson.opaque])
+      (* [v -> FailureOutcome origins] records that [v] is a value some call produced to mean
+         FAILURE. Carried as a set because two paths that reach the same value can come from
+         different calls, and the set is what a join has to union rather than drop.
+         ALSO LAST ON PURPOSE, for the rank reason above. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -302,6 +353,8 @@ module Attribute = struct
   let to_rank = Variants.to_rank
 
   let file_descriptor_ownership_transferred_rank = Variants.filedescriptorownershiptransferred.rank
+
+  let failure_outcome_rank = Variants.failureoutcome.rank
 
   let address_of_stack_variable_rank = Variants.addressofstackvariable.rank
 
@@ -513,6 +566,8 @@ module Attribute = struct
         F.fprintf f "UnknownEffect(@[%a,@ %a)@]" CallEvent.pp call ValueHistory.pp hist
     | UnreachableAt location ->
         F.fprintf f "UnreachableAt(%a)" Location.pp location
+    | FailureOutcome origins ->
+        F.fprintf f "FailureOutcome(%a)" FailureOriginSet.pp origins
     | UsedAsBranchCond (pname, location, trace) ->
         F.fprintf f "UsedAsBranchCond(%a, %a, %a)" Procname.pp pname Location.pp location
           (Trace.pp ~pp_immediate:(pp_string_if_debug "used"))
@@ -533,6 +588,8 @@ module Attribute = struct
     | MustNotBeTainted _
     | UsedAsBranchCond _ ->
         true
+    | FailureOutcome _
+    (* a fact about what a call PRODUCED, so it says nothing about the caller's precondition *)
     | Invalid _
     | AbsentFromContainer
     | Allocated _
@@ -589,6 +646,7 @@ module Attribute = struct
     | UnreachableAt _
     | UsedAsBranchCond _ ->
         false
+    | FailureOutcome _
     | AbsentFromContainer
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
@@ -685,6 +743,7 @@ module Attribute = struct
     | UnknownEffect _
     | UnreachableAt _
     | UsedAsBranchCond _
+    | FailureOutcome _
     | WrittenTo _ ->
         Some attr
 
@@ -806,6 +865,9 @@ module Attribute = struct
       | StdVectorCapacity _
       | StdVectorReserve
       | Uninitialized _
+      | FailureOutcome _
+      (* names the callee that produced the value, which a caller applying the summary does
+         not change *)
       | UnreachableAt _ ) as attr ->
         attr
 
@@ -942,6 +1004,7 @@ module Attribute = struct
       | UnknownEffect _
       | UnreachableAt _
       | UsedAsBranchCond _
+      | FailureOutcome _
       | WrittenTo _ ) as attr ->
         Some attr
 
@@ -991,6 +1054,13 @@ module Attributes = struct
       |> Option.value ~default:Attribute.TaintSinkMap.empty
 
 
+    let get_failure_outcome attrs =
+      get_by_rank Attribute.failure_outcome_rank
+        ~dest:(function[@warning "-partial-match"] FailureOutcome origins -> origins)
+        attrs
+      |> Option.value ~default:Attribute.FailureOriginSet.empty
+
+
     let add attrs value =
       let open Attribute in
       match value with
@@ -1022,6 +1092,11 @@ module Attributes = struct
               else Some sink2
             in
             update (MustNotBeTainted (TaintSinkMap.union aux new_sinks sinks)) attrs
+      | FailureOutcome new_origins ->
+          if FailureOriginSet.is_empty new_origins then attrs
+          else
+            let existing = get_failure_outcome attrs in
+            update (FailureOutcome (FailureOriginSet.union_capped new_origins existing)) attrs
       | UnknownEffect _ when Option.is_some (find_rank attrs Attribute.std_vector_capacity_rank) ->
           add (update (StdVectorCapacity None) attrs) value
       | Invalid (OptionalEmpty, _) | WrittenTo _ | StdVectorCapacity _ ->
