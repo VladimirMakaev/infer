@@ -759,7 +759,15 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
                       ) ) )
           | Stopped (ExitProgram {exit}) ->
               (* keep the CALLEE's exit: the caller did not exit, its callee did, and the
-                 location and kind of that exit are what a report about this path has to name *)
+                 location and kind of that exit are what a report about this path has to name.
+                 The origins are the exception: they name values, and the callee's values are not
+                 the caller's, so they are recomputed from the caller's own state. This is what
+                 attributes a crash inside a check helper to the call that failed here. *)
+              let exit =
+                { exit with
+                  ExecutionDomain.failure_origins= PulseFailureOrigins.pinned_null astate_post_call
+                }
+              in
               Sat (Ok (Stopped (ExitProgram {astate= astate_summary; exit})))
           | Stopped (LatentAbortProgram {latent_issue}) -> (
               let open SatUnsat.Import in

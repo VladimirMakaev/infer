@@ -35,7 +35,12 @@ type exit_info =
   ; kind: exit_kind
   ; fatal_callee: Procname.t option
         (** the callee that ended it, when one is known: a trace into it is what makes a report
-            about an abort readable. [None] for an exit the frontend produced without a call. *) }
+            about an abort readable. [None] for an exit the frontend produced without a call. *)
+  ; failure_origins: (Attribute.FailureOriginSet.t[@yojson.opaque])
+        (** the calls whose documented failure value was null when this path ended. Snapshotted here
+            because a state is summarised the moment it becomes an exit, and summarising discards
+            the attribute that carries this: see [PulseFailureOrigins]. Filled in by whoever turns a
+            state into an exit, so a construction site may leave it empty. *) }
 [@@deriving equal, compare, yojson_of]
 
 let pp_exit_kind fmt = function
@@ -168,11 +173,15 @@ let pp_header kind fmt = function
       let message, _suggestion = Diagnostic.get_message_and_suggestion diagnostic in
       let location = Diagnostic.get_location diagnostic in
       F.fprintf fmt "(%a: %a: %s)" Location.pp location IssueType.pp issue_type message
-  | Stopped (ExitProgram {exit= {location; kind= exit_kind; fatal_callee}}) ->
+  | Stopped (ExitProgram {exit= {location; kind= exit_kind; fatal_callee; failure_origins}}) ->
       Pp.with_color kind Orange F.pp_print_string fmt "ExitProgram" ;
-      F.fprintf fmt "(%a, %a%a)" Location.pp location pp_exit_kind exit_kind
+      F.fprintf fmt "(%a, %a%a%a)" Location.pp location pp_exit_kind exit_kind
         (fun fmt -> function None -> () | Some pname -> F.fprintf fmt ", %a" Procname.pp pname)
         fatal_callee
+        (fun fmt origins ->
+          if not (Attribute.FailureOriginSet.is_empty origins) then
+            F.fprintf fmt ", failed: %a" Attribute.FailureOriginSet.pp origins )
+        failure_origins
   | Stopped (LatentAbortProgram {latent_issue}) ->
       Pp.with_color kind Orange F.pp_print_string fmt "LatentAbortProgram" ;
       let diagnostic = LatentIssue.to_diagnostic latent_issue in

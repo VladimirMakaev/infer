@@ -269,6 +269,8 @@ val pulse_dict_missing_key : t
 
 val pulse_dynamic_type_mismatch : t
 
+val pulse_fatal_on_nullable_return : t
+
 val pulse_transitive_access : t
 
 val pulse_memory_leak_c : t

@@ -1568,7 +1568,10 @@ module PulseTransferFunctions = struct
             ; kind=
                 Option.value_map callee_pname ~default:ExecutionDomain.UnknownExit
                   ~f:ExecutionDomain.exit_kind_of_no_return_callee
-            ; fatal_callee= callee_pname }
+            ; fatal_callee= callee_pname
+            ; failure_origins=
+                Attribute.FailureOriginSet.empty
+                (* [force_exit_program] fills this in from the state it is about to summarise *) }
           in
           List.filter_map exec_states_res ~f:(fun exec_state_res ->
               (let+ exec_state = exec_state_res in
@@ -2977,6 +2980,7 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
         if Config.pulse_transitive_access_enabled then
           PulseTransitiveAccessChecker.report_errors analysis_data summary ;
         report_topl_errors analysis_data summary.pre_post_list ;
+        PulseFatalOnNullable.report_errors analysis_data posts ;
         if Config.is_checker_enabled TreeBorrows then
           report_tree_borrows_errors analysis_data summary.pre_post_list ;
         if not (has_0_continue_program summary) then (
