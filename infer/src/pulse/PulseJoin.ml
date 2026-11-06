@@ -265,6 +265,9 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | MustNotBeTainted _
   | PropagateTaintFrom _
   | Tainted _
+  (* provenance, like [Tainted]: the value MAY have come from a failing call on one of the two
+     paths, and a rule built on this still has to prove the failure decided something *)
+  | FailureOutcome _
   | Uninitialized _ ->
       Some (weaken attr)
 
@@ -413,6 +416,8 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       (* arbitrary, doesn't matter much which side *) Some attr1
   | UsedAsBranchCond _, UsedAsBranchCond _ ->
       (* arbitrary, doesn't matter much which side *) Some attr1
+  | FailureOutcome origins1, FailureOutcome origins2 ->
+      Some (FailureOutcome (Attribute.FailureOriginSet.union_capped origins1 origins2))
   | WrittenTo (ts1, _), WrittenTo (ts2, _) ->
       (* pick the most recent event *)
       if Timestamp.compare ts1 ts2 >= 0 then Some attr1 else Some attr2
