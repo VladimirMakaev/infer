@@ -22,12 +22,29 @@ let free deleted_access : model = Basic.free_or_delete `Free CFree deleted_acces
    them positionally, so the pattern-driven entries take this shape. The other config-pattern
    models already do the same (pulse-model-return-first-arg and friends). *)
 let free_from_list args : model =
- fun model_data astate non_disj ->
+ fun ({analysis_data; path; location; ret; callee_procname; call_flags} as model_data) astate
+     non_disj ->
   match args with
   | arg :: _ ->
       free arg model_data astate non_disj
   | [] ->
-      (Basic.ok_continue astate, non_disj)
+      (* A free with no pointer argument frees nothing, so matching it buys nothing -- and it
+         COSTS something, because a matched model REPLACES the call. Answering with a no-op threw
+         the callee's body away, so a zero-arity function whose name happens to match kept its
+         effects unperformed: that both invents a report in the caller and deletes one. The list
+         form cannot say "at least one argument" in the matcher itself, so the shape this model
+         does not apply to is handed to the ordinary interprocedural call instead, which applies
+         the real summary -- or treats the callee as unknown when it has none -- exactly as if
+         this entry had never matched. ResolvedCall does not re-enter model matching, so this
+         cannot recurse back into here. *)
+      let formals_opt =
+        Option.map (IRAttributes.load callee_procname) ~f:ProcAttributes.get_pvar_formals
+      in
+      let results, non_disj, _contradiction, _call_status =
+        PulseCallOperations.call analysis_data path location callee_procname ~ret ~actuals:[]
+          ~formals_opt PulseOperations.ResolvedCall call_flags astate non_disj
+      in
+      (results, non_disj)
 
 
 let invalidate path access_path location cause addr_trace : unit DSL.model_monad =
