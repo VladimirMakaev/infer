@@ -2438,7 +2438,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         CContext.get_curr_class_decl_ptr stmt_info (CContext.get_curr_class context)
       in
       let decl = Option.value_exn (CAst_utils.get_decl class_ptr) in
-      let fields = CAst_utils.get_record_fields decl in
+      let fields =
+        (* a union's destructor destroys none of its variant members: the program has to destroy
+           the active one itself, which is what a tagged union does by hand. Destroying every
+           member here invented the destruction of objects that were never alive at the same
+           time, and re-destroyed the one the program had already destroyed. *)
+        if Typ.Name.is_union (CType_decl.get_record_typename ~tenv:context.tenv decl) then []
+        else CAst_utils.get_record_fields decl
+      in
       let bases = CAst_utils.get_cxx_base_classes decl in
       let _, sloc2 = stmt_info.Clang_ast_t.si_source_range in
       let stmt_info_loc = {stmt_info with Clang_ast_t.si_source_range= (sloc2, sloc2)} in
