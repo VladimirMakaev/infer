@@ -15,6 +15,21 @@ module DSL = PulseModelsDSL
 
 let free deleted_access : model = Basic.free_or_delete `Free CFree deleted_access
 
+(* [+pred] alone is [name_cons_f empty]: the predicate is asked about the LAST name component and
+   then [empty] rejects anything with a qualifier left over, so a namespaced C++ function can
+   never match a config pattern however the regex is written. Chaining [&::.*] accepts the
+   remaining qualifiers, but it hands the model all the arguments as a list rather than capturing
+   them positionally, so the pattern-driven entries take this shape. The other config-pattern
+   models already do the same (pulse-model-return-first-arg and friends). *)
+let free_from_list args : model =
+ fun model_data astate non_disj ->
+  match args with
+  | arg :: _ ->
+      free arg model_data astate non_disj
+  | [] ->
+      (Basic.ok_continue astate, non_disj)
+
+
 let invalidate path access_path location cause addr_trace : unit DSL.model_monad =
   let open DSL.Syntax in
   PulseOperations.invalidate path access_path location cause addr_trace |> exec_command
@@ -1595,7 +1610,7 @@ let matchers : matcher list =
   ; +BuiltinDecl.(match_builtin __builtin_va_copy)
     <>$ capt_arg_payload $+ capt_arg_payload $--> va_copy
   ; +BuiltinDecl.(match_builtin __builtin_va_arg) <>$ capt_arg_payload $--> va_arg
-  ; +match_regexp_opt Config.pulse_model_free_pattern <>$ capt_arg $+...$--> free
+  ; +match_regexp_opt Config.pulse_model_free_pattern &::.*++> free_from_list
   ; -"realloc" <>$ capt_arg $+ capt_exp $--> realloc ~null_case:true
   ; +match_regexp_opt Config.pulse_model_realloc_pattern
     <>$ capt_arg $+ capt_exp $+...$--> custom_realloc ~null_case:true
@@ -1898,6 +1913,6 @@ let matchers : matcher list =
       ; +map_context_tenv PatternMatch.ObjectiveC.is_core_foundation_create_or_copy
         &--> custom_alloc_not_null "CFCreate/Copy"
       ; +BuiltinDecl.(match_builtin malloc_no_fail) <>$ capt_exp $--> malloc ~null_case:false
-      ; +match_regexp_opt Config.pulse_model_alloc_pattern &--> custom_alloc_not_null "custom alloc"
-      ]
+      ; +match_regexp_opt Config.pulse_model_alloc_pattern
+        &::.*--> custom_alloc_not_null "custom alloc" ]
     |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist) )
