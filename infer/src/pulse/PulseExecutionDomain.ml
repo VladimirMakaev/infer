@@ -21,12 +21,61 @@ type conditional_manifest_report =
   ; trace_to_issue: Trace.t }
 [@@deriving equal, compare, yojson_of]
 
+(* Why a path stopped, and where. By the time a path becomes [ExitProgram] the call that ended it
+   is gone, so this is the only place the information survives.
+
+   [Fatal] is a crash the program chose: an assert, a CHECK, a fatal log. [NormalExit] is an
+   orderly end -- [exit], [_exit], a thread exit -- which is not a defect. [UnknownExit] is any
+   other [noreturn] callee, whose intent its name does not tell us; a rule that reports on fatal
+   paths must stay silent on those rather than guess. *)
+type exit_kind = Fatal | NormalExit | UnknownExit [@@deriving equal, compare, yojson_of]
+
+type exit_info =
+  { location: Location.t  (** the call that ended the path, not the procedure's own exit node *)
+  ; kind: exit_kind
+  ; fatal_callee: Procname.t option
+        (** the callee that ended it, when one is known: a trace into it is what makes a report
+            about an abort readable. [None] for an exit the frontend produced without a call. *) }
+[@@deriving equal, compare, yojson_of]
+
+let pp_exit_kind fmt = function
+  | Fatal ->
+      F.pp_print_string fmt "Fatal"
+  | NormalExit ->
+      F.pp_print_string fmt "NormalExit"
+  | UnknownExit ->
+      F.pp_print_string fmt "UnknownExit"
+
+
+(* Ends the thread or the process in an orderly way: not a defect, and not something a
+   fatal-path rule may report. These are the standard C and POSIX spellings. *)
+let is_orderly_exit procname =
+  List.mem
+    ["exit"; "_exit"; "_Exit"; "quick_exit"; "pthread_exit"; "thrd_exit"]
+    (Procname.get_method procname) ~equal:String.equal
+
+
+(* Classify a [[noreturn]] callee that has no model.
+
+   The rule is generic, and deliberately carries no list of names to recognise as fatal. A
+   function declared [[noreturn]] that is not one of the orderly exits above does not return and
+   does not exit: it crashes, and that is true of a platform assert ([__assert_fail],
+   [__assert2], [__android_log_assert]), of a fatal logger, and of a project's own
+   [[noreturn]] check helper alike, without Infer having to know any of their names. Functions
+   that abort WITHOUT being [[noreturn]] never reach here -- the user names them in
+   [--pulse-model-abort], and that model declares [Fatal] where it is registered.
+
+   Two shapes are classified fatal here that are not crashes: a [[noreturn]] function that
+   throws, and one that loops forever. Both are rare, and both cost precision in a later rule
+   rather than correctness here. *)
+let exit_kind_of_no_return_callee procname = if is_orderly_exit procname then NormalExit else Fatal
+
 (* The type variable is needed to distinguish summaries from plain states.
 
    Some of the variants have summary-typed states instead of plain states, to ensure we have
    normalized them and don't need to normalize them again. *)
 type stopped_execution =
-  | ExitProgram of AbductiveDomain.Summary.t
+  | ExitProgram of {astate: AbductiveDomain.Summary.t; exit: exit_info}
   | AbortProgram of
       {astate: AbductiveDomain.Summary.t; diagnostic: Diagnostic.t; trace_to_issue: Trace.t}
   | LatentAbortProgram of {astate: AbductiveDomain.Summary.t; latent_issue: LatentIssue.t}
@@ -52,7 +101,7 @@ type t = AbductiveDomain.t base_t
 let continue astate = ContinueProgram astate
 
 let summary_of_stopped_execution = function
-  | ExitProgram astate
+  | ExitProgram {astate}
   | AbortProgram {astate}
   | LatentAbortProgram {astate}
   | LatentInvalidAccess {astate}
@@ -66,7 +115,11 @@ let leq_stopped_execution ~lhs ~rhs =
   ||
   match (lhs, rhs) with
   | AbortProgram {astate= astate1}, AbortProgram {astate= astate2}
-  | ExitProgram astate1, ExitProgram astate2 ->
+  | ExitProgram {astate= astate1}, ExitProgram {astate= astate2} ->
+      (* deliberately NOT comparing [exit]: subsumption decides which disjuncts merge, so making
+         it finer would grow summaries and spend disjunct budget, which changes reports on
+         programs that have nothing to do with exits. Two stopped paths with equal states are the
+         same path for every consumer that exists today. *)
       AbductiveDomain.Summary.leq ~lhs:astate1 ~rhs:astate2
   | ( LatentAbortProgram {astate= astate1; latent_issue= issue1}
     , LatentAbortProgram {astate= astate2; latent_issue= issue2} ) ->
@@ -115,8 +168,11 @@ let pp_header kind fmt = function
       let message, _suggestion = Diagnostic.get_message_and_suggestion diagnostic in
       let location = Diagnostic.get_location diagnostic in
       F.fprintf fmt "(%a: %a: %s)" Location.pp location IssueType.pp issue_type message
-  | Stopped (ExitProgram _) ->
-      Pp.with_color kind Orange F.pp_print_string fmt "ExitProgram"
+  | Stopped (ExitProgram {exit= {location; kind= exit_kind; fatal_callee}}) ->
+      Pp.with_color kind Orange F.pp_print_string fmt "ExitProgram" ;
+      F.fprintf fmt "(%a, %a%a)" Location.pp location pp_exit_kind exit_kind
+        (fun fmt -> function None -> () | Some pname -> F.fprintf fmt ", %a" Procname.pp pname)
+        fatal_callee
   | Stopped (LatentAbortProgram {latent_issue}) ->
       Pp.with_color kind Orange F.pp_print_string fmt "LatentAbortProgram" ;
       let diagnostic = LatentIssue.to_diagnostic latent_issue in
@@ -156,7 +212,8 @@ let equal_fast_stopped_execution exec_state1 exec_state2 =
     , AbortProgram {astate= astate2; diagnostic= diagnostic2} ) ->
       (* ignoring traces in [AbortProgram] *)
       phys_equal astate1 astate2 && phys_equal diagnostic1 diagnostic2
-  | ExitProgram astate1, ExitProgram astate2 ->
+  | ExitProgram {astate= astate1}, ExitProgram {astate= astate2} ->
+      (* same reasoning as [leq_stopped_execution] *)
       phys_equal astate1 astate2
   | ( ConditionalManifestIssue {astate= astate1; report= report1}
     , ConditionalManifestIssue {astate= astate2; report= report2} ) ->

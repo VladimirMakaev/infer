@@ -326,7 +326,7 @@ module Syntax : sig
 
     val free : Invalidation.t -> ValueOrigin.t FuncArg.t -> unit model_monad
 
-    val early_exit : model
+    val early_exit : kind:ExecutionDomain.exit_kind -> model
   end
 end
 

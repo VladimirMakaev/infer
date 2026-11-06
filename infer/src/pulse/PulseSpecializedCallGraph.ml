@@ -141,7 +141,7 @@ let get_missed_captures ~get_summary entry_nodes =
     | ContinueProgram summary
     | ExceptionRaised summary
     | Stopped
-        ( ExitProgram summary
+        ( ExitProgram {astate= summary}
         | AbortProgram {astate= summary}
         | LatentAbortProgram {astate= summary}
         | LatentInvalidAccess {astate= summary}

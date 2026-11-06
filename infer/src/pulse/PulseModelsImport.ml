@@ -161,9 +161,18 @@ module Basic = struct
     (astate, (value, hist))
 
 
-  let early_exit : model_no_non_disj =
-   fun {analysis_data= {proc_desc}; location} astate ->
+  (* [kind] is declared by each model where it is registered rather than inferred from the
+     callee's name here: [abort] and [exit] both arrive through this one function, and the
+     difference between a crash and an orderly exit is a property of the model, not of a
+     string. A new model that stops a path has to answer the question to compile. *)
+  let early_exit ~(kind : ExecutionDomain.exit_kind) : model_no_non_disj =
+   fun {analysis_data= {proc_desc}; location; callee_procname} astate ->
     let open SatUnsat.Import in
+    let exit =
+      { ExecutionDomain.location
+      ; kind
+      ; fatal_callee= (match kind with Fatal -> Some callee_procname | _ -> None) }
+    in
     match
       AbductiveDomain.Summary.of_post (Procdesc.get_attributes proc_desc) location astate
       >>| AccessResult.ignore_leaks >>| AccessResult.of_abductive_summary_result
@@ -173,9 +182,9 @@ module Basic = struct
         SatUnsat.log_unsat unsat_info ;
         []
     | Sat (Ok astate) ->
-        [Ok (Stopped (ExitProgram astate))]
+        [Ok (Stopped (ExitProgram {astate; exit}))]
     | Sat (Recoverable (astate, errors)) ->
-        [Recoverable (Stopped (ExitProgram astate), errors)]
+        [Recoverable (Stopped (ExitProgram {astate; exit}), errors)]
     | Sat (FatalError _ as err) ->
         [err]
 
@@ -187,7 +196,10 @@ module Basic = struct
       (attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor)
       && Option.equal Bool.equal attrs.cpp_constructor_is_nothrow (Some false)
     then [Ok (ExceptionRaised astate)]
-    else early_exit model_data astate
+    else
+      (* a C++ constructor that throws: the path ends, but by an exception rather than a
+            crash, so it is not a fatal exit *)
+      early_exit ~kind:UnknownExit model_data astate
 
 
   let unreachable : model_no_non_disj = fun _ _astate -> []
@@ -513,8 +525,8 @@ module Basic = struct
     ; -"assert" <>$ capt_arg $--> assert_
     ; +BuiltinDecl.(match_builtin objc_cpp_throw) <>--> cpp_constructor_throw
     ; +BuiltinDecl.(match_builtin __cast) <>$ capt_arg_payload $+...$--> id_first_arg ~desc:"cast"
-    ; +BuiltinDecl.(match_builtin abort) <>--> early_exit
-    ; +BuiltinDecl.(match_builtin exit) <>--> early_exit
+    ; +BuiltinDecl.(match_builtin abort) <>--> early_exit ~kind:Fatal
+    ; +BuiltinDecl.(match_builtin exit) <>--> early_exit ~kind:NormalExit
     ; +BuiltinDecl.(match_builtin __get_array_length) <>--> return_unknown_size ~desc:""
     ; +match_regexp_opt Config.pulse_model_return_nonnull
       &::.*--> return_positive ~desc:"modelled as returning not null due to configuration option"

@@ -1142,7 +1142,8 @@ module WeakPtr = struct
      pointer *)
   let to_shared this weak ~desc : model_no_non_disj =
    fun ({path; location} as model_data) astate ->
-    case_split path location weak astate ~expired:(Basic.early_exit model_data)
+    case_split path location weak astate
+      ~expired:(Basic.early_exit ~kind:UnknownExit model_data) (* throws bad_weak_ptr *)
       ~alive:(share_ownership path location ~result:this ~desc)
 end
 

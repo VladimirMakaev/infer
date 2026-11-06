@@ -1092,7 +1092,7 @@ module Syntax = struct
       Basic.free_or_delete `Free invalidation func_arg |> lift_to_monad
 
 
-    let early_exit = Basic.early_exit |> lift_model
+    let early_exit ~kind = Basic.early_exit ~kind |> lift_model
   end
 end
 

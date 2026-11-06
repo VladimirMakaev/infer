@@ -169,7 +169,7 @@ let is_modeled_pure tenv pname =
 let extract_impurity tenv pname formals (exec_state : ExecutionDomain.summary) : ImpurityDomain.t =
   let astate, exited =
     match exec_state with
-    | Stopped (ExitProgram astate) ->
+    | Stopped (ExitProgram {astate}) ->
         (astate, true)
     | ContinueProgram astate | ExceptionRaised astate ->
         (astate, false)
