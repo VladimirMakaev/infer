@@ -48,3 +48,58 @@ void plain_malloc_ok(void) {
   int* p = (int*)malloc(sizeof(int));
   free(p);
 }
+
+// ---------------- a matching callee that takes no arguments ----------------
+//
+// A free with no pointer argument frees nothing, so matching it buys nothing -- but a matched
+// model REPLACES the call, so answering with a no-op loses whatever the callee does. These pin
+// that a zero-arity callee keeps its body: the pair differs only in which value the branch
+// tests, so if the body were dropped both verdicts would flip rather than one of them changing.
+
+namespace hw {
+int g_state;
+void close_all_sessions() { g_state = 42; }
+template <typename T>
+void close_all() {
+  g_state = 42;
+}
+} // namespace hw
+
+// unreachable: close_all_sessions set g_state to 42
+void zero_arity_body_survives_ok() {
+  hw::g_state = 0;
+  hw::close_all_sessions();
+  if (hw::g_state == 0) {
+    int* p = nullptr;
+    *p = 1;
+  }
+}
+
+// reachable, and the positive control for the same shape
+void zero_arity_control_bad() {
+  hw::g_state = 0;
+  hw::close_all_sessions();
+  if (hw::g_state == 42) {
+    int* p = nullptr;
+    *p = 1;
+  }
+}
+
+// the same pair through a templated callee, which takes the same matcher path
+void tmpl_zero_arity_body_survives_ok() {
+  hw::g_state = 0;
+  hw::close_all<int>();
+  if (hw::g_state == 0) {
+    int* p = nullptr;
+    *p = 1;
+  }
+}
+
+void tmpl_zero_arity_control_bad() {
+  hw::g_state = 0;
+  hw::close_all<int>();
+  if (hw::g_state == 42) {
+    int* p = nullptr;
+    *p = 1;
+  }
+}
