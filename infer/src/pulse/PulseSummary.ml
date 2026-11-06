@@ -14,7 +14,18 @@ open PulseOperationResult.Import
 
 type pre_post_list = ExecutionDomain.summary list [@@deriving yojson_of]
 
-type summary = {pre_post_list: pre_post_list; non_disj: NonDisjDomain.Summary.t}
+(* "calling this exits fatally iff the value [deref_depth] dereferences into formal
+   [formal_index] is null". [IsNull] is the only condition E9 needs; it is a variant so a later
+   contract extends a match rather than silently redefining the field. *)
+type exit_condition_kind = IsNull [@@deriving equal, compare, yojson_of]
+
+type exit_condition = {formal_index: int; deref_depth: int; condition: exit_condition_kind}
+[@@deriving equal, compare, yojson_of]
+
+type summary =
+  { pre_post_list: pre_post_list
+  ; non_disj: NonDisjDomain.Summary.t
+  ; exit_conditions: exit_condition list }
 [@@deriving yojson_of]
 
 type t =
@@ -38,7 +49,13 @@ let pp_pre_post_list print_kind fmt ~pp_specialized_name pre_posts =
   F.close_box ()
 
 
-let pp_summary print_kind fmt ~pp_specialized_name {pre_post_list; non_disj} =
+let pp_exit_condition fmt {formal_index; deref_depth; condition= IsNull} =
+  F.fprintf fmt "formal#%d%s is null" formal_index (String.make deref_depth '*')
+
+
+let pp_summary print_kind fmt ~pp_specialized_name {pre_post_list; non_disj; exit_conditions} =
+  if not (List.is_empty exit_conditions) then
+    F.fprintf fmt "ExitConditions: [%a]@\n" (Pp.seq ~sep:", " pp_exit_condition) exit_conditions ;
   F.fprintf fmt "%a%a"
     (pp_pre_post_list print_kind ~pp_specialized_name)
     pre_post_list
@@ -83,16 +100,43 @@ let pp pp_env proc_name fmt ({failed} as summary) =
     failed
 
 
-let add_disjunctive_pre_post pre_post {pre_post_list; non_disj} =
-  {pre_post_list= pre_post :: pre_post_list; non_disj}
+let add_disjunctive_pre_post pre_post {pre_post_list; non_disj; exit_conditions} =
+  (* the added post is not one [exit_conditions] was computed from, so the contract no longer
+     describes this summary; dropping it is the only answer that cannot be wrong *)
+  ignore exit_conditions ;
+  {pre_post_list= pre_post :: pre_post_list; non_disj; exit_conditions= []}
 
 
-let empty = {pre_post_list= []; non_disj= NonDisjDomain.Summary.bottom}
+let empty = {pre_post_list= []; non_disj= NonDisjDomain.Summary.bottom; exit_conditions= []}
 
 let join summary1 summary2 =
   let pre_post_list = summary1.pre_post_list @ summary2.pre_post_list in
   let non_disj = NonDisjDomain.Summary.join summary1.non_disj summary2.non_disj in
-  {pre_post_list; non_disj}
+  (* A condition has to hold of EVERY fatal disjunct, so where both sides contribute fatal
+     disjuncts only a condition both promise survives. A side with NO fatal disjunct constrains
+     nothing and must not erase the other's conditions -- joining the exit-node summaries with
+     the exception-sink ones goes through here, and the sink side is usually [empty], so a plain
+     intersection silently discarded every condition. *)
+  let has_fatal {pre_post_list} =
+    List.exists pre_post_list ~f:(function
+      | ExecutionDomain.Stopped (ExitProgram {exit= {kind= Fatal}}) ->
+          true
+      | _ ->
+          false )
+  in
+  let exit_conditions =
+    match (has_fatal summary1, has_fatal summary2) with
+    | true, true ->
+        List.filter summary1.exit_conditions ~f:(fun c ->
+            List.mem summary2.exit_conditions c ~equal:equal_exit_condition )
+    | true, false ->
+        summary1.exit_conditions
+    | false, true ->
+        summary2.exit_conditions
+    | false, false ->
+        []
+  in
+  {pre_post_list; non_disj; exit_conditions}
 
 
 let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis_data) ~ignore_leaks
@@ -241,6 +285,97 @@ let force_exit_program ~ignore_leaks ~exit analysis_data path post =
     ~exception_raised:(fun astate -> Stopped (ExitProgram {astate; exit}))
 
 
+(* A helper's contract for a caller: "you exit fatally here if this argument is null".
+
+   The condition is keyed on a formal INDEX plus a DEREFERENCE DEPTH, not on a formal alone. A
+   plain pointer parameter is constrained at depth 1, but the shipped precondition macros take a
+   reference parameter and constrain its POINTEE, which is depth 2. Keyed on the index alone the
+   reference case silently never matches, which is the FP-free but useless answer.
+
+   [IsNull] is the only condition E9 needs. It is a variant rather than a bare flag so that a
+   later slice adding, say, a negative-return contract extends a match instead of changing the
+   meaning of the existing field. *)
+let max_deref_depth = 2
+
+(* the value reached by dereferencing [pvar] [depth] times in a disjunct's PRE, if the pre
+   reaches that far: the pre only contains what the callee actually touched.
+
+   Edge targets come back needing canonicalisation, so each step goes through the summary's own
+   equality relation; comparing a non-canonical value against the formula would silently answer
+   "unconstrained" for a value the formula does in fact pin down. *)
+let value_at_formal_in_pre (astate : AbductiveDomain.Summary.t) pvar depth =
+  let as_astate = (astate :> AbductiveDomain.t) in
+  let canon v = AbductiveDomain.CanonValue.canon as_astate v in
+  let pre = AbductiveDomain.Summary.get_pre astate in
+  let rec walk v n =
+    if n <= 0 then Some (AbductiveDomain.CanonValue.downcast v)
+    else
+      match BaseMemory.find_edge_opt v Dereference pre.BaseDomain.heap with
+      | Some (v', _) ->
+          walk (canon v') (n - 1)
+      | None ->
+          None
+  in
+  BaseStack.find_opt (Var.of_pvar pvar) pre.BaseDomain.stack
+  |> Option.bind ~f:(fun vo -> walk (canon (ValueOrigin.value vo)) depth)
+
+
+(* [phi] forces [v] to be null. Asked by identity with the formula's own representative for the
+   constant 0: [absval_of_int] is documented to return the same abstract variable each time the
+   same integer is queried, so "v IS the zero variable" is exactly the fact [term_eqs: 0=v] holds.
+
+   Measured alternatives that all answer FALSE on a state that prints {v = 0}: is_known_zero
+   (reads only intervals and linear equalities), PulseArithmetic.is_known_zero, and pruning the
+   negation and looking for Unsat (the prunes do not re-solve against term_eqs or atoms). Pulse's
+   formula is deliberately incomplete for speed, so "the state prints it" does not imply any
+   given query sees it.
+
+   Weakening this to "not known to be non-null" would be wrong in the other direction: a path
+   that never constrained the value at all would pass, and every helper would look
+   discriminating. *)
+let implies_null astate v =
+  let phi = AbductiveDomain.Summary.get_path_condition astate in
+  let phi, zero = Formula.absval_of_int phi IntLit.zero in
+  AbstractValue.equal (Formula.get_var_repr phi v) (Formula.get_var_repr phi zero)
+
+
+let exit_conditions_of_posts proc_desc pre_post_list =
+  let fatal_pres =
+    List.filter_map pre_post_list ~f:(function
+      | ExecutionDomain.Stopped (ExitProgram {astate; exit= {kind= Fatal}}) ->
+          Some astate
+      | _ ->
+          None )
+  in
+  (* nothing to promise if the callee never exits fatally *)
+  if List.is_empty fatal_pres then []
+  else
+    let continue_pres =
+      List.filter_map pre_post_list ~f:(function
+        | ExecutionDomain.ContinueProgram astate ->
+            Some astate
+        | _ ->
+            None )
+    in
+    let holds_in astate pvar depth ~f =
+      match value_at_formal_in_pre astate pvar depth with None -> false | Some v -> f astate v
+    in
+    List.concat_mapi (Procdesc.get_pvar_formals proc_desc) ~f:(fun formal_index (pvar, _typ) ->
+        List.filter_map
+          (List.range 1 (max_deref_depth + 1))
+          ~f:(fun deref_depth ->
+            (* EVERY fatal exit must be conditioned on this value being null, and at least one
+               surviving path must prove it is not: the first makes the condition necessary, the
+               second makes it discriminating rather than "this helper always aborts" *)
+            if
+              List.for_all fatal_pres ~f:(fun astate ->
+                  holds_in astate pvar deref_depth ~f:implies_null )
+              && List.exists continue_pres ~f:(fun astate ->
+                  holds_in astate pvar deref_depth ~f:(fun astate v -> not (implies_null astate v)) )
+            then Some {formal_index; deref_depth; condition= IsNull}
+            else None ) )
+
+
 let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specialization location posts
     non_disj =
   let pre_post_list =
@@ -255,7 +390,8 @@ let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specializati
         |> SatUnsat.sat )
   in
   { pre_post_list
-  ; non_disj= NonDisjDomain.make_summary (Procdesc.get_attributes proc_desc) location non_disj }
+  ; non_disj= NonDisjDomain.make_summary (Procdesc.get_attributes proc_desc) location non_disj
+  ; exit_conditions= exit_conditions_of_posts proc_desc pre_post_list }
 
 
 let mk_objc_self_pvar proc_name = Pvar.mk Mangled.self proc_name

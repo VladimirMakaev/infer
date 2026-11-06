@@ -11,7 +11,19 @@ open PulseDomainInterface
 
 type pre_post_list = ExecutionDomain.summary list [@@deriving yojson_of]
 
-type summary = {pre_post_list: pre_post_list; non_disj: NonDisjDomain.Summary.t}
+type exit_condition_kind = IsNull [@@deriving equal, compare, yojson_of]
+
+type exit_condition = {formal_index: int; deref_depth: int; condition: exit_condition_kind}
+[@@deriving equal, compare, yojson_of]
+
+type summary =
+  { pre_post_list: pre_post_list
+  ; non_disj: NonDisjDomain.Summary.t
+  ; exit_conditions: exit_condition list
+        (** what a caller may conclude about this procedure: it exits fatally exactly when the value
+            [deref_depth] dereferences into formal [formal_index] is null. The depth is what makes a
+            reference parameter's pointee expressible; keyed on the formal alone, the shipped
+            precondition macros would never match. *) }
 [@@deriving yojson_of]
 
 type t =
