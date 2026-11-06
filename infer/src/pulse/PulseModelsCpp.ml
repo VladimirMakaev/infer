@@ -2413,9 +2413,9 @@ module Vector = struct
             if Option.value attrs.cpp_constructor_is_nothrow ~default:false then
               List.concat_map outcomes ~f:(function
                 | Ok (ExceptionRaised astate) ->
-                    Basic.early_exit model_data astate
+                    Basic.early_exit ~kind:UnknownExit model_data astate
                 | Recoverable (ExceptionRaised astate, errors) ->
-                    Basic.early_exit model_data astate
+                    Basic.early_exit ~kind:UnknownExit model_data astate
                     |> List.map ~f:(fun state -> PulseResult.append_errors errors state)
                 | state ->
                     [state] )
@@ -3836,7 +3836,7 @@ module AbortIfFieldEquals = struct
           ret arg
     in
     disj
-      [ prune_eq_int field_value value @@> lift_to_monad Basic.early_exit
+      [ prune_eq_int field_value value @@> lift_to_monad (Basic.early_exit ~kind:Fatal)
       ; (let* () = prune_ne_int field_value value in
          let* ret = fresh () in
          assign_ret ret ) ]
@@ -3934,7 +3934,9 @@ module ReturnConstant = struct
 end
 
 let abort_matchers : matcher list =
-  get_cpp_matchers ~model:(fun _ -> Basic.early_exit) Config.pulse_model_abort
+  (* --pulse-model-abort names functions that abort but are not [[noreturn]], so the only
+     thing that makes them fatal is being on that list *)
+  get_cpp_matchers ~model:(fun _ -> Basic.early_exit ~kind:Fatal) Config.pulse_model_abort
   |> List.map ~f:(ProcnameDispatcher.Call.map_matcher ~f:lift_model)
 
 
@@ -4601,7 +4603,9 @@ let log_message_fatal severity : model =
   let fatal = IntLit.of_int 6 in
   start_model
   @@ fun () ->
-  disj [prune_eq_int severity fatal @@> lift_to_monad Basic.early_exit; prune_ne_int severity fatal]
+  disj
+    [ prune_eq_int severity fatal @@> lift_to_monad (Basic.early_exit ~kind:Fatal)
+    ; prune_ne_int severity fatal ]
 
 
 let simple_matchers =

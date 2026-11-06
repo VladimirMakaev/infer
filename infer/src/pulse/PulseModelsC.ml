@@ -326,7 +326,12 @@ let thread_exit ~desc retval : model =
     Basic.unknown_call desc [retval] model_data astate
     |> List.filter_map ~f:(fun result ->
         (let+ exec = result in
-         PulseSummary.force_exit_program ~ignore_leaks:false analysis_data path location exec
+         PulseSummary.force_exit_program ~ignore_leaks:false
+           ~exit:
+             { ExecutionDomain.location
+             ; kind= NormalExit (* ends this thread in an orderly way *)
+             ; fatal_callee= None }
+           analysis_data path location exec
          |> SatUnsat.sat )
         |> PulseResult.of_some )
   in
@@ -1778,12 +1783,12 @@ let matchers : matcher list =
   ; ( -"ioctl" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg
     $++$--> fun fd request args -> use_fd fd (request :: args) )
   ; -"localtime" <>$ any_arg $--> start_model @@ null_or_nonneg_non_det_ret
-  ; -"longjmp" <>$ any_arg $+ any_arg $--> Basic.early_exit
+  ; -"longjmp" <>$ any_arg $+ any_arg $--> Basic.early_exit ~kind:UnknownExit
   ; ( -"lseek" <>$ capt_arg_of_prim_typ StdTyp.int $+ capt_arg $+ capt_arg
     $--> fun fd offset whence -> use_fd fd [offset; whence] )
-  ; -"luaL_typeerror" <>$ any_arg $+ any_arg $+ any_arg $--> Basic.early_exit
-  ; -"luaL_error" <>$ any_arg $+...$--> Basic.early_exit
-  ; -"lua_error" <>$ any_arg $--> Basic.early_exit
+  ; -"luaL_typeerror" <>$ any_arg $+ any_arg $+ any_arg $--> Basic.early_exit ~kind:UnknownExit
+  ; -"luaL_error" <>$ any_arg $+...$--> Basic.early_exit ~kind:UnknownExit
+  ; -"lua_error" <>$ any_arg $--> Basic.early_exit ~kind:UnknownExit
   ; -"memchr" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg $--> memchr
   ; -"memcmp" <>$ capt_arg_payload $+ capt_arg_payload $+ any_arg
     $--> compose2 valid_args2 (ignore_args2 non_det_ret)

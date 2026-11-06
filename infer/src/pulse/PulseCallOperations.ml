@@ -757,8 +757,10 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
                       (ConditionalManifestIssue
                          {astate= astate_summary; report= {report with diagnostic; trace_to_issue}}
                       ) ) )
-          | Stopped (ExitProgram _) ->
-              Sat (Ok (Stopped (ExitProgram astate_summary)))
+          | Stopped (ExitProgram {exit}) ->
+              (* keep the CALLEE's exit: the caller did not exit, its callee did, and the
+                 location and kind of that exit are what a report about this path has to name *)
+              Sat (Ok (Stopped (ExitProgram {astate= astate_summary; exit})))
           | Stopped (LatentAbortProgram {latent_issue}) -> (
               let open SatUnsat.Import in
               let latent_issue =
@@ -1161,8 +1163,8 @@ let add_need_dynamic_type_specialization needs execution_states =
         | Stopped exec ->
             Stopped
               ( match exec with
-              | ExitProgram summary ->
-                  ExitProgram (update_summary summary)
+              | ExitProgram {astate= summary; exit} ->
+                  ExitProgram {astate= update_summary summary; exit}
               | AbortProgram {astate= summary; diagnostic; trace_to_issue} ->
                   AbortProgram {astate= update_summary summary; diagnostic; trace_to_issue}
               | LatentAbortProgram latent_abort_program ->

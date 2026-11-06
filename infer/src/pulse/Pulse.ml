@@ -1561,9 +1561,19 @@ module PulseTransferFunctions = struct
     in
     ( ( if Option.exists callee_pname ~f:IRAttributes.is_no_return then
           let ignore_leaks = not (Option.exists callee_pname ~f:is_thread_exit) in
+          (* a [[noreturn]] callee with no model: its name is all we have to go on, and a name we
+             do not recognise is [UnknownExit] rather than a guess *)
+          let exit =
+            { ExecutionDomain.location= call_loc
+            ; kind=
+                Option.value_map callee_pname ~default:ExecutionDomain.UnknownExit
+                  ~f:ExecutionDomain.exit_kind_of_no_return_callee
+            ; fatal_callee= callee_pname }
+          in
           List.filter_map exec_states_res ~f:(fun exec_state_res ->
               (let+ exec_state = exec_state_res in
-               PulseSummary.force_exit_program ~ignore_leaks analysis_data path call_loc exec_state
+               PulseSummary.force_exit_program ~ignore_leaks ~exit analysis_data path call_loc
+                 exec_state
                |> SatUnsat.sat )
               |> PulseResult.of_some )
         else exec_states_res )
