@@ -209,8 +209,8 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
              (AbortProgram
                 {astate; diagnostic= report.diagnostic; trace_to_issue= report.trace_to_issue} ) ) )
       else Sat (Stopped (ConditionalManifestIssue {astate; report}))
-  | Stopped (ExitProgram astate) ->
-      Sat (Stopped (ExitProgram astate))
+  | Stopped (ExitProgram {astate; exit}) ->
+      Sat (Stopped (ExitProgram {astate; exit}))
   | Stopped (LatentAbortProgram {astate; latent_issue}) ->
       Sat (Stopped (LatentAbortProgram {astate; latent_issue}))
   | Stopped (LatentInvalidAccess {astate; address; must_be_valid; calling_context}) ->
@@ -235,10 +235,10 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
              ) ) )
 
 
-let force_exit_program ~ignore_leaks analysis_data path post =
+let force_exit_program ~ignore_leaks ~exit analysis_data path post =
   exec_summary_of_post_common analysis_data None path post ~ignore_leaks
-    ~continue_program:(fun astate -> Stopped (ExitProgram astate))
-    ~exception_raised:(fun astate -> Stopped (ExitProgram astate))
+    ~continue_program:(fun astate -> Stopped (ExitProgram {astate; exit}))
+    ~exception_raised:(fun astate -> Stopped (ExitProgram {astate; exit}))
 
 
 let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specialization location posts

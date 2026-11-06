@@ -37,6 +37,7 @@ val join : summary -> summary -> summary
 
 val force_exit_program :
      ignore_leaks:bool
+  -> exit:ExecutionDomain.exit_info
   -> t InterproceduralAnalysis.t
   -> PathContext.t
   -> Location.t
