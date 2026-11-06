@@ -1,0 +1,2 @@
+codetoanalyze/cpp/pulse-failure-outcomes/fatal_on_nullable.cpp, unchecked_deref_control_bad, 1, NULLPTR_DEREFERENCE, no_bucket, ERROR, [in call to `DesktopView::GetPanelAppHost` (modelled),is assigned to the null pointer,invalid access occurs here]
+codetoanalyze/cpp/pulse-failure-outcomes/fatal_on_nullable.cpp, unchecked_deref_control2_bad, 1, NULLPTR_DEREFERENCE, no_bucket, ERROR, [in call to `mr::VulkanContextProvider::rhi` (modelled),is assigned to the null pointer,invalid access occurs here]

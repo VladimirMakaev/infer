@@ -143,7 +143,7 @@ module Basic : sig
     -> AbductiveDomain.t
     -> (AbductiveDomain.t * (AbstractValue.t * ValueHistory.t)) PulseOperationResult.t
 
-  val early_exit : model_no_non_disj
+  val early_exit : kind:ExecutionDomain.exit_kind -> model_no_non_disj
 
   val return_int : desc:string -> int64 -> model_no_non_disj
 

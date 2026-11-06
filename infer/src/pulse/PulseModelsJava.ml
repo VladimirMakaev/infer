@@ -1083,7 +1083,7 @@ let matchers : matcher list =
     $+...$--> (fun src dest -> Basic.shallow_copy_model "System.arraycopy" dest src)
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements_lang "System")
-    &:: "exit" <>--> Basic.early_exit |> with_non_disj
+    &:: "exit" <>--> Basic.early_exit ~kind:NormalExit |> with_non_disj
   ; +map_context_tenv PatternMatch.Java.implements_collection
     &:: "<init>" <>$ capt_arg_payload
     $--> Collection.init ~desc:"Collection.init()"
@@ -1241,15 +1241,17 @@ let matchers : matcher list =
   ; -"kotlin.jvm.internal.Intrinsics" &:: "checkNotNull" $ capt_arg_payload
     $+...$--> KotlinIntrinsics.check_not_null |> with_non_disj
   ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUninitializedPropertyAccessException"
-    &--> Basic.early_exit |> with_non_disj
-  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUninitializedProperty" &--> Basic.early_exit
+    &--> Basic.early_exit ~kind:Fatal |> with_non_disj
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUninitializedProperty"
+    &--> Basic.early_exit ~kind:Fatal |> with_non_disj
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUndefinedForReified"
+    &--> Basic.early_exit ~kind:Fatal |> with_non_disj
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwAssert" &--> Basic.early_exit ~kind:Fatal
     |> with_non_disj
-  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwUndefinedForReified" &--> Basic.early_exit
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwIllegalArgument" &--> Basic.early_exit ~kind:Fatal
     |> with_non_disj
-  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwAssert" &--> Basic.early_exit |> with_non_disj
-  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwIllegalArgument" &--> Basic.early_exit
+  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwIllegalState" &--> Basic.early_exit ~kind:Fatal
     |> with_non_disj
-  ; -"kotlin.jvm.internal.Intrinsics" &:: "throwIllegalState" &--> Basic.early_exit |> with_non_disj
   ; -"java.lang.Object" &:: "<init>" &--> Basic.skip |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements_lang "Object")
     &:: "equals"
