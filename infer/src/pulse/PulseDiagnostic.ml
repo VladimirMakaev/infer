@@ -213,6 +213,8 @@ type t =
   | ConstRefableParameter of {param: Var.t; typ: Typ.t; location: Location.t}
   | DynamicTypeMismatch of {location: Location.t}
   | ErlangError of ErlangError.t
+  | FatalOnNullableReturn of
+      {origin: Attribute.FailureOrigin.t; exit_location: Location.t; fatal_callee: Procname.t option}
   | InfiniteLoopError of {location: Location.t}
   | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
   | MissingNullabilityAnnotation of {callee: Procname.t; location: Location.t}
@@ -281,6 +283,10 @@ let pp fmt diagnostic =
   | HackCannotInstantiateAbstractClass {type_name; trace} ->
       F.fprintf fmt "HackCannotInstantiateAbstractClass {@[type_name:%a;@;trace:%a@]" Typ.Name.pp
         type_name (Trace.pp ~pp_immediate) trace
+  | FatalOnNullableReturn {origin; exit_location; fatal_callee} ->
+      F.fprintf fmt "FatalOnNullableReturn {@[origin=%a;@;exit_location=%a;@;fatal_callee=%a@]}"
+        Attribute.FailureOrigin.pp origin Location.pp exit_location (Pp.option Procname.pp)
+        fatal_callee
   | MissingNullabilityAnnotation {callee; location} ->
       F.fprintf fmt "MissingNullabilityAnnotation {@[callee=%a;@;location=%a@]}" Procname.pp callee
         Location.pp location
@@ -403,6 +409,10 @@ let get_location = function
       (* report at the call site that triggers the bug *) location
   | ResourceLeak {resource= Awaitable; allocation_trace} ->
       Trace.get_outer_location allocation_trace
+  | FatalOnNullableReturn {origin= {location}} ->
+      (* the call that produced the failure value, NOT the exit: a helper-mediated crash exits
+         inside the callee, and a report must land in the procedure being analysed *)
+      location
   | ConfigUsage {location}
   | ConstRefableParameter {location}
   | MissingNullabilityAnnotation {location}
@@ -458,6 +468,7 @@ let aborts_execution (path : PathContext.t) = function
   | ConfigUsage _
   | ConstRefableParameter _
   | DynamicTypeMismatch _
+  | FatalOnNullableReturn _
   | HackCannotInstantiateAbstractClass _
   | MissingNullabilityAnnotation _
   | MutualRecursionCycle _
@@ -811,6 +822,18 @@ let get_message_and_suggestion diagnostic =
       F.asprintf "no matching branch in try at %a" Location.pp location |> no_suggestion
   | InfiniteLoopError {location} ->
       F.asprintf "potential infinite loop detected at %a" Location.pp location |> no_suggestion
+  | FatalOnNullableReturn {origin= {callee}; exit_location; fatal_callee} ->
+      let pp_through fmt = function
+        | None ->
+            ()
+        | Some fatal ->
+            F.fprintf fmt ", in `%a`" Procname.pp fatal
+      in
+      ( F.asprintf
+          "`%a` can return null to report a failure, and that null value is what ends the \
+           program            at %a%a."
+          Procname.pp callee Location.pp_line exit_location pp_through fatal_callee
+      , Some "Handle the failure instead of asserting that it cannot happen." )
   | MissingNullabilityAnnotation {callee} ->
       SwiftObjCNullabilityIssue.message callee |> no_suggestion
   | HackCannotInstantiateAbstractClass {type_name; trace} ->
@@ -1342,6 +1365,17 @@ let get_trace = function
           [] ]
   | InfiniteLoopError {location} ->
       [Errlog.make_trace_element 0 location "in loop" []]
+  | FatalOnNullableReturn {origin= {callee; location}; exit_location; fatal_callee} ->
+      [ Errlog.make_trace_element 0 location
+          (F.asprintf "`%a` returns null here to report a failure" Procname.pp callee)
+          []
+      ; Errlog.make_trace_element 0 exit_location
+          ( match fatal_callee with
+          | Some fatal ->
+              F.asprintf "the program ends here, in `%a`" Procname.pp fatal
+          | None ->
+              "the program ends here" )
+          [] ]
   | MissingNullabilityAnnotation {callee; location} ->
       [ Errlog.make_trace_element 0 location
           (F.asprintf "call to unannotated Objective-C method `%a` here" Procname.pp callee)
@@ -1366,6 +1400,8 @@ let get_issue_type ~latent issue_type =
       IssueType.pulse_dynamic_type_mismatch
   | MissingNullabilityAnnotation _, false ->
       IssueType.missing_nullability_annotation_pulse
+  | FatalOnNullableReturn _, false ->
+      IssueType.pulse_fatal_on_nullable_return
   | ErlangError (Badarg _), _ ->
       IssueType.bad_arg ~latent
   | ErlangError (Badgenerator _), _ ->
@@ -1466,6 +1502,7 @@ let get_issue_type ~latent issue_type =
   | ( ( ConfigUsage _
       | ConstRefableParameter _
       | DynamicTypeMismatch _
+      | FatalOnNullableReturn _
       | HackCannotInstantiateAbstractClass _
       | MissingNullabilityAnnotation _
       | ReadonlySharedPtrParameter _

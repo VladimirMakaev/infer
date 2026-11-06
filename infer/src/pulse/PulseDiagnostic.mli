@@ -99,6 +99,8 @@ type t =
   | ConstRefableParameter of {param: Var.t; typ: Typ.t; location: Location.t}
   | DynamicTypeMismatch of {location: Location.t}
   | ErlangError of ErlangError.t
+  | FatalOnNullableReturn of
+      {origin: Attribute.FailureOrigin.t; exit_location: Location.t; fatal_callee: Procname.t option}
   | InfiniteLoopError of {location: Location.t}
   | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
   | MissingNullabilityAnnotation of {callee: Procname.t; location: Location.t}

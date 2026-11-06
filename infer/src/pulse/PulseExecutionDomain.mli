@@ -23,7 +23,15 @@ type conditional_manifest_report =
 
 type exit_kind = Fatal | NormalExit | UnknownExit [@@deriving equal, compare, yojson_of]
 
-type exit_info = {location: Location.t; kind: exit_kind; fatal_callee: Procname.t option}
+type exit_info =
+  { location: Location.t
+  ; kind: exit_kind
+  ; fatal_callee: Procname.t option
+  ; failure_origins: (Attribute.FailureOriginSet.t[@yojson.opaque])
+        (** the calls whose documented failure value was null when this path ended. Snapshotted here
+            because the state is summarised the moment it becomes an exit, and summarising discards
+            the attribute: see [PulseFailureOrigins]. Filled in by whoever turns a state into an
+            exit, so a construction site may leave it empty. *) }
 [@@deriving equal, compare, yojson_of]
 
 val exit_kind_of_no_return_callee : Procname.t -> exit_kind

@@ -819,6 +819,16 @@ let pulse_dynamic_type_mismatch =
     ~user_documentation:[%blob "./documentation/issues/PULSE_DYNAMIC_TYPE_MISMATCH.md"]
 
 
+(* DISABLED, and the analysis that produces it is guarded on this field too, not just the report.
+   The test suites run with [--debug-exceptions], which clears [--filtering], so a report-time
+   filter alone would let a disabled type into their expectations. Turn it on with
+   [--enable-issue-type PULSE_FATAL_ON_NULLABLE_RETURN]. *)
+let pulse_fatal_on_nullable_return =
+  register ~category:RuntimeException ~enabled:false ~id:"PULSE_FATAL_ON_NULLABLE_RETURN" Error
+    Pulse ~hum:"Fatal On Nullable Return"
+    ~user_documentation:[%blob "./documentation/issues/PULSE_FATAL_ON_NULLABLE_RETURN.md"]
+
+
 let pulse_transitive_access =
   register ~enabled:true ~category:LogicError ~id:"PULSE_TRANSITIVE_ACCESS" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/PULSE_TRANSITIVE_ACCESS.md"]
