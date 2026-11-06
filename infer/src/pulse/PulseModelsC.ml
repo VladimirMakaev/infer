@@ -330,7 +330,10 @@ let thread_exit ~desc retval : model =
            ~exit:
              { ExecutionDomain.location
              ; kind= NormalExit (* ends this thread in an orderly way *)
-             ; fatal_callee= None }
+             ; fatal_callee= None
+             ; failure_origins=
+                 Attribute.FailureOriginSet.empty
+                 (* [force_exit_program] fills this in from the state it is about to summarise *) }
            analysis_data path location exec
          |> SatUnsat.sat )
         |> PulseResult.of_some )

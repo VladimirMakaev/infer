@@ -102,6 +102,7 @@ let should_report (astate : AbductiveDomain.Summary.t) (diagnostic : Diagnostic.
   | ConfigUsage _
   | ConstRefableParameter _
   | DynamicTypeMismatch _
+  | FatalOnNullableReturn _
   | HackCannotInstantiateAbstractClass _
   | MissingNullabilityAnnotation _
   | MutualRecursionCycle _

@@ -26,6 +26,11 @@ type summary =
             precondition macros would never match. *) }
 [@@deriving yojson_of]
 
+val forces_null : AbductiveDomain.Summary.t -> AbstractValue.t -> bool
+(** does this state's path condition pin [v] to zero? Asked by identity with the formula's own
+    representative for the constant 0, because the direct queries are incomplete: see the
+    implementation for the measured list of what answers false on a state that prints [{v = 0}]. *)
+
 type t =
   { main: summary
   ; specialized: summary Specialization.Pulse.Map.t
