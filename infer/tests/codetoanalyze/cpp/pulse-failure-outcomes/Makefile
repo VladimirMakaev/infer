@@ -9,9 +9,12 @@ TESTS_DIR = ../../..
 CLANG_OPTIONS = -x c++ -std=c++17 -nostdinc++ -isystem$(CLANG_INCLUDES)/c++/v1/ -c
 # The two model options are existing flags, supplied here the way the generated nullable list and
 # the real analyze config supply them, so this suite adds no new user-facing surface.
+# PULSE_FATAL_ON_NULLABLE_RETURN is registered disabled, and the rule that produces it is guarded
+# on the same flag, so it has to be turned on here. --enable-issue-type is an existing option.
 INFER_OPTIONS = \
   --pulse-only --debug-exceptions --no-pulse-force-continue --project-root $(TESTS_DIR) \
   --pulse-report-issues-for-tests \
+  --enable-issue-type PULSE_FATAL_ON_NULLABLE_RETURN \
   --pulse-model-return-nullable-list 'mr::VulkanContextProvider::rhi$$' \
   --pulse-model-return-nullable-list 'DesktopView::GetPanelAppHost$$' \
   --pulse-model-abort 'assertions::AssertHandler::handleAssert'

@@ -11,10 +11,12 @@
 // NULLPTR_DEREFERENCE. The two control functions at the bottom are that dereference, and they are
 // what proves the nullable list below is actually matching.
 //
-// The fatal functions are named FN_ because no slice of this work has landed yet: today every one
-// of them is silent. They are not a list of limitations, they are the acceptance target -- each
-// commit in the chain flips specific names here, and issues.exp records what is true at that
-// commit rather than what is intended.
+// Eight of the nine fatal families now report PULSE_FATAL_ON_NULLABLE_RETURN. That issue type is
+// disabled by default, so the Makefile turns it on with the existing --enable-issue-type; a build
+// without that flag sees only the two NULLPTR_DEREFERENCE controls.
+//
+// The ninth keeps its FN_ marker and its reason is recorded at the function itself. A silence in
+// this file is either a named _ok case or that one FN_, never an unexplained gap.
 //
 // Nullable returns come from --pulse-model-return-nullable-list in the Makefile, which is how the
 // generated list will supply them. Both listed functions are reductions of real crashes:
@@ -119,59 +121,59 @@ extern "C" void __assert_fail(const char* assertion,
 
 // --- one fatal family each: all silent today ------------------------------------------------
 
-int FN_invariant_msg_bad(DesktopView& v) {
+int invariant_msg_bad(DesktopView& v) {
   PanelAppHost* host = v.GetPanelAppHost();
   INVARIANT_MSG(host != nullptr, "no PanelAppHost");
   return host->id;
 }
 
 // Helper-mediated: the check lives in the macro's lambda, a procedure of its own.
-int FN_precondition_notnull_bad(mr::VulkanContextProvider* p) {
+int precondition_notnull_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = PRECONDITION_NOTNULL(p->rhi());
   return rhi->x;
 }
 
-int FN_check_notnull_bad(mr::VulkanContextProvider* p) {
+int check_notnull_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   CHECK_NOTNULL(rhi);
   return rhi->x;
 }
 
-int FN_glog_check_bad(mr::VulkanContextProvider* p) {
+int glog_check_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   GLOG_CHECK(rhi != nullptr);
   return rhi->x;
 }
 
-int FN_production_assert_bad(mr::VulkanContextProvider* p) {
+int production_assert_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   PRODUCTION_ASSERT(rhi);
   return rhi->x;
 }
 
-int FN_log_always_fatal_if_bad(mr::VulkanContextProvider* p) {
+int log_always_fatal_if_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   LOG_ALWAYS_FATAL_IF(rhi == nullptr, "no rhi");
   return rhi->x;
 }
 
-int FN_bionic_assert_bad(mr::VulkanContextProvider* p) {
+int bionic_assert_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   bionic_assert(rhi != nullptr);
   return rhi->x;
 }
 
-// The one family that needs TWO things that are not in this suite, both measured:
-//   1. the frontend deletes it. cTrans_utils trans_assertion is
-//      `if Config.report_custom_error then trans_assertion_failure else trans_assume_false`, so
-//      by default the assert-failure branch is assumed false and gone before Pulse runs --
-//      __infer_fail is not even emitted (measured: 0 files mention it by default, 6 with
-//      --report-custom-error).
-//   2. --report-custom-error alone is still not enough: it emits a call to __infer_fail, which
-//      needs a Pulse model before it becomes an exit at all.
-// So this case stays silent until both land, and it is kept rather than dropped because a suite
-// that quietly omitted the one family the frontend removes would make the other eight look like
-// the whole story.
+// OUT OF SCOPE, deliberately, and kept so that the other eight are not mistaken for the whole
+// story. The clang frontend deletes this branch before Pulse ever sees it: cTrans_utils
+// trans_assertion is `if Config.report_custom_error then trans_assertion_failure else
+// trans_assume_false`, so by default the assert-failure branch is assumed false (measured: 0
+// files mention __infer_fail by default, 6 with --report-custom-error).
+//
+// Making it reachable is NOT merely a flag away, which is why this is an FN_ and not a TODO:
+// turning the branch back on revives a documented UNNECESSARY_COPY false positive through the
+// non-disjunctive join. Fixing that is a separate piece of work, tracked as
+// pulse-nondisj-join-fatal-exit-as-bottom; until it lands, reaching this row would cost an
+// existing true report elsewhere.
 int FN_glibc_assert_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   glibc_assert(rhi);
@@ -181,9 +183,48 @@ int FN_glibc_assert_bad(mr::VulkanContextProvider* p) {
 // Helper-mediated: the null value crosses one call before it reaches the check.
 static void requireRhi(Rhi* rhi) { CHECK_NOTNULL(rhi); }
 
-int FN_fatal_in_callee_bad(mr::VulkanContextProvider* p) {
+int fatal_in_callee_bad(mr::VulkanContextProvider* p) {
   Rhi* rhi = p->rhi();
   requireRhi(rhi);
+  return rhi->x;
+}
+
+// --- one fixture per precision clause -------------------------------------------------------
+// Without these the rule's three conditions are untested: mutating any of them out left the
+// suite green and the expectation file byte-identical, because the cases above are all rejected
+// by the first condition alone.
+
+// TWO independent failure values, each with its own check. Both report, and each names its own
+// call. This is what pins "can this crash site be reached with the value non-null": on the path
+// where both calls failed, BOTH origins are null at the first check, so a rule that did not ask
+// the question per crash site would blame the first check for the second call's failure too.
+int two_failures_bad(mr::VulkanContextProvider* p, DesktopView& v) {
+  PanelAppHost* host = v.GetPanelAppHost();
+  Rhi* rhi = p->rhi();
+  CHECK_NOTNULL(host);
+  CHECK_NOTNULL(rhi);
+  return rhi->x + host->id;
+}
+
+// Dies on every path, so the null return is not what kills it. Measured to be rejected by "some
+// path survives" ALONE: its check-site exit is manifest and does carry the origin, so the other
+// two conditions are both satisfied here.
+void always_fatal_ok(mr::VulkanContextProvider* p) {
+  Rhi* rhi = p->rhi();
+  CHECK_NOTNULL(rhi);
+  ::applog::logFatal("unconditional");
+}
+
+// Silent because of the manifest-only condition, and worth keeping because the reason is a real
+// limitation rather than a design choice. Reaching the second check requires mode >= 0, a
+// constraint on a parameter, and Pulse classifies the resulting state as not manifest -- so the
+// crash this rule exists to report is suppressed when the path to it also constrains an integer
+// parameter. Measured, not assumed: that exit reports manifest=false while the mode < 0 exits
+// above it report manifest=true.
+int mode_dependent_fatal_ok(mr::VulkanContextProvider* p, int mode) {
+  Rhi* rhi = p->rhi();
+  GLOG_CHECK(mode >= 0);
+  CHECK_NOTNULL(rhi);
   return rhi->x;
 }
 

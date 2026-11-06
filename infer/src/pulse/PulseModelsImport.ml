@@ -171,7 +171,9 @@ module Basic = struct
     let exit =
       { ExecutionDomain.location
       ; kind
-      ; fatal_callee= (match kind with Fatal -> Some callee_procname | _ -> None) }
+      ; fatal_callee= (match kind with Fatal -> Some callee_procname | _ -> None)
+      ; (* the state is about to be summarised, which discards the attribute this reads *)
+        failure_origins= PulseFailureOrigins.pinned_null astate }
     in
     match
       AbductiveDomain.Summary.of_post (Procdesc.get_attributes proc_desc) location astate

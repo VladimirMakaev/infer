@@ -103,9 +103,10 @@ end
     [NullableReturn] is produced today, so that adding the general failure contract later extends a
     match rather than changing this type and its attribute rank. *)
 module FailureOrigin : sig
-  type source = NullableReturn | FailureOutcome [@@deriving compare, equal]
+  type source = NullableReturn | FailureOutcome [@@deriving compare, equal, yojson_of]
 
-  type t = {source: source; callee: Procname.t; location: Location.t} [@@deriving compare, equal]
+  type t = {source: source; callee: Procname.t; location: Location.t}
+  [@@deriving compare, equal, yojson_of]
 
   val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
 end
@@ -336,6 +337,9 @@ module Attributes : sig
   val remove_must_be_valid : t -> t
 
   val get_must_be_non_null : t -> (Timestamp.t * Trace.t * CallEvent.t * int) option
+
+  val get_failure_outcome : t -> FailureOriginSet.t
+  (** empty when nothing claims this value stands for a failure *)
 
   val get_must_not_be_tainted : t -> TaintSink.t TaintSinkMap.t
 

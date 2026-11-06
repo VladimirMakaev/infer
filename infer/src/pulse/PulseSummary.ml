@@ -279,8 +279,17 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
              ) ) )
 
 
-let force_exit_program ~ignore_leaks ~exit analysis_data path post =
-  exec_summary_of_post_common analysis_data None path post ~ignore_leaks
+let force_exit_program ~ignore_leaks ~exit analysis_data path location (post : ExecutionDomain.t) =
+  (* the only chance to record which calls' failure values are null on this path:
+     [exec_summary_of_post_common] summarises, and summarising discards the attribute *)
+  let exit =
+    match post with
+    | ContinueProgram astate | ExceptionRaised astate ->
+        {exit with ExecutionDomain.failure_origins= PulseFailureOrigins.pinned_null astate}
+    | Stopped _ ->
+        exit
+  in
+  exec_summary_of_post_common analysis_data None path location post ~ignore_leaks
     ~continue_program:(fun astate -> Stopped (ExitProgram {astate; exit}))
     ~exception_raised:(fun astate -> Stopped (ExitProgram {astate; exit}))
 
@@ -333,7 +342,7 @@ let value_at_formal_in_pre (astate : AbductiveDomain.Summary.t) pvar depth =
    Weakening this to "not known to be non-null" would be wrong in the other direction: a path
    that never constrained the value at all would pass, and every helper would look
    discriminating. *)
-let implies_null astate v =
+let forces_null astate v =
   let phi = AbductiveDomain.Summary.get_path_condition astate in
   let phi, zero = Formula.absval_of_int phi IntLit.zero in
   AbstractValue.equal (Formula.get_var_repr phi v) (Formula.get_var_repr phi zero)
@@ -369,9 +378,9 @@ let exit_conditions_of_posts proc_desc pre_post_list =
                second makes it discriminating rather than "this helper always aborts" *)
             if
               List.for_all fatal_pres ~f:(fun astate ->
-                  holds_in astate pvar deref_depth ~f:implies_null )
+                  holds_in astate pvar deref_depth ~f:forces_null )
               && List.exists continue_pres ~f:(fun astate ->
-                  holds_in astate pvar deref_depth ~f:(fun astate v -> not (implies_null astate v)) )
+                  holds_in astate pvar deref_depth ~f:(fun astate v -> not (forces_null astate v)) )
             then Some {formal_index; deref_depth; condition= IsNull}
             else None ) )
 
