@@ -4194,6 +4194,15 @@ let nullable_action (analysis_data : PulseSummary.t InterproceduralAnalysis.t) c
         Unknown_model
 
 
+(* The null a nullable-list callee may return is a FAILURE value: the list is the statement
+   that this callee reports failure by returning null. Record which call produced it, so a
+   checker downstream can say what failed rather than only that something is null. *)
+let nullable_failure_origin callee_procname location =
+  Attribute.FailureOutcome
+    (Attribute.FailureOriginSet.singleton
+       {Attribute.FailureOrigin.source= NullableReturn; callee= callee_procname; location} )
+
+
 let nullable_model_unknown args : model =
   let open PulseModelsDSL.Syntax in
   start_model
@@ -4229,6 +4238,10 @@ let nullable_model_unknown args : model =
              PulseOperations.invalidate path UntraceableAccess location null_deref res
              |> exec_command
            in
+           let* () =
+             AddressAttributes.add_one (fst res) (nullable_failure_origin callee_procname location)
+             |> exec_command
+           in
            assign_ret res )
         ; prune_positive res ]
 
@@ -4257,6 +4270,7 @@ let with_null_return_disjuncts path location callee_procname ret_id results =
     | Sat (Ok astate) | Sat (Recoverable (astate, _)) ->
         Some
           ( PulseOperations.invalidate path UntraceableAccess location null_deref value astate
+          |> AddressAttributes.add_one v (nullable_failure_origin callee_procname location)
           |> PulseOperations.write_id ret_id value )
   in
   (* Interleaved rather than appended: a capped callee has as many posts as the cap allows, so
