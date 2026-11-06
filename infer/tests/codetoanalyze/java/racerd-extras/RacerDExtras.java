@@ -116,3 +116,54 @@ class Guarded {
     unguardedValue = 1;
   }
 }
+
+/*
+ * (6) a report that is not about a field at all. An INTERFACE_NOT_THREAD_SAFE warns about a call,
+ * not an access to a named location, so there is no field to describe and the report carries NO
+ * racerd_access entry: the issues.exp row below ends at its bug_trace, with nothing after it. That
+ * absence is the contract. The alternative a consumer has to be protected from is an entry filled
+ * in with the receiver -- here the formal `i`, whose declaring class is the interface -- which
+ * would make a view that groups reports by field invent a field nobody accessed.
+ */
+interface ExtrasUnannotatedInterface {
+  void run();
+}
+
+@ThreadSafe
+class InterfaceCaller {
+  public void callUnannotatedBad(ExtrasUnannotatedInterface i) {
+    i.run();
+  }
+}
+
+/*
+ * (7) the third and last thread value, any_but_self, which no other test in the tree produces in a
+ * reported access. It needs a read, not a write: an access known to be confined to the main thread
+ * is not "unprotected" (AccessSnapshot.is_unprotected is false for any_but_self), and every write
+ * report requires an unprotected write, so a main-thread write is simply silent. A main-thread
+ * READ instead takes the protected-read path, which reports it against an unprotected write that
+ * may run on any thread -- exactly the race below, where the writer is unsynchronized.
+ *
+ * Both methods report. The read is the row this case exists for, carrying thread: any_but_self;
+ * the write's own row carries thread: any and keeps the two visibly distinct, so a regression that
+ * collapsed the domain to a single value could not leave this pair unchanged. Deleting the
+ * assertMainThread() call turns the read's value into any and changes nothing else, which is what
+ * makes the column, rather than the shape of the race, the thing this case measures.
+ */
+class ExtrasThreadUtils {
+  static void assertMainThread() {}
+}
+
+@ThreadSafe
+class MainThreadConfined {
+  private int value;
+
+  public int readOnMainThreadBad() {
+    ExtrasThreadUtils.assertMainThread();
+    return value;
+  }
+
+  public void writeAnywhereBad(int v) {
+    value = v;
+  }
+}
