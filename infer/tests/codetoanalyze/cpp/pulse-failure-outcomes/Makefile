@@ -17,6 +17,7 @@ INFER_OPTIONS = \
   --enable-issue-type PULSE_FATAL_ON_NULLABLE_RETURN \
   --pulse-model-return-nullable-list 'mr::VulkanContextProvider::rhi$$' \
   --pulse-model-return-nullable-list 'DesktopView::GetPanelAppHost$$' \
+  --pulse-model-return-nullable-list 'headerLookup$$' \
   --pulse-model-abort 'assertions::AssertHandler::handleAssert'
 INFERPRINT_OPTIONS = \
   --issues-tests-fields file,procedure,line_offset,bug_type,bucket,severity,bug_trace,taint_extra,transitive_callees_extra,autofix \
