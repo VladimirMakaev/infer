@@ -30,6 +30,8 @@ module DisjDomain = struct
 
   let is_executable _ = true
 
+  let is_fatal_exit _ = false
+
   let exceptional_to_normal _ = assert false (* no exceptional state anyway *)
 
   let is_active_loop _ = None

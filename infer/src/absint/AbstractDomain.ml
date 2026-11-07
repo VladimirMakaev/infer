@@ -35,6 +35,12 @@ module type Disjunct = sig
 
   val is_executable : t -> bool
 
+  val is_fatal_exit : t -> bool
+  (** test if the abstract state is a path that ended in a FATAL exit, e.g. a failed assertion. Such
+      a disjunct carries nothing forward, exactly like having no disjunct at all, so the places that
+      preserve the non-disjunctive state when a node produces no disjuncts must treat it the same
+      way. *)
+
   val exceptional_to_normal : t -> t
 
   val is_active_loop : t -> Procdesc.Node.id option
@@ -312,6 +318,8 @@ module PairDisjunct (Domain1 : Disjunct) (Domain2 : Disjunct) = struct
   let is_exceptional (x1, x2) = Domain1.is_exceptional x1 && Domain2.is_exceptional x2
 
   let is_executable (x1, x2) = Domain1.is_executable x1 && Domain2.is_executable x2
+
+  let is_fatal_exit (x1, x2) = Domain1.is_fatal_exit x1 || Domain2.is_fatal_exit x2
 
   let exceptional_to_normal (x1, x2) =
     (Domain1.exceptional_to_normal x1, Domain2.exceptional_to_normal x2)
