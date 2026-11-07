@@ -4217,7 +4217,11 @@ let nullable_model_unknown args : model =
   match (List.last args, has_return_param) with
   | Some return_param, true -> (
       let desc = Procname.to_string callee_procname in
-      match PulseModelsSmartPointers.nullable_return tenv return_param ~desc with
+      match
+        PulseModelsSmartPointers.nullable_return
+          ~nullable_origin:(nullable_failure_origin callee_procname location)
+          tenv return_param ~desc
+      with
       | Some model ->
           lift_to_monad (lift_model model)
       | None ->

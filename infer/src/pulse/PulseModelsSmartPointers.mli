@@ -22,10 +22,15 @@ val unique_ptr_constructor :
     captured. Arguments have already undergone reference forwarding. *)
 
 val nullable_return :
-  Tenv.t -> (AbstractValue.t * ValueHistory.t) FuncArg.t -> desc:string -> model_no_non_disj option
+     ?nullable_origin:Attribute.t
+  -> Tenv.t
+  -> (AbstractValue.t * ValueHistory.t) FuncArg.t
+  -> desc:string
+  -> model_no_non_disj option
 (** [nullable_return tenv dest ~desc]: the null and non-null results that a callee returning a
     [std::unique_ptr] or a [std::shared_ptr] by value writes into [dest], if [dest] has one of these
-    types *)
+    types. [nullable_origin] is attached to the managed pointer on the null result, so that a
+    smart-pointer return can be a source for the same rules a raw pointer already is. *)
 
 module SharedPtr : sig
   val assign_count :
