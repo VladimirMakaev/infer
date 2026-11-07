@@ -2697,6 +2697,62 @@ let assume_notnull_params {ProcAttributes.proc_name; formals} astate =
       else astate )
 
 
+(** A constructor builds an object that does not exist yet, so no live object of its class is
+    already at [this]: [this] is not one of the constructor's own reference parameters of that
+    class.
+
+    Without this, a copy or move constructor that reaches a self-comparison keeps a disjunct whose
+    precondition says the two ARE equal. [operator=] opening with [if (this == &from) return *this;]
+    is the usual way of writing one, and a move constructor written as
+    [T(T&& from) : T() { *this = std::move(from); }] inherits it. A caller that constructs one
+    object's field from another object's field then has to satisfy that precondition by making the
+    two field addresses one value, and it cannot refute it: a field access carries no offset
+    arithmetic, so knowing the two objects are distinct says nothing about their fields. From then
+    on the two fields are the same cell, and ending the lifetime of either reports a
+    use-after-lifetime on the other.
+
+    Only parameters that are REFERENCES to the same class are assumed distinct from [this]. A raw
+    pointer is left alone: passing the address of storage to a constructor that builds an object
+    there is how placement new is written. *)
+let assume_this_differs_from_reference_params {ProcAttributes.proc_name; formals} astate =
+  match formals with
+  | (this_mangled, {Typ.desc= Tptr ({desc= Tstruct class_name}, _)}, _) :: other_formals
+    when Language.curr_language_is Clang && Procname.is_constructor proc_name ->
+      let is_reference_to_the_class ({Typ.desc} as typ) =
+        Typ.is_reference typ
+        &&
+        match desc with
+        | Typ.Tptr ({desc= Tstruct name}, _) ->
+            Typ.Name.equal name class_name
+        | _ ->
+            false
+      in
+      let value_of mangled astate =
+        let open IOption.Let_syntax in
+        let var = Pvar.mk mangled proc_name |> Var.of_pvar in
+        let+ addr_var = Stack.find_opt var astate >>| ValueOrigin.addr_hist in
+        Memory.eval_edge addr_var Dereference astate
+      in
+      if List.exists other_formals ~f:(fun (_, typ, _) -> is_reference_to_the_class typ) then
+        match value_of this_mangled astate with
+        | None ->
+            astate
+        | Some (astate, (this_value, _)) ->
+            List.fold other_formals ~init:astate ~f:(fun astate (mangled, typ, _) ->
+                if is_reference_to_the_class typ then
+                  match value_of mangled astate with
+                  | None ->
+                      astate
+                  | Some (astate, (param_value, _)) ->
+                      PulseArithmetic.and_not_equal (AbstractValueOperand this_value)
+                        (AbstractValueOperand param_value) astate
+                      |> PulseOperationResult.sat_ok |> Option.value ~default:astate
+                else astate )
+      else astate
+  | _ ->
+      astate
+
+
 let add_dynamic_type_on_params_with_final_type tenv {ProcAttributes.proc_name; formals; loc} astate
     =
   if Language.curr_language_is Java && Config.pulse_final_types_are_exact then
@@ -2750,6 +2806,7 @@ let initial tenv proc_attrs specialization location =
     |> PulseTaintOperations.taint_initial tenv proc_attrs
     |> set_uninitialize_prop path tenv proc_attrs
     |> assume_notnull_params proc_attrs
+    |> assume_this_differs_from_reference_params proc_attrs
     |> add_dynamic_type_on_params_with_final_type tenv proc_attrs
     |> tree_borrows_init_formals proc_attrs specialization
   in
