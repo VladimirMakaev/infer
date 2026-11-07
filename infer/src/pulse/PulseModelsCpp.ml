@@ -3226,6 +3226,115 @@ module Span = struct
     start_named_model desc @@ fun () -> get_array this >>= assign_ret
 
 
+  (** The one position of an EMPTY span, where both [begin()] and [end()] point.
+
+      It has a field of its own rather than reusing [__infer_past_the_end]. Sharing that value
+      looked equivalent - both ends of an empty range are the same position either way - but
+      [EndOfCollection] is an attribute of the VALUE, so a later [end()] on the same span marked the
+      very value [begin()] had already handed out, after the fact and in either call order.
+      Dereferencing it was then an error; and since "the extent is zero" is this model's own
+      assumption rather than anything the caller said, the error was reported as MANIFEST in the
+      helper. [begin(); end(); *it] over a span of symbolic extent reported against callers that
+      only ever pass a non-empty one.
+
+      A separate field keeps the equality and drops the residue: nothing ever marks this value,
+      because [eval_pointer_to_last_element] is not reached on the empty branch. *)
+  let empty_position_field =
+    Fieldname.make PulseOperations.pulse_model_type "__infer_span_empty_position"
+
+
+  let point_at_empty ~desc this iter : model_no_non_disj =
+   fun {path; location} astate ->
+    let event = Hist.call_event path location desc in
+    let hist = Hist.add_event event (snd iter) in
+    let<*> astate, (arr_addr, _) =
+      GenericArrayBackedCollection.eval path Read location this astate
+    in
+    let<*> astate, (pointer_addr, _) =
+      PulseOperations.eval_deref_access path Write location this (FieldAccess empty_position_field)
+        astate
+    in
+    let<*> astate =
+      PulseOperations.write_deref_field path location ~ref:iter GenericArrayBackedCollection.field
+        ~obj:(arr_addr, hist) astate
+    in
+    let<+> astate =
+      PulseOperations.write_field path location ~ref:iter
+        GenericArrayBackedCollection.Iterator.internal_pointer ~obj:(pointer_addr, hist) astate
+    in
+    astate
+
+
+  (** [std::span::begin()] and [std::span::end()], which share a shape.
+
+      A span is a view over storage it does not own, so its data pointer is whatever the caller
+      passed, and for an empty span that is routinely null: an empty [std::initializer_list] hands
+      over exactly that. Modelled as the vector [begin()], the iterator is made to point at element
+      [0] of the viewed array, so forming it - and then stepping it round a loop - walks storage an
+      empty span does not have. Nothing related the iterator to the extent, so the loop-entered path
+      was explored even for an extent of zero and a loop over an empty span was reported as a null
+      dereference.
+
+      Split on the extent instead. An empty span's [begin()] IS its [end()]: the two compare equal,
+      the loop body is unreachable, and no element is ever formed. A non-empty span behaves exactly
+      as before, and that branch carries "the extent is not zero" in its pre-condition, so a caller
+      passing an empty span cannot instantiate it - while a caller passing a non-empty span over a
+      null pointer still can, which is what keeps that report.
+
+      When the extent is a constant one of the two branches is [Unsat] and drops out, so a span of
+      known extent costs no extra disjunct.
+
+      [end()] splits the same way, so that the two agree whichever is called first.
+
+      On the empty branch the two meet at one position. WHICH position depends on where the
+      emptiness came from, and that is the whole of the difference between a report worth making and
+      the [known_past] trap:
+
+      - if the extent is already a constant zero in the state as it stands, the span is empty by the
+        CALLER's facts. An empty range's iterator really is past the end, so both ends take the
+        ordinary past-the-end pointer and keep [EndOfCollection]: dereferencing it is an error and
+        saying so is correct.
+      - if the extent is symbolic, emptiness is only this model's assumption on one of two branches.
+        Marking there reported in the helper itself, against callers that only ever pass a non-empty
+        span, so the two meet instead at [empty_position_field], which nothing marks.
+
+      Either way they meet, so [begin() != end()] is unsatisfiable and the loop body is unreachable.
+
+      Two things make that test harder than it reads. The decision is taken on the state BEFORE this
+      call prunes, because afterwards every empty branch looks like a constant zero. And it is not
+      enough to look at the extent, because the FIRST of the two calls leaves [extent = 0] pruned
+      into the branch, so the second one would see a "constant" zero that this model invented a
+      moment earlier - which is how [end(); begin(); *it] kept reporting. The presence of
+      [empty_position_field] on the span is the record that an earlier call already assumed
+      emptiness here, and it outranks the extent. *)
+  let split_on_extent ~desc ~non_empty this iter : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let<*> astate, (size, _) =
+      GenericArrayBackedCollection.to_internal_size_deref path Read location this astate
+    in
+    let emptiness_was_already_assumed =
+      Memory.find_edge_opt (fst this) (FieldAccess empty_position_field) astate |> Option.is_some
+    in
+    let emptiness_is_the_callers_fact =
+      (not emptiness_was_already_assumed)
+      && Option.exists (PulseArithmetic.as_constant_q astate size) ~f:(fun q -> Q.equal q Q.zero)
+    in
+    let empty =
+      let<**> astate = PulseArithmetic.prune_eq_zero size astate in
+      if emptiness_is_the_callers_fact then Vector.vector_end ~desc this iter model_data astate
+      else point_at_empty ~desc this iter model_data astate
+    in
+    let non_empty_branch =
+      let<**> astate = PulseArithmetic.prune_ne_zero size astate in
+      non_empty ~desc this iter model_data astate
+    in
+    empty @ non_empty_branch
+
+
+  let begin_ ~desc this iter = split_on_extent ~desc ~non_empty:Vector.vector_begin this iter
+
+  let end_ ~desc this iter = split_on_extent ~desc ~non_empty:Vector.vector_end this iter
+
   (** a view that starts or ends outside the sequence the span covers: its array is invalid, so
       reading or writing through the view is reported *)
   let out_of_bounds result : unit PulseModelsDSL.model_monad =
@@ -5060,10 +5169,10 @@ let simple_matchers =
       $--> Vector.back ~desc:"std::span::back()"
       |> with_non_disj
     ; -"std" &:: "span" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
-      $--> Vector.vector_begin ~desc:"std::span::begin()"
+      $--> Span.begin_ ~desc:"std::span::begin()"
       |> with_non_disj
     ; -"std" &:: "span" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
-      $--> Vector.vector_end ~desc:"std::span::end()"
+      $--> Span.end_ ~desc:"std::span::end()"
       |> with_non_disj
     ; -"std" &:: "span" &:: "first" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
       $--> Span.first ~desc:"std::span::first()"
