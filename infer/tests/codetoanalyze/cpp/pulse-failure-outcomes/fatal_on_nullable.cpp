@@ -15,8 +15,9 @@
 // disabled by default, so the Makefile turns it on with the existing --enable-issue-type; a build
 // without that flag sees only the two NULLPTR_DEREFERENCE controls.
 //
-// The ninth keeps its FN_ marker and its reason is recorded at the function itself. A silence in
-// this file is either a named _ok case or that one FN_, never an unexplained gap.
+// The ninth keeps its FN_ marker and its reason is recorded at the function itself. A second FN_
+// is the priced cost of the handled-branch clause, recorded the same way. A silence in this file
+// is either a named _ok case or one of those two FN_s, never an unexplained gap.
 //
 // Nullable returns come from --pulse-model-return-nullable-list in the Makefile, which is how the
 // generated list will supply them. Both listed functions are reductions of real crashes:
@@ -190,7 +191,7 @@ int fatal_in_callee_bad(mr::VulkanContextProvider* p) {
 }
 
 // --- one fixture per precision clause -------------------------------------------------------
-// Without these the rule's three conditions are untested: mutating any of them out left the
+// Without these the rule's four conditions are untested: mutating any of them out left the
 // suite green and the expectation file byte-identical, because the cases above are all rejected
 // by the first condition alone.
 
@@ -221,6 +222,12 @@ void always_fatal_ok(mr::VulkanContextProvider* p) {
 // crash this rule exists to report is suppressed when the path to it also constrains an integer
 // parameter. Measured, not assumed: that exit reports manifest=false while the mode < 0 exits
 // above it report manifest=true.
+//
+// Two exits, two reasons, and only the first was written down here originally. The mode < 0
+// exits ARE manifest and do carry the origin, and what rejects them is "no fatal exit happens
+// WITHOUT it": the same GLOG_CHECK site is reached with rhi non-null too. Mutating that clause
+// out makes this function report at `google::LogMessageFatal::~LogMessageFatal`, not at the
+// CHECK_NOTNULL, which is how the second reason was found.
 int mode_dependent_fatal_ok(mr::VulkanContextProvider* p, int mode) {
   Rhi* rhi = p->rhi();
   GLOG_CHECK(mode >= 0);
@@ -243,6 +250,11 @@ int graceful_ok(mr::VulkanContextProvider* p) {
 // Two fatals, neither decided by the nullable value: the first is unreachable because null is
 // already excluded, the second is about an unrelated argument. This is the case that separates
 // "a fatal is on this path" from "the nullable return decided this fatal".
+//
+// It is no longer a test of any single clause, and shared_fatal_site_ok exists because of that:
+// the early return makes this a handled branch too, so dropping either clause alone leaves the
+// other one rejecting it. Measured -- it reports under none of the three single-clause
+// mutations. Kept as the shape it documents, not relied on as a discriminator.
 int unrelated_fatal_ok(mr::VulkanContextProvider* p, int mode) {
   Rhi* rhi = p->rhi();
   if (rhi == nullptr) {
@@ -251,6 +263,140 @@ int unrelated_fatal_ok(mr::VulkanContextProvider* p, int mode) {
   CHECK_NOTNULL(rhi);
   GLOG_CHECK(mode >= 0);
   return rhi->x + mode;
+}
+
+// --- the null branch is HANDLED, and a callee on it can still not return ----------------------
+// These two are the most common false positive this rule produces on real code: in one measured
+// project 133 of 239 locations ended in a throwing library helper, and 16 of 16 sampled were
+// wrong. The null branch does the
+// right thing -- logs and returns, or creates the missing object -- but a callee on that branch
+// has its own [[noreturn]] error path whose condition has nothing to do with the null. That exit
+// is reachable only under the null, because the branch is the only place the call sits, and
+// before the fix the rule read "reachable only under the null" as "caused by the null".
+//
+// Both reductions keep the property that matters: the throwing helper is a DECLARATION, so Pulse
+// cannot see that its guard is unrelated, which is exactly the real situation with fmt and absl.
+
+// fmt::vformat: the error path is taken only for a malformed format string.
+namespace fmtlike {
+[[noreturn]] void throw_format_error(const char* msg);
+int parse_spec(const char* s);
+inline void log_error(const char* fmt) {
+  if (parse_spec(fmt) < 0) {
+    throw_format_error("invalid format string");
+  }
+}
+} // namespace fmtlike
+
+int graceful_log_throws_ok(mr::VulkanContextProvider* p) {
+  Rhi* rhi = p->rhi();
+  if (rhi == nullptr) {
+    fmtlike::log_error("no rhi");
+    return -1;
+  }
+  return rhi->x;
+}
+
+// A registry's findOrCreate: find() null -> create(), whose container member has a length check
+// that ends in absl::ThrowStdLengthError.
+[[noreturn]] void ThrowStdLengthError(const char* what);
+std::size_t requested_size();
+// Hands back a pointer it does not own: the real one allocates, but an allocation here would add
+// a MEMORY_LEAK_CPP row that has nothing to do with what this fixture is for.
+Rhi* registeredRhi();
+inline Rhi* makeRhi() {
+  if (requested_size() > static_cast<std::size_t>(-1) / 2) {
+    ThrowStdLengthError("length check");
+  }
+  return registeredRhi();
+}
+
+int find_or_create_throws_ok(mr::VulkanContextProvider* p) {
+  Rhi* rhi = p->rhi();
+  if (rhi != nullptr) {
+    return rhi->x;
+  }
+  return makeRhi()->x;
+}
+
+// The cost of the clause above, stated rather than discovered later. The null branch really does
+// crash, on a second condition that really is about the failure -- and it also recovers. Nothing
+// available here separates that from the two cases above: both are "the null branch splits, one
+// side dies". The field sample says the logger shape is the overwhelming majority, so the clause
+// is worth this row.
+bool canRecover();
+int FN_recoverable_then_fatal_bad(mr::VulkanContextProvider* p) {
+  Rhi* rhi = p->rhi();
+  if (rhi == nullptr) {
+    if (canRecover()) {
+      return -1;
+    }
+    ::applog::logFatal("no rhi and no fallback");
+  }
+  return rhi->x;
+}
+
+// TWO failure values, one handled and one fatal, both obtained BEFORE either is checked. The
+// path that returns because `host` is null also carries `rhi` as null, because rhi's check is
+// never reached on that path and so nothing constrains it. A handled-branch test phrased over
+// the whole procedure puts rhi in the handled set and loses this report -- silently, and the
+// more calls the nullable list matches the more often it happens. Found by the verifier, not
+// by me: my first version of that clause was a union over every surviving path.
+int other_origin_handled_bad(mr::VulkanContextProvider* p, DesktopView& v) {
+  Rhi* rhi = p->rhi();
+  PanelAppHost* host = v.GetPanelAppHost();
+  if (host == nullptr) {
+    return -1;
+  }
+  CHECK_NOTNULL(rhi);
+  return rhi->x + host->id;
+}
+
+// A crash that needs BOTH failures at once, and the fixture that pins the handled-set match to
+// equality rather than containment. The fatal pins {rhi, host}; the path that survives it pins
+// only {rhi}, because it reached the inner check with host non-null and then returned through a
+// helper that can throw. Containment would read that surviving path as "rhi was handled" and
+// report neither value, losing the whole crash; equality asks for a surviving path that failed
+// the same way, finds none, and reports both.
+//
+// Every other fixture here has one origin on the handling branch, so its surviving set and its
+// fatal set are equal and the two readings agree. This is the only one that separates them.
+int conjunctive_fatal_bad(mr::VulkanContextProvider* p, DesktopView& v) {
+  Rhi* rhi = p->rhi();
+  PanelAppHost* host = v.GetPanelAppHost();
+  if (rhi == nullptr) {
+    if (host == nullptr) {
+      ::applog::logFatal("neither available");
+    }
+    fmtlike::log_error("rhi missing");
+    return -1;
+  }
+  return rhi->x;
+}
+
+// Ordering control for the one above. The handled value's early return happens before the fatal
+// value is even obtained, so no surviving path can pin rhi to null and no reading of the clause
+// can suppress this. If this ever goes silent the pair above proves nothing.
+int handled_before_bad(mr::VulkanContextProvider* p, DesktopView& v) {
+  PanelAppHost* host = v.GetPanelAppHost();
+  if (host == nullptr) {
+    return -1;
+  }
+  Rhi* rhi = p->rhi();
+  CHECK_NOTNULL(rhi);
+  return rhi->x + host->id;
+}
+
+// Keeps "no fatal exit happens WITHOUT it" under its own test. Both fatal exits are the SAME
+// call site, reached with the value null and with it non-null, and no path returns with it null
+// -- so this is rejected by that clause alone, and a mutation that drops it shows up here rather
+// than hiding behind the handled-branch clause the way unrelated_fatal_ok now does.
+int shared_fatal_site_ok(mr::VulkanContextProvider* p, int mode) {
+  Rhi* rhi = p->rhi();
+  if (rhi == nullptr || mode < 0) {
+    ::applog::logFatal("unusable");
+  }
+  return rhi->x;
 }
 
 // Not on the nullable list, so its contract is unknown and a CHECK on it says nothing.

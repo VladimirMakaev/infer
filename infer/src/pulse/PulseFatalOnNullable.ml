@@ -14,18 +14,22 @@ open PulseDomainInterface
    is reachable in normal operation, and nothing reports it today: the disjunct simply stops.
 
    The rule is NOT "a fatal exit is reachable on a path where a failure value exists". Nearly
-   every procedure containing an assert satisfies that. Three questions must all be answered
+   every procedure containing an assert satisfies that. Four questions must all be answered
    yes, and each one is what rejects a specific shape the suite contains:
 
    - the failure DECIDED this exit: the path that ended pinned that call's value to null;
    - no fatal exit happens WITHOUT it: a procedure that also crashes for an unrelated reason is
      not evidence about this value, and reporting it would blame the wrong call;
-   - the success side SURVIVES: if no surviving path has the value non-null then the procedure
-     ends the program regardless, and the null return is not what kills it.
+   - the null is NOT HANDLED: no path that pinned the same value to null, and nothing else
+     this exit did not, returned normally. A branch the procedure both dies on and returns
+     from was not decided by the null;
+   - the success side SURVIVES: if nothing survives then the procedure ends the program
+     regardless, and the null return is not what kills it.
 
-   The last two are the interesting ones. Dropping the second turns a procedure that handles
-   null and then checks an unrelated argument into a report; dropping the third means any
-   always-aborting helper that happens to receive a failure value reports. *)
+   The middle two are the interesting ones. Dropping the second turns a procedure that handles
+   null and then checks an unrelated argument into a report; dropping the third reports every
+   graceful branch whose logger can throw; dropping the fourth means any always-aborting helper
+   that happens to receive a failure value reports. *)
 
 (* Values are per-disjunct, so a value number cannot be followed from one post to another. The
    origin can: it is the callee plus the call site, the same record in every disjunct that call
@@ -61,23 +65,47 @@ let reportable_origins posts =
   else
     (* Does any path survive this procedure at all?
 
-       This is deliberately NOT "some surviving path still has the value non-null", which is what
-       it looks like it should be. By the time a path reaches the exit node its locals are gone --
-       [exit_scope] and [remove_vars] run first -- and the checked pointer is dead, so its
-       attribute has been discarded and every surviving post answers "I have never heard of this
-       call". Measured: on all nine fatal shapes the surviving post reports an empty origin set.
-       A clause phrased that way is not conservative, it is unsatisfiable, and it would have made
+       This is deliberately NOT "some surviving path still has the value non-null". That question
+       cannot be asked here: a path that took the non-null branch has no further use for the
+       pointer, [exit_scope] and [remove_vars] drop it, and the attribute goes with it. Measured
+       on all nine fatal shapes: the surviving post answers "I have never heard of this call". A
+       clause phrased that way is not conservative, it is unsatisfiable, and it would have made
        the rule report nothing while every test still passed.
 
-       The work that clause was there to do is already done by [reachable_without_failing]
-       below, which
-       is the real content of "the success side cannot reach that fatal": if the value being
-       non-null could reach a fatal exit, that exit would be one that does not pin it to null.
-       What remains is the weaker, and computable, question of whether the procedure has any way
-       out other than dying -- which is what rejects a helper that aborts unconditionally. *)
+       [handled_as_this_exit_did] below asks the opposite question -- did a surviving path pin the
+       value to NULL -- and that one is answerable, because a branch guarded on the null keeps
+       the value reachable for exactly as long as it is the branch condition. Same attribute,
+       same state, different side of the test. *)
     let some_path_survives =
       List.exists posts ~f:(fun (exec_state, _path) ->
           match (exec_state : ExecutionDomain.t) with ContinueProgram _ -> true | _ -> false )
+    in
+    (* Which failures did a path pin to null and then RETURN with?
+
+       A procedure that both dies and returns on the same null was not killed by the null. The
+       shape this rejects is the common one in the field: the null branch handles the failure --
+       logs and returns, or creates the missing object -- and a callee on that branch has its own
+       [[noreturn]] error path whose condition is nothing to do with the null
+       (fmt::detail::throw_format_error behind a malformed format string,
+       absl::ThrowStdLengthError behind a container's length check). Pulse finds that exit
+       reachable only under the null, because that is the only branch the call sits on, and
+       without this clause the rule blames the null for it. Measured: on a three-report
+       reduction 2 of the 3 are that shape, and on one real project it was 133 of 239 locations.
+
+       The cost is a real false negative, and it is the fixture named for it: a null branch that
+       recovers on one sub-condition and crashes on another no longer reports. Nothing here can
+       separate that from the logger case -- both are "the null branch splits, one side dies" --
+       and the field sample says the logger case is the overwhelming majority.
+
+       [ExceptionRaised] does not count as returning: the procedure did not hand an answer back,
+       and whether the caller survives is the caller's question, asked again there. *)
+    let surviving_null_sets =
+      List.filter_map posts ~f:(fun (exec_state, _path) ->
+          match (exec_state : ExecutionDomain.t) with
+          | ContinueProgram astate ->
+              Some (nullable_returns (PulseFailureOrigins.pinned_null astate))
+          | ExceptionRaised _ | Stopped _ ->
+              None )
     in
     (* Can THIS crash site be reached with the value non-null? If some path ends the program at
        the same place without the value being null, the crash is not about this call, and saying
@@ -97,6 +125,39 @@ let reportable_origins posts =
       List.exists fatal_exits ~f:(fun (_, other_location, _, origins) ->
           Location.equal location other_location && not (OriginSet.mem origin origins) )
     in
+    (* Was THIS failure the one that was handled?
+
+       Asking only "did some surviving path have this value null" is too coarse, and the gap is
+       not academic. With two failure values obtained before either is checked, the path that
+       returns because the FIRST is null also carries the second as null -- the second's check
+       was never reached on that path, so nothing constrained it. A procedure-wide set then
+       contains both, and the second value's genuine fatal goes unreported. That is a silent
+       false negative, it grows with the length of the nullable list, and it is not the single-
+       origin cost this rule knowingly pays.
+
+       So the surviving path has to be the same branch as the fatal, not merely a path on which
+       the value happened to be null. The test is the SAME SET of failures: a surviving path
+       that pins exactly what the fatal path pinned differs from it only in things this rule
+       does not track -- the format check inside the logger, the length check inside the
+       container -- and is the same handling of the same failure. A path that pins a different
+       set went somewhere else, because some other value being null is what sent it there.
+
+       Equality rather than containment, and the difference is a shape worth keeping. A crash
+       that needs TWO failures at once -- [if (a) { if (b) die(); log(); return; }] -- has a
+       fatal pinning both and a surviving path pinning only the first. Containment would call
+       the first one handled on the strength of that path and report neither value; equality
+       asks for a surviving path that failed in the same way, finds none, and reports both.
+       Containment loses the whole crash, not a detail of it.
+
+       The containment form was committed first, justified by a worry that equality would let
+       the logger false positives back in. Measured, it does not: a throwing helper always
+       leaves a surviving twin on the same branch with an IDENTICAL pinned set, because the
+       helper's non-throwing path falls through to the same return. Equality and containment
+       agree on every fixture in this file; the conjunctive crash is where they part. *)
+    let handled_as_this_exit_did origin exit_origins =
+      List.exists surviving_null_sets ~f:(fun surviving ->
+          OriginSet.mem origin surviving && OriginSet.equal surviving exit_origins )
+    in
     List.fold fatal_exits ~init:OriginMap.empty
       ~f:(fun acc (astate, location, fatal_callee, origins) ->
         (* Manifest only. A latent fatal needs something of the caller to be reachable, and this
@@ -109,6 +170,7 @@ let reportable_origins posts =
               if
                 (not (OriginMap.mem origin acc))
                 && (not (reachable_without_failing origin location))
+                && (not (handled_as_this_exit_did origin origins))
                 && some_path_survives
               then OriginMap.add origin (location, fatal_callee) acc
               else acc )
