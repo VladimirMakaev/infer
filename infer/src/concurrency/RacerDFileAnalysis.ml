@@ -794,21 +794,36 @@ let protected_methods_with_locked_callers ~analyze summaries =
         Option.some_if (is_protected_cpp_method procname) procname )
     |> Procname.Set.of_list
   in
+  (* A caller may only hand its own credit to a callee if it never touches a lock itself. The
+     credit means "my callers hold the lock for the whole of my body"; a body that unlocks and
+     relocks around the call breaks that, and the counts in [LockDomain] cannot see it -- an
+     unlock cancels an earlier acquire before it records a release, so a helper holding an
+     unrelated guard while giving back the caller's lock is indistinguishable from one that
+     touches no lock at all. Asking whether the helper has any lock effect at all is coarse, but
+     it is answerable, and it only ever withholds credit. *)
+  let touches_locks =
+    List.filter_map summaries ~f:(fun (procname, (summary : summary)) ->
+        Option.some_if summary.touches_locks procname )
+    |> Procname.Set.of_list
+  in
   if Procname.Set.is_empty protected_methods then Procname.Set.empty
   else
-    let add_call_site caller ({elem; trace} : AccessSnapshot.t) callees_locked =
+    (* Each call site is kept with the caller it came from, not collapsed to a boolean. A helper
+       reached only from another protected helper is locked exactly when that one is, and that is
+       a question about the caller which cannot be answered until the caller has been decided. *)
+    let add_call_site caller ({elem; trace} : AccessSnapshot.t) call_sites =
       match trace with
       | call_site :: _
         when Procname.Set.mem (CallSite.pname call_site) protected_methods
              && not (Procname.equal (CallSite.pname call_site) caller) ->
           let is_locked = LockDomain.is_locked elem.lock in
           Procname.Map.update (CallSite.pname call_site)
-            (fun locked -> Some (is_locked && Option.value locked ~default:true))
-            callees_locked
+            (fun sites -> Some ((caller, is_locked) :: Option.value sites ~default:[]))
+            call_sites
       | _ ->
-          callees_locked
+          call_sites
     in
-    let callees_locked =
+    let call_sites =
       List.fold summaries ~init:Procname.Map.empty ~f:(fun acc (caller, {accesses}) ->
           let locks_held_on_entry = RacerDModels.num_required_capabilities caller in
           AccessDomain.fold
@@ -817,10 +832,32 @@ let protected_methods_with_locked_callers ~analyze summaries =
               |> fun snapshot -> add_call_site caller snapshot acc )
             accesses acc )
     in
+    (* Least fixpoint, so a helper is credited with a lock only once something justifies it. A
+       method with no call site at all never enters the map and so is never credited, and a cycle
+       of protected helpers with no locked caller outside it is never credited either: starting
+       from the empty set, neither member can be the one that justifies the other. *)
+    let close_under_locked_callers ~undermined initial =
+      let rec loop locked =
+        let locked' =
+          Procname.Map.fold
+            (fun callee sites acc ->
+              if Procname.Set.mem callee acc || Procname.Set.mem callee undermined then acc
+              else if
+                List.for_all sites ~f:(fun (caller, is_locked) ->
+                    is_locked
+                    || (not (Procname.Set.mem caller touches_locks))
+                       && Procname.Set.mem caller locked )
+              then Procname.Set.add callee acc
+              else acc )
+            call_sites locked
+        in
+        if Int.equal (Procname.Set.cardinal locked') (Procname.Set.cardinal locked) then locked
+        else loop locked'
+      in
+      loop initial
+    in
     let locked_methods =
-      Procname.Map.fold
-        (fun callee locked acc -> if locked then Procname.Set.add callee acc else acc)
-        callees_locked Procname.Set.empty
+      close_under_locked_callers ~undermined:Procname.Set.empty Procname.Set.empty
     in
     if Procname.Set.is_empty locked_methods then locked_methods
     else
@@ -828,7 +865,11 @@ let protected_methods_with_locked_callers ~analyze summaries =
          class's lock. Its accesses are aggregated separately, and the derived class need not
          have any concurrent method of its own. Check captured derived callers, including those
          defined in another translation unit, before dropping the base helper's accesses. *)
-      let locked_methods = ref locked_methods in
+      (* Collected rather than removed in place, then fed back into the fixpoint: a helper that
+         was credited only because its caller was credited has to lose the lock too when the
+         caller turns out to have an unprotected derived caller. Removing from the finished set
+         would leave the dependent behind. *)
+      let undermined = ref Procname.Set.empty in
       iter_captured_cpp_methods ~f:(fun caller ->
           match Procname.get_class_type_name caller with
           | None ->
@@ -842,13 +883,13 @@ let protected_methods_with_locked_callers ~analyze summaries =
                         (not (Typ.Name.equal caller_class callee_class))
                         && PatternMatch.is_subtype (Exe_env.get_proc_tenv caller) caller_class
                              callee_class ) )
-                  !locked_methods
+                  locked_methods
               in
               if (not (Procname.Set.is_empty derived_methods)) && should_report_on_proc caller then
                 match analyze caller |> AnalysisResult.to_option with
                 | None ->
                     (* A missing caller summary cannot establish the lock precondition. *)
-                    locked_methods := Procname.Set.diff !locked_methods derived_methods
+                    undermined := Procname.Set.union !undermined derived_methods
                 | Some {RacerDDomain.accesses} ->
                     let locks_held_on_entry = RacerDModels.num_required_capabilities caller in
                     AccessDomain.iter
@@ -860,9 +901,10 @@ let protected_methods_with_locked_callers ~analyze summaries =
                           List.iter snapshot.trace ~f:(fun call_site ->
                               let callee = CallSite.pname call_site in
                               if Procname.Set.mem callee derived_methods then
-                                locked_methods := Procname.Set.remove callee !locked_methods ) )
+                                undermined := Procname.Set.add callee !undermined ) )
                       accesses ) ) ;
-      !locked_methods
+      if Procname.Set.is_empty !undermined then locked_methods
+      else close_under_locked_callers ~undermined:!undermined Procname.Set.empty
 
 
 (* create a map from [abstraction of a memory loc] -> accesses that

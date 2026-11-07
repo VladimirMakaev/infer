@@ -161,6 +161,9 @@ end
 
 module NeverReturns : AbstractDomain.S
 
+(** whether the procedure acquires or releases any lock at all *)
+module TouchesLocks : AbstractDomain.S with type t = bool
+
 type t =
   { threads: ThreadsDomain.t  (** current thread: main, background, or unknown *)
   ; locks: LockDomain.t  (** effect on the locks held *)
@@ -171,7 +174,8 @@ type t =
   ; ownership: OwnershipDomain.t  (** map of access paths to ownership predicates *)
   ; attribute_map: AttributeMapDomain.t
         (** map of access paths to attributes such as owned, functional, ... *)
-  ; return_alias: ReturnAliasDomain.t  (** what the procedure returns, if it is an access path *) }
+  ; return_alias: ReturnAliasDomain.t  (** what the procedure returns, if it is an access path *)
+  ; touches_locks: TouchesLocks.t }
 
 include AbstractDomain.S with type t := t
 
@@ -191,7 +195,8 @@ type summary =
   ; return_attribute: Attribute.t
   ; return_alias: AccessExpression.t option
         (** access expression over the formals or globals whose value is returned *)
-  ; attributes: AttributeMapDomain.t }
+  ; attributes: AttributeMapDomain.t
+  ; touches_locks: TouchesLocks.t }
 
 val empty_summary : summary
 
@@ -224,6 +229,10 @@ val integrate_summary :
   -> Location.t
   -> t
   -> t
+
+val mark_touches_locks : t -> t
+(** record that this procedure acquires or releases a lock, so it may not pass its callers' lock
+    credit down a chain *)
 
 val acquire_lock : t -> t
 
