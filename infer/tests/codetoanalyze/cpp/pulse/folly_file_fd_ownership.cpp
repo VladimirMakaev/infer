@@ -36,6 +36,10 @@ class File {
   int fd_;
   bool ownsFd_;
 };
+
+// a retrying wrapper around close(), defined in another translation unit
+int closeNoInt(int fd);
+
 } // namespace folly
 
 extern int use_fd(int fd);
@@ -359,6 +363,78 @@ struct NotAFile {
 int reads_an_uninitialized_field_bad() {
   NotAFile n{};
   return n.fd();
+}
+
+
+// --- closeNoInt ----------------------------------------------------------------------------
+// A retrying wrapper around close(), declared in a header and defined in another translation
+// unit. Unmodelled, the descriptor is handed to a callee with no body, so ownership never moves
+// and an RAII wrapper that closes through it looks like a leak however carefully it is written.
+// The wrapper's destructor below is INLINE: what is out of line is the close itself, which is
+// why keeping the descriptor in a local, or in a returned std::optional, makes no difference.
+
+// the shape that was reported: a descriptor owned by an RAII wrapper that closes through it
+class ScopedDescriptor {
+ public:
+  explicit ScopedDescriptor(int fd) : fd_(fd) {}
+  ~ScopedDescriptor() {
+    if (fd_ >= 0) {
+      folly::closeNoInt(fd_);
+    }
+  }
+  ScopedDescriptor(const ScopedDescriptor&) = delete;
+  int get() const { return fd_; }
+
+ private:
+  int fd_;
+};
+
+void raii_closes_through_closeNoInt_ok(const char* path) {
+  ScopedDescriptor d(open(path, O_RDONLY));
+}
+
+void closeNoInt_closes_ok(const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd >= 0) {
+    folly::closeNoInt(fd);
+  }
+}
+
+// CONTROLS. The first keeps a real leak reported, so the two silences above cannot pass
+// vacuously. The rest only became visible when the wrapper was modelled: before, closing
+// through it was opaque, so a second close was reported as a leak and a mixed double close was
+// not reported at all.
+
+void closeNoInt_never_called_bad(const char* path) {
+  int fd = open(path, O_RDONLY);
+  (void)fd;
+}
+
+void closeNoInt_twice_bad(const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return;
+  }
+  folly::closeNoInt(fd);
+  folly::closeNoInt(fd);
+}
+
+void closeNoInt_then_use_bad(const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return;
+  }
+  folly::closeNoInt(fd);
+  read(fd, nullptr, 0);
+}
+
+void close_then_closeNoInt_bad(const char* path) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return;
+  }
+  close(fd);
+  folly::closeNoInt(fd);
 }
 
 } // namespace folly_file_fd_ownership
