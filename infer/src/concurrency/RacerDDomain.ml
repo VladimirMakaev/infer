@@ -653,6 +653,12 @@ end
 
 module NeverReturns = AbstractDomain.BooleanAnd
 
+(** Whether the procedure acquires or releases any lock at all. A helper that touches no lock cannot
+    have disturbed the lock its callers hold, which is what lets it pass their credit down a chain;
+    one that does touch a lock may have given that very lock back around the call, and the counts in
+    [LockDomain] cannot tell the two apart. *)
+module TouchesLocks = AbstractDomain.BooleanOr
+
 type t =
   { threads: ThreadsDomain.t
   ; locks: LockDomain.t
@@ -660,7 +666,8 @@ type t =
   ; accesses: AccessDomain.t
   ; ownership: OwnershipDomain.t
   ; attribute_map: AttributeMapDomain.t
-  ; return_alias: ReturnAliasDomain.t }
+  ; return_alias: ReturnAliasDomain.t
+  ; touches_locks: TouchesLocks.t }
 [@@deriving abstract_domain]
 
 let initial =
@@ -671,7 +678,8 @@ let initial =
   let ownership = OwnershipDomain.empty in
   let attribute_map = AttributeMapDomain.empty in
   let return_alias = ReturnAliasDomain.bottom in
-  {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias}
+  let touches_locks = false in
+  {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
 
 
 type summary =
@@ -682,7 +690,8 @@ type summary =
   ; return_ownership: OwnershipAbstractValue.t
   ; return_attribute: Attribute.t
   ; return_alias: AccessExpression.t option
-  ; attributes: AttributeMapDomain.t }
+  ; attributes: AttributeMapDomain.t
+  ; touches_locks: TouchesLocks.t }
 
 let empty_summary =
   { threads= ThreadsDomain.bottom
@@ -692,7 +701,8 @@ let empty_summary =
   ; return_ownership= OwnershipAbstractValue.unowned
   ; return_attribute= Attribute.top
   ; return_alias= None
-  ; attributes= AttributeMapDomain.top }
+  ; attributes= AttributeMapDomain.top
+  ; touches_locks= false }
 
 
 let pp_summary fmt
@@ -703,7 +713,8 @@ let pp_summary fmt
     ; return_ownership
     ; return_attribute
     ; return_alias
-    ; attributes } =
+    ; attributes
+    ; touches_locks } =
   F.fprintf fmt
     "@\n\
      Threads: %a, Locks: %a, NeverReturns: %a @\n\
@@ -711,22 +722,27 @@ let pp_summary fmt
      Ownership: %a @\n\
      Return Attribute: %a @\n\
      Return Alias: %a @\n\
-     Attributes: %a @\n"
+     Attributes: %a @\n\
+     TouchesLocks: %a @\n"
     ThreadsDomain.pp threads LockDomain.pp locks NeverReturns.pp never_returns AccessDomain.pp
     accesses OwnershipAbstractValue.pp return_ownership Attribute.pp return_attribute
-    (Pp.option AccessExpression.pp) return_alias AttributeMapDomain.pp attributes
+    (Pp.option AccessExpression.pp) return_alias AttributeMapDomain.pp attributes TouchesLocks.pp
+    touches_locks
 
 
-let pp fmt {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias} =
+let pp fmt
+    {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
+    =
   F.fprintf fmt
     "Threads: %a, Locks: %a, NeverReturns: %a @\n\
      Accesses %a @\n\
      Ownership: %a @\n\
      Attributes: %a @\n\
-     Return Alias: %a @\n"
+     Return Alias: %a @\n\
+     TouchesLocks: %a @\n"
     ThreadsDomain.pp threads LockDomain.pp locks NeverReturns.pp never_returns AccessDomain.pp
     accesses OwnershipDomain.pp ownership AttributeMapDomain.pp attribute_map ReturnAliasDomain.pp
-    return_alias
+    return_alias TouchesLocks.pp touches_locks
 
 
 let add_unannotated_call_access formals pname actuals loc (astate : t) =
@@ -740,7 +756,8 @@ let add_unannotated_call_access formals pname actuals loc (astate : t) =
 
 
 let astate_to_summary proc_desc formals
-    {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias} =
+    {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
+    =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let return_var_exp =
     AccessExpression.base
@@ -792,8 +809,10 @@ let astate_to_summary proc_desc formals
   in
   if Procname.is_destructor proc_name then
     (* destructors seldom run concurrently with other methods, so only keep the effect on locks, e.g.
-       a RAII guard releasing its lock *)
-    {empty_summary with locks}
+       a RAII guard releasing its lock. [touches_locks] has to survive with it: a hand-written RAII
+       type whose destructor unlocks is exactly the case where the effect is real and the procedure
+       that scoped it must not be treated as lock-free. *)
+    {empty_summary with locks; touches_locks}
   else
     { threads
     ; locks
@@ -802,7 +821,8 @@ let astate_to_summary proc_desc formals
     ; return_ownership
     ; return_attribute
     ; return_alias
-    ; attributes }
+    ; attributes
+    ; touches_locks }
 
 
 let add_access tenv formals loc ~is_write (astate : t) exp =
@@ -890,7 +910,8 @@ let branch_never_returns () =
   ; attribute_map=
       (* this is incorrect, as there is no identity element for an inverted set *)
       AttributeMapDomain.empty
-  ; return_alias= ReturnAliasDomain.bottom }
+  ; return_alias= ReturnAliasDomain.bottom
+  ; touches_locks= false }
 
 
 let integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_pname actuals loc
@@ -917,8 +938,16 @@ let integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_p
     let threads =
       ThreadsDomain.integrate_summary ~caller_astate:astate.threads ~callee_astate:threads
     in
-    {astate with locks; never_returns; threads; ownership; attribute_map}
+    (* A lock touched inside the callee is still a lock this procedure touched: the chain credit
+       asks whether the caller held its own callers' lock for the whole of its body, and
+       delegating the unlock to a helper does not make the body innocent. Without this join a
+       procedure whose only lock effect is a call to [void release() { mu_.unlock(); }] looks like
+       a pure forwarder. *)
+    let touches_locks = TouchesLocks.join astate.touches_locks summary.touches_locks in
+    {astate with locks; never_returns; threads; ownership; attribute_map; touches_locks}
 
+
+let mark_touches_locks (astate : t) = {astate with touches_locks= true}
 
 let acquire_lock (astate : t) =
   { astate with
