@@ -256,6 +256,10 @@ let is_executable (exec_state : t) : bool =
   match exec_state with ContinueProgram _ | ExceptionRaised _ -> true | _ -> false
 
 
+let is_fatal_exit (exec_state : t) : bool =
+  match exec_state with Stopped (ExitProgram {exit= {kind= Fatal}}) -> true | _ -> false
+
+
 let exceptional_to_normal : t -> t = function
   | ExceptionRaised astate ->
       ContinueProgram astate

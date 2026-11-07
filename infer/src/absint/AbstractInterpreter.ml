@@ -409,6 +409,15 @@ struct
         Some (d, nd)
 
 
+  (* "nothing here can carry the non-disjunctive state forward". Having no disjunct at all is the
+     original case; a disjunct that ended in a FATAL exit is the same situation, because it is a
+     path that stopped. The distinction used to be invisible: a failing assertion whose branch the
+     frontend deleted produced no disjunct, while one whose branch survives produces a stopped
+     one, and whether [nd] is preserved must not depend on which of those two the frontend
+     happened to emit. [List.for_all] on the empty list is [true], so this subsumes the old
+     [List.is_empty] test rather than replacing it. *)
+  let no_disjunct_carries_on l = List.for_all l ~f:T.DisjDomain.is_fatal_exit
+
   let filter_disjuncts ~f ((l, nd) : Domain.t) =
     let filtered = List.filter l ~f in
     if
@@ -417,7 +426,7 @@ struct
       (* TODO(non-disj): once [nd] detects unreachability accurately we can replace the last
             condition with something like [not (T.NonDisjDomain.is_executable nd)] that tests if we
             can carry on executing using the non-disjunctive state *)
-      not (List.is_empty l)
+      not (no_disjunct_carries_on l)
     then ([], T.NonDisjDomain.bottom)
     else (filtered, nd)
 
@@ -476,7 +485,7 @@ struct
     in
     let post_non_disj = T.exec_instr_non_disj pre_non_disj analysis_data node instr in
     let non_disj =
-      if List.is_empty disjuncts then post_non_disj
+      if no_disjunct_carries_on disjuncts then post_non_disj
       else List.fold ~init:post_non_disj ~f:T.NonDisjDomain.join non_disj_astates
     in
     let non_disj = add_dropped_disjuncts dropped non_disj in
@@ -515,7 +524,7 @@ struct
       if
         Config.pulse_prevent_non_disj_top
         || List.exists disjuncts ~f:T.DisjDomain.is_executable
-        || List.is_empty disjuncts
+        || no_disjunct_carries_on disjuncts
       then
         if not (List.is_empty old_pre) then
           (* HACK: When we drop disjuncts due to the disjunct limit, we may lose some information on
