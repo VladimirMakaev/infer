@@ -1,0 +1,12 @@
+[
+   {
+      "directory" : "%pwd%/../codetoanalyze/char_signedness",
+      "file" : "ping_unit.cpp",
+      "arguments" : ["clang++", "-std=c++17", "-c", "ping_unit.cpp"]
+   },
+   {
+      "directory" : "%pwd%/../codetoanalyze/char_signedness",
+      "file" : "pong_unit.cpp",
+      "arguments" : ["clang++", "-std=c++17", "-funsigned-char", "-c", "pong_unit.cpp"]
+   }
+]

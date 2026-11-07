@@ -500,6 +500,24 @@ let rec analyze_callee_can_raise_recursion (analysis_req : AnalysisRequest.t) ~s
       register_callee ~cycle_detected:false ?caller_summary callee_pname ;
       if is_in_block_list callee_pname then Error InBlockList
       else
+        (* Set when the procedure the database actually holds for [callee_pname] turns out to be
+           running already. The name we were given and the name the stored procedure carries are
+           normally equal, but one capture entry can stand for two instantiations -- the same
+           header compiled for two target triples, where plain [char] has a different signedness
+           -- and the active-target queue is keyed by the name [run_proc_analysis] takes from the
+           procdesc. Asking by the requested name then misses the target that is really running
+           and the enqueue fails outright instead of being read as the recursion it is.
+           It is checked below rather than at the top of this function on purpose: there it would
+           force a [Procdesc.load] on every call, including the ones a ready summary answers
+           without loading anything. Here the procdesc is already in hand, and when the two names
+           agree the test stops at [Procname.equal]. *)
+        let resolved_target_is_active = ref false in
+        (* so the collision reports the same no-summary reason the guard above would have, rather
+           than looking like an analysis failure *)
+        let finish result =
+          if !resolved_target_is_active then Error AnalysisResult.MutualRecursionCycle
+          else AnalysisResult.of_option result
+        in
         let analyze_callee_aux specialization_context =
           error_if_ondemand_analysis_during_replay ~from_file_analysis caller_summary callee_pname ;
           RestartScheduler.with_lock ~get_actives:ActiveProcedures.get_all callee_pname
@@ -514,53 +532,61 @@ let rec analyze_callee_can_raise_recursion (analysis_req : AnalysisRequest.t) ~s
               | `NoSummary ->
                   Procdesc.load callee_pname
                   >>= fun callee_pdesc ->
-                  let previous_global_state = AnalysisGlobalState.save () in
-                  protect
-                    ~f:(fun () ->
-                      (* preload tenv to avoid tainting preanalysis timing with IO *)
-                      let tenv = Exe_env.get_proc_tenv callee_pname in
-                      AnalysisGlobalState.initialize callee_pdesc tenv ;
-                      Timer.time Preanalysis
-                        ~f:(fun () ->
-                          let caller_pname =
-                            caller_summary >>| fun summ -> summ.Summary.proc_name
-                          in
-                          let summary =
-                            run_proc_analysis tenv analysis_req specialization_context ?caller_pname
-                              callee_pdesc
-                          in
-                          set_complete_result analysis_req summary ;
-                          Some summary )
-                        ~on_timeout:(fun span ->
-                          L.debug Analysis Quiet
-                            "TIMEOUT after %fs of CPU time analyzing %a:%a, outside of any \
-                             checkers (pre-analysis timeout?)@\n"
-                            span SourceFile.pp
-                            (Procdesc.get_attributes callee_pdesc).translation_unit Procname.pp
-                            callee_pname ;
-                          None ) )
-                    ~finally:(fun () ->
-                      AnalysisGlobalState.restore previous_global_state ;
-                      (* the cache is otherwise only cleared between tasks, so the summaries
+                  let active_pname = Procdesc.get_proc_name callee_pdesc in
+                  if
+                    (not (Procname.equal active_pname callee_pname))
+                    && ActiveProcedures.mem {proc_name= active_pname; specialization}
+                  then (
+                    resolved_target_is_active := true ;
+                    None )
+                  else
+                    let previous_global_state = AnalysisGlobalState.save () in
+                    protect
+                      ~f:(fun () ->
+                        (* preload tenv to avoid tainting preanalysis timing with IO *)
+                        let tenv = Exe_env.get_proc_tenv callee_pname in
+                        AnalysisGlobalState.initialize callee_pdesc tenv ;
+                        Timer.time Preanalysis
+                          ~f:(fun () ->
+                            let caller_pname =
+                              caller_summary >>| fun summ -> summ.Summary.proc_name
+                            in
+                            let summary =
+                              run_proc_analysis tenv analysis_req specialization_context
+                                ?caller_pname callee_pdesc
+                            in
+                            set_complete_result analysis_req summary ;
+                            Some summary )
+                          ~on_timeout:(fun span ->
+                            L.debug Analysis Quiet
+                              "TIMEOUT after %fs of CPU time analyzing %a:%a, outside of any \
+                               checkers (pre-analysis timeout?)@\n"
+                              span SourceFile.pp
+                              (Procdesc.get_attributes callee_pdesc).translation_unit Procname.pp
+                              callee_pname ;
+                            None ) )
+                      ~finally:(fun () ->
+                        AnalysisGlobalState.restore previous_global_state ;
+                        (* the cache is otherwise only cleared between tasks, so the summaries
                          loaded by nested analyses would pile up; the caller is about to use the
                          callee's summary *)
-                      if Option.is_some caller_summary && not Config.multicore then
-                        Summary.OnDisk.clear_cache ~keep:callee_pname () ) )
+                        if Option.is_some caller_summary && not Config.multicore then
+                          Summary.OnDisk.clear_cache ~keep:callee_pname () ) )
         in
         match is_summary_already_computed analysis_req callee_pname specialization with
         | `SummaryReady summary ->
             RestartScheduler.release_reservations callee_pname ;
             Ok summary
         | `ComputeDefaultSummary ->
-            analyze_callee_aux None |> AnalysisResult.of_option
+            analyze_callee_aux None |> finish
         | `ComputeDefaultSummaryThenSpecialize specialization ->
             (* recursive call so that we detect mutual recursion on the unspecialized summary *)
             analyze_callee analysis_req ~specialization:None ?caller_summary ~from_file_analysis
               callee_pname
             |> Result.bind ~f:(fun summary ->
-                analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option )
+                analyze_callee_aux (Some (summary, specialization)) |> finish )
         | `AddNewSpecialization (summary, specialization) ->
-            analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option
+            analyze_callee_aux (Some (summary, specialization)) |> finish
         | `UnknownProcedure ->
             Error UnknownProcedure )
 
