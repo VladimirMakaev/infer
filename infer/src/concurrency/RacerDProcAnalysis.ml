@@ -79,7 +79,35 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         Domain.integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_pname
           actuals loc astate
     | Error _ ->
+        (* No summary, so nothing is known about this callee's effect on locks. [TouchesLocks] is
+           evidence of disturbance, not a proof of its absence, and the chain credit reads it as a
+           proof -- so an unresolved call has to count as "may touch". This is where every erased
+           call lands: a [std::function], a function pointer, and a virtual call on an abstract
+           base all reach here with no body to analyse. Marking costs credit, never soundness. *)
         process_call_without_summary tenv ret_access_exp callee_pname actuals astate
+        |> Domain.mark_touches_locks
+
+
+  (* A modelled call is not analysed, so its lock effect has to be recovered some other way. A
+     container model stands for the container's own bookkeeping, not for the ELEMENT code it runs:
+     assigning a vector invokes the element's [operator=], resizing one invokes its constructor,
+     and a lookup in an ordered container invokes the key's [operator<]. Any of those may be
+     user-defined and may touch a lock.
+
+     Take the lock effect from the callee's summary and nothing else -- the model still supplies the
+     accesses, which is the whole point of having it. A missing summary is ignorance, not innocence,
+     so it counts as "may touch", exactly as in [process_call_summary].
+
+     Consulting the summary is only more precise than marking unconditionally for a container whose
+     body is captured, which in practice means a user-defined one. The standard containers are
+     declared but not defined, so they have no summary and always take the "may touch" branch: a
+     helper whose only container work is on a [std::vector] or a [std::string] keeps no credit. *)
+  let join_modelled_callee_lock_effect analyze_dependency callee_pname astate =
+    match analyze_dependency callee_pname with
+    | Ok (summary : Domain.summary) when not summary.touches_locks ->
+        astate
+    | _ ->
+        Domain.mark_touches_locks astate
 
 
   (* Whether a guard owns a lock is not tracked (e.g. a [std::unique_lock] constructed with
@@ -100,7 +128,13 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
   let process_lock_effect_or_summary analyze_dependency proc_desc tenv formals ret_access_exp
       callee_pname actuals loc (astate : Domain.t) =
-    match ConcurrencyModels.get_lock_effect callee_pname actuals with
+    let lock_effect = ConcurrencyModels.get_lock_effect callee_pname actuals in
+    (* any lock effect at all, acquire or release, disqualifies this procedure from passing its
+       callers' lock credit down a chain: see [TouchesLocks] *)
+    let astate =
+      match lock_effect with NoEffect -> astate | _ -> Domain.mark_touches_locks astate
+    in
+    match lock_effect with
     | Lock locks ->
         (* [std::lock] acquires all its arguments, which are then released one by one, and a lock
            function from [--lock-model] may take no argument *)
@@ -266,23 +300,36 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         astate
 
 
-  let exec_instr astate ({interproc= {proc_desc; tenv}; formals} as analysis_data) _ _ instr =
+  let exec_instr astate
+      ({interproc= {proc_desc; tenv; analyze_dependency}; formals} as analysis_data) _ _ instr =
     match (instr : HilInstr.t) with
     | Call (ret_base, Direct callee_pname, actuals, call_flags, loc) ->
         let astate = Domain.add_reads_of_hilexps tenv formals actuals loc astate in
+        (* The container branches model the call instead of analysing it, so neither reaches
+           [process_call_summary]; they recover the callee's lock effect from its summary instead,
+           because the element code a container runs is not visible here. The ownership branch
+           does not: in C++ it matches only [__new] and [__new_array], which allocate raw memory
+           and run no user code -- the constructor is a separate call that is analysed normally.
+           (In Java it also matches [clone] and [newInstance], which can run user code, but the
+           chain credit this feeds is C++-only.) *)
         if RacerDModels.acquires_ownership callee_pname tenv then
           do_call_acquiring_ownership (AccessExpression.base ret_base) astate
         else if RacerDModels.is_container_write tenv callee_pname then
           Domain.add_container_access tenv formals ~is_write:true ret_base callee_pname actuals loc
             astate
+          |> join_modelled_callee_lock_effect analyze_dependency callee_pname
         else if RacerDModels.is_container_read tenv callee_pname then
           Domain.add_container_access tenv formals ~is_write:false ret_base callee_pname actuals loc
             astate
+          |> join_modelled_callee_lock_effect analyze_dependency callee_pname
         else do_proc_call ret_base callee_pname actuals call_flags loc analysis_data astate
     | Call (_, Indirect _, _, _, _) ->
         if Procname.is_java (Procdesc.get_proc_name proc_desc) then
           L.(die InternalError) "Unexpected indirect call instruction %a" HilInstr.pp instr
-        else astate
+        else
+          (* a call through a value this analysis cannot name: nothing is known about it, least of
+             all whether it touches a lock *)
+          Domain.mark_touches_locks astate
     | Assign (lhs_access_expr, rhs_exp, loc) ->
         do_assignment lhs_access_expr rhs_exp loc analysis_data astate
     | Assume (assume_exp, _, _, loc) ->
