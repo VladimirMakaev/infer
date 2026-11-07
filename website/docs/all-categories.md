@@ -43,6 +43,7 @@ Issue types in this category:
 - [STRING_VIEW_OUT_OF_BOUNDS](/docs/next/all-issue-types#string_view_out_of_bounds)
 - [STRING_VIEW_OUT_OF_BOUNDS_LATENT](/docs/next/all-issue-types#string_view_out_of_bounds_latent)
 - [STRONG_SELF_NOT_CHECKED](/docs/next/all-issue-types#strong_self_not_checked)
+- [TREE_BORROWS_UB](/docs/next/all-issue-types#tree_borrows_ub)
 - [USE_AFTER_DELETE](/docs/next/all-issue-types#use_after_delete)
 - [USE_AFTER_DELETE_LATENT](/docs/next/all-issue-types#use_after_delete_latent)
 - [USE_AFTER_FREE](/docs/next/all-issue-types#use_after_free)
@@ -112,6 +113,7 @@ Issue types in this category:
 - [PULSE_UNFINISHED_BUILDER](/docs/next/all-issue-types#pulse_unfinished_builder)
 - [RETAIN_CYCLE](/docs/next/all-issue-types#retain_cycle)
 - [RETAIN_CYCLE_NO_WEAK_INFO](/docs/next/all-issue-types#retain_cycle_no_weak_info)
+- [RETAIN_CYCLE_UNACTIONABLE](/docs/next/all-issue-types#retain_cycle_unactionable)
 - [SELF_IN_BLOCK_PASSED_TO_INIT](/docs/next/all-issue-types#self_in_block_passed_to_init)
 
 ## Runtime exception
@@ -155,6 +157,7 @@ Issue types in this category:
 - [PULSE_CANNOT_INSTANTIATE_ABSTRACT_CLASS](/docs/next/all-issue-types#pulse_cannot_instantiate_abstract_class)
 - [PULSE_DICT_MISSING_KEY](/docs/next/all-issue-types#pulse_dict_missing_key)
 - [PULSE_DYNAMIC_TYPE_MISMATCH](/docs/next/all-issue-types#pulse_dynamic_type_mismatch)
+- [PULSE_FATAL_ON_NULLABLE_RETURN](/docs/next/all-issue-types#pulse_fatal_on_nullable_return)
 - [PULSE_UNINITIALIZED_CONST](/docs/next/all-issue-types#pulse_uninitialized_const)
 - [PULSE_UNINITIALIZED_METHOD](/docs/next/all-issue-types#pulse_uninitialized_method)
 
