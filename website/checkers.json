@@ -12,6 +12,6 @@
     "checker-pulse", "checker-purity", "checker-racerd",
     "checker-resource-leak-lab", "checker-sil-validation", "checker-siof",
     "checker-scope-leakage", "checker-self-in-block", "checker-starvation",
-    "checker-swift-objc-nullability", "checker-topl"
+    "checker-swift-objc-nullability", "checker-topl", "checker-tree-borrows"
   ]
 }
