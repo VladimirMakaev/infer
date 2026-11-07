@@ -5,8 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <initializer_list>
 #include <span>
 #include <vector>
 
@@ -186,6 +188,111 @@ int size_of_subspan_bad() {
     return *p;
   }
   return 0;
+}
+
+// A span over an EMPTY range. Its data pointer is whatever the caller passed,
+// and for an empty span that is routinely null -- an empty
+// `std::initializer_list` hands over exactly that. Forming and comparing the
+// iterators must not require that pointer to be dereferenceable: `begin()` of
+// an empty span is its `end()`, so the loop body is never entered.
+
+bool has_key(int value, std::span<const int> allowed) {
+  for (int key : allowed) {
+    if (key == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool has_key(int value, std::initializer_list<int> allowed) {
+  return has_key(value, std::span<const int>(allowed.begin(), allowed.size()));
+}
+
+bool iterate_empty_span_ok(int value) { return has_key(value, {}); }
+
+bool iterate_nonempty_span_ok(int value) { return has_key(value, {1, 2}); }
+
+// The extent here is a constant zero, so the loop is provably empty.
+int loop_over_zero_extent_span(const int* p) {
+  std::span<const int> s(p, std::size_t{0});
+  int n = 0;
+  for (auto it = s.begin(); it != s.end(); ++it) {
+    n++;
+  }
+  return n;
+}
+
+int loop_over_zero_extent_span_ok() { return loop_over_zero_extent_span(nullptr); }
+
+// The controls. A non-zero extent does promise storage, so reading through it
+// is still reported.
+
+int deref_begin_of_span(const int* p, std::size_t n) {
+  std::span<const int> s(p, n);
+  return *s.begin();
+}
+
+int deref_begin_of_null_span_bad() { return deref_begin_of_span(nullptr, 3); }
+
+int deref_begin_of_nonempty_span_ok() {
+  int a[3] = {1, 2, 3};
+  return deref_begin_of_span(a, 3);
+}
+
+// Stepping past the one element an empty span does not have is undefined even
+// though the loop above is not entered.
+int increment_begin_of_span(std::initializer_list<int> a) {
+  std::span<const int> s(a.begin(), a.size());
+  auto it = s.begin();
+  ++it;
+  return 0;
+}
+
+int increment_begin_of_empty_span_bad() { return increment_begin_of_span({}); }
+
+// Holding BOTH iterators of a span whose extent is symbolic, then reading
+// through the first one. Neither helper is wrong for every caller -- the extent
+// is the caller's to choose -- so neither may report here, in either call order
+// and whether or not an algorithm is handed the pair.
+
+int begin_then_end_then_deref_ok(const int* p, std::size_t n) {
+  std::span<const int> s(p, n);
+  auto it = s.begin();
+  (void)s.end();
+  return *it;
+}
+
+int end_then_begin_then_deref_ok(const int* p, std::size_t n) {
+  std::span<const int> s(p, n);
+  (void)s.end();
+  auto it = s.begin();
+  return *it;
+}
+
+int sort_then_deref_ok(int* p, std::size_t n) {
+  std::span<int> s(p, n);
+  auto b = s.begin();
+  auto e = s.end();
+  std::sort(b, e);
+  return *b;
+}
+
+// An extent the caller fixed at zero is a different matter. That span really is
+// empty, so both of its iterators are past the end and reading through either
+// one is an error worth reporting.
+
+int deref_end_of_empty_span_bad() {
+  static const int a[1] = {7};
+  std::span<const int> s(a, std::size_t{0});
+  auto e = s.end();
+  return *e;
+}
+
+int deref_begin_of_empty_span_bad() {
+  static const int a[1] = {7};
+  std::span<const int> s(a, std::size_t{0});
+  return *s.begin();
 }
 
 // Known limitations.
