@@ -27,6 +27,8 @@ let is_exceptional _ = true
 
 let is_executable _ = true
 
+let is_fatal_exit _ = false
+
 let exceptional_to_normal x = x
 
 let is_active_loop _ = None

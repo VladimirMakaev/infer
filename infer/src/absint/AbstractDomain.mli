@@ -44,6 +44,12 @@ module type Disjunct = sig
   (** test if the abstract state represents executable states, e.g. [ContinueProgram] or
       [ExceptionRaised]. *)
 
+  val is_fatal_exit : t -> bool
+  (** test if the abstract state is a path that ended in a FATAL exit, e.g. a failed assertion. Such
+      a disjunct carries nothing forward, exactly like having no disjunct at all, so the places that
+      preserve the non-disjunctive state when a node produces no disjuncts must treat it the same
+      way. *)
+
   val exceptional_to_normal : t -> t
   (** convert all exceptional states into normal states (used when reaching a handler) *)
 
