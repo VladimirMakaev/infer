@@ -1118,8 +1118,10 @@ In C, Infer reports memory leaks when objects are created with `malloc` and not
 freed. For example:
 
 ```c
-void memory_leak_bug () {
-    struct Person *p = malloc(sizeof(struct Person));
+#include <stdlib.h>
+
+void memory_leak_bug(void) {
+    int *p = malloc(sizeof(int));
 }
 ```
 
@@ -1980,16 +1982,35 @@ A latent [NULLPTR_DEREFERENCE](#nullptr_dereference). See the [documentation on 
 
 *Category: [Runtime exception](/docs/next/all-categories#runtime-exception). Reported as "Null Argument" by [pulse](/docs/next/checker-pulse).*
 
-```objc
-This issue type indicates `nil` being passed as argument where a non-nil value expected.
+This issue type indicates `nil` or `null` being passed as argument where a non-null value is expected.
 
+With `--pulse-nullability-annotations`, this is also reported when null is passed to a C function or
+C++ method without a known implementation whose declaration marks the parameter `_Nonnull` or
+`__attribute__((nonnull))`:
+
+```c
+#include <stdlib.h>
+
+int parse_level(const char* _Nonnull s);
+
+int level_from_environment(void) {
+  // ERROR: getenv() returns NULL when LEVEL is not set
+  return parse_level(getenv("LEVEL"));
+}
+```
+
+Argument positions are counted from 1 and include the implicit object parameter of C++ methods, as in
+`nonnull(i)`. Variadic arguments are not checked.
+
+In Objective-C, some methods are known to crash when passed `nil`:
+
+```objc
 #import <Foundation/Foundation.h>
 
-// Test (non-nil) returned values of NSString methods against `nil`
 NSString* stringNotNil(NSString* str) {
   if (!str) {
-        // ERROR: NSString:stringWithString: expects a non-nil value
-	return [NSString stringWithString:nil];
+    // ERROR: NSString:stringWithString: expects a non-nil value
+    return [NSString stringWithString:nil];
   }
   return str;
 }
@@ -2156,6 +2177,39 @@ with the dynamic type of its arguments.
 
 For example, reading `$x['key']` when `$x` is a vector.
 
+
+## PULSE_FATAL_ON_NULLABLE_RETURN
+
+*Category: [Runtime exception](/docs/next/all-categories#runtime-exception). Reported as "Fatal On Nullable Return" by [pulse](/docs/next/checker-pulse).*
+
+A function that can return null to signal failure was called, and when it does return null the
+program deliberately terminates: a `CHECK`, `INVARIANT` or `assert` on the returned value calls
+`abort`, a `[[noreturn]]` fatal logger, or any other callee that does not return. The null return
+is a documented outcome rather than a bug, so the crash is a reachable one.
+
+This is reported only when the failure is what decides the crash. If the null value is checked and
+handled, if the fatal is reached regardless of the value, or if the crash is about something else
+entirely, there is no report.
+
+```cpp
+// `getRhi()` is on the nullable-return list: it returns null when the device is unavailable.
+Rhi* rhi = provider->getRhi();
+CHECK_NOTNULL(rhi);  // the program aborts here whenever the device is unavailable
+return rhi->width;
+```
+
+The fix is to handle the failure rather than assert it away:
+
+```cpp
+Rhi* rhi = provider->getRhi();
+if (rhi == nullptr) {
+  return kDefaultWidth;  // or propagate the failure to a caller that can act on it
+}
+return rhi->width;
+```
+
+This issue type is disabled by default; enable it with
+`--enable-issue-type PULSE_FATAL_ON_NULLABLE_RETURN`.
 
 ## PULSE_READONLY_SHARED_PTR_PARAM
 
@@ -2664,6 +2718,25 @@ hierarchy:
 }
 @end
 ```
+
+## RETAIN_CYCLE_UNACTIONABLE
+
+*Category: [Resource leak](/docs/next/all-categories#resource-leak). Reported as "Retain Cycle Unactionable" by [pulse](/docs/next/checker-pulse).*
+
+# RETAIN_CYCLE_UNACTIONABLE
+
+Internal companion to `RETAIN_CYCLE`, disabled by default. Raised when
+the retain-cycle report's headline location resolves to a
+`<bitcode_id>:compiler-generated` sentinel sourcefile — i.e. the cycle
+was detected inside a compiler-generated procedure (Swift partial-apply
+forwarder, autoclosure body, async continuation thunk, witness-table
+accessor, overlay initializer, or ObjC bridging thunk) with no user
+source file to anchor the report.
+
+The cycle itself is real; the report just has no actionable file:line
+for a product engineer. Disabled by default so production drops these.
+Re-enable with `--enable-issue-type RETAIN_CYCLE_UNACTIONABLE` for
+debugging or to measure prevalence in Scuba.
 
 ## SCOPE_LEAKAGE
 
@@ -3183,6 +3256,11 @@ See [Topl](/docs/next/checker-topl#what-is-it) for an example
 *Category: [User defined property](/docs/next/all-categories#user-defined-property). Reported as "Topl Error Latent" by [topl](/docs/next/checker-topl).*
 
 A latent [TOPL_ERROR](#topl_error). See the [documentation on Pulse latent issues](/docs/next/checker-pulse#latent-issues).
+## TREE_BORROWS_UB
+
+*Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Tree Borrows Ub" by [tree-borrows](/docs/next/checker-tree-borrows).*
+
+Tree Borrows Undefined Behaviour. A pointer access (read, write, reborrow, function call or return) was performed in a way that violates Rust's Tree Borrows aliasing discipline.
 ## USE_AFTER_DELETE
 
 *Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Use After Delete" by [pulse](/docs/next/checker-pulse).*
@@ -3345,3 +3423,4 @@ Replace `weakSelf` with `self`:
 
 *Limitations:* To keep this check simple and intra-procedural, we rely on names to find `weakSelf`:
 we assume that any captured weak pointer whose name contains "self" is a weak reference to `self`.
+
