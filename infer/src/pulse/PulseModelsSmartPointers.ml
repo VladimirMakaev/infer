@@ -33,13 +33,23 @@ let write_value ?access path location this ~value ~desc astate =
   (astate, (pointer, value_hist))
 
 
-let assign_value_nullptr ?access path location this ~desc astate =
+let assign_value_nullptr ?access ?nullable_origin path location this ~desc astate =
   let=* astate, (pointer, value) =
     write_value ?access path location this
       ~value:(AbstractValue.mk_fresh (), ValueHistory.epoch)
       ~desc astate
   in
   let++ astate = PulseArithmetic.and_eq_int (fst value) IntLit.zero astate in
+  (* [nullable_origin] records WHY this pointer is null: which listed callee returned it. The
+     MANAGED pointer is what the caller goes on to test and dereference -- through [get],
+     [operator bool], a comparison with nullptr, or a copy -- so attaching the origin to it, and
+     not to the smart pointer object, is what lets it survive all of those without each of them
+     having to know about it. Callers that are not a nullable return pass nothing and are
+     unchanged. *)
+  let astate =
+    Option.value_map nullable_origin ~default:astate ~f:(fun attribute ->
+        AddressAttributes.add_one (fst value) attribute astate )
+  in
   PulseOperations.invalidate path
     (MemoryAccess {pointer; access= Dereference; hist_obj_default= snd value})
     location (ConstantDereference IntLit.zero) value astate
@@ -1491,7 +1501,7 @@ let android_pointer_access =
     else None
 
 
-let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
+let nullable_return ?nullable_origin tenv FuncArg.{arg_payload= this; typ} ~desc =
   let is_unique = Option.is_some (UniquePtr.get_pointer_type_and_deleter_kind tenv typ) in
   let access = android_pointer_access tenv typ in
   let is_android = Option.is_some access in
@@ -1503,7 +1513,9 @@ let nullable_return tenv FuncArg.{arg_payload= this; typ} ~desc =
           else SharedPtr.assign_count path location this ~constant ~desc astate
         in
         let null =
-          let** astate = assign_value_nullptr ?access path location this ~desc astate in
+          let** astate =
+            assign_value_nullptr ?access ?nullable_origin path location this ~desc astate
+          in
           assign_count IntLit.zero astate
         in
         let non_null =
