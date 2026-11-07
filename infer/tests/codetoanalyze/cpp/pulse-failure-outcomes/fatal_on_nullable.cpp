@@ -28,6 +28,8 @@
 #include <cstdlib>
 #include <utility>
 
+#include "fatal_on_nullable_callee.h"
+
 struct Rhi {
   int x;
 };
@@ -397,6 +399,55 @@ int shared_fatal_site_ok(mr::VulkanContextProvider* p, int mode) {
     ::applog::logFatal("unusable");
   }
   return rhi->x;
+}
+
+// --- the failing call is in a CALLEE, so the callee is where it is reported -------------------
+// The value a nullable call returns outlives the procedure that made the call: stored in a
+// field, it travels into every caller, and the attribute saying where it came from travels with
+// it. The exit travels too, because a caller whose callee ends the program ends with it. Every
+// caller therefore used to get its own copy of one report, transitively, each one carrying the
+// callee's line number against the caller's own file.
+
+// Cross-file. HeaderExtractor_Bad's own report is in the header; neither caller here may report,
+// and a report that did would print a header line number against this file. Concretely: the
+// header's nullable call is on its line 20, and line 20 of THIS file is a comment. That is the
+// field shape, where the mislocated line landed on `#include`s and on doc comments.
+struct HeaderPrinter {
+  HeaderExtractor_Bad ex_;
+  HeaderPrinter() : ex_() {}
+};
+
+int header_callee_direct_caller_ok() {
+  HeaderPrinter p;
+  return p.ex_.fn_ != nullptr;
+}
+
+// One more call deep. The object is RETURNED rather than destroyed in the middle frame, because
+// what carries the attribute up is the value still being reachable: the first version of this
+// fixture called a function that returned an int, nothing reached here, and it was silent on
+// both arms -- a fixture that tests nothing. Measured: with the clause mutated out this reports
+// and the one above it does too, so the chain really is what it says.
+HeaderPrinter header_callee_middle_frame() { return HeaderPrinter(); }
+
+int header_callee_transitive_caller_ok() {
+  HeaderPrinter p = header_callee_middle_frame();
+  return p.ex_.fn_ != nullptr;
+}
+
+// Same file, so this is not the cross-file case wearing a different hat: it is the duplicate
+// itself. A rule that only compared source files would still report here, and the line it
+// printed would be the constructor's, several functions away from this one.
+struct LocalExtractor_Bad {
+  Rhi* fn_;
+  explicit LocalExtractor_Bad(mr::VulkanContextProvider* p) {
+    fn_ = p->rhi();
+    CHECK_NOTNULL(fn_);
+  }
+};
+
+int local_callee_caller_ok(mr::VulkanContextProvider* p) {
+  LocalExtractor_Bad e(p);
+  return e.fn_->x;
 }
 
 // Not on the nullable list, so its contract is unknown and a CHECK on it says nothing.
