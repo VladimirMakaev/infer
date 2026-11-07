@@ -1737,6 +1737,11 @@ let matchers : matcher list =
   ; -"folly" &:: "File" &:: "File" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
     $--> folly_file_from_fd
   ; -"folly" &:: "File" &:: "close" <>$ capt_arg_payload $--> folly_file_close
+  ; (* a thin retrying wrapper around [close], declared in a header and defined in another
+       translation unit. Without this the descriptor is handed to a callee with no body and no
+       model, so an RAII wrapper that closes through it looks like a leak however carefully it
+       is written -- and a double close through it is not reported at all. *)
+    -"folly" &:: "closeNoInt" <>$ capt_arg_payload_of_prim_typ StdTyp.int $--> close
   ; -"folly" &:: "File" &:: "operator=" <>$ capt_arg_payload $+ capt_arg_payload
     $--> folly_file_move_assign
   ; -"folly" &:: "File" &:: "release" <>$ capt_arg_payload $--> folly_file_release
