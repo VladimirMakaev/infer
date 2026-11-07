@@ -14,9 +14,10 @@ open PulseDomainInterface
    is reachable in normal operation, and nothing reports it today: the disjunct simply stops.
 
    The rule is NOT "a fatal exit is reachable on a path where a failure value exists". Nearly
-   every procedure containing an assert satisfies that. Four questions must all be answered
+   every procedure containing an assert satisfies that. Five questions must all be answered
    yes, and each one is what rejects a specific shape the suite contains:
 
+   - the failing call happened HERE: a value that failed in a callee is the callee's report;
    - the failure DECIDED this exit: the path that ended pinned that call's value to null;
    - no fatal exit happens WITHOUT it: a procedure that also crashes for an unrelated reason is
      not evidence about this value, and reporting it would blame the wrong call;
@@ -26,10 +27,12 @@ open PulseDomainInterface
    - the success side SURVIVES: if nothing survives then the procedure ends the program
      regardless, and the null return is not what kills it.
 
-   The middle two are the interesting ones. Dropping the second turns a procedure that handles
-   null and then checks an unrelated argument into a report; dropping the third reports every
-   graceful branch whose logger can throw; dropping the fourth means any always-aborting helper
-   that happens to receive a failure value reports. *)
+   All but the second earn their place by rejecting something. Dropping the first gives every
+   transitive caller its own copy of one report, each one carrying the callee's line number
+   against the caller's file; dropping the third turns a procedure that handles null and then
+   checks an unrelated argument into a report; dropping the fourth reports every graceful
+   branch whose logger can throw; dropping the fifth means any always-aborting helper that
+   happens to receive a failure value reports. *)
 
 (* Values are per-disjunct, so a value number cannot be followed from one post to another. The
    origin can: it is the callee plus the call site, the same record in every disjunct that call
@@ -59,10 +62,27 @@ let fatal_exits_of posts =
           None )
 
 
-let reportable_origins posts =
+(* The locations this procedure's own instructions occupy.
+
+   A report's FILE is not taken from its location. [JsonReports] prints the source file of the
+   procedure the report is attached to, and the line from the diagnostic. A diagnostic whose
+   location is in another procedure therefore does not merely point somewhere unhelpful: it
+   prints that procedure's line against this procedure's file, and the line it lands on is
+   usually not even code -- a comment, an [#include]. Two of the three reports in the repro for
+   this were a comment line.
+
+   The locations are those of instructions rather than of nodes, because that is where the
+   origin's own location comes from: the call instruction the nullable model ran on. *)
+let own_locations proc_desc =
+  Procdesc.fold_instrs proc_desc ~init:Location.Map.empty ~f:(fun acc _node instr ->
+      Location.Map.add (Sil.location_of_instr instr) () acc )
+
+
+let reportable_origins proc_desc posts =
   let fatal_exits = fatal_exits_of posts in
   if List.is_empty fatal_exits then OriginMap.empty
   else
+    let own_locs = own_locations proc_desc in
     (* Does any path survive this procedure at all?
 
        This is deliberately NOT "some surviving path still has the value non-null". That question
@@ -158,6 +178,26 @@ let reportable_origins posts =
       List.exists surviving_null_sets ~f:(fun surviving ->
           OriginSet.mem origin surviving && OriginSet.equal surviving exit_origins )
     in
+    (* Did the failing call happen HERE?
+
+       A failure value outlives the procedure that produced it: stored in a field, returned, or
+       simply still reachable, it travels into every caller, and the attribute travels with it.
+       The exit does too, because a caller whose callee ends the program ends with it. So a
+       procedure that merely calls something that checks a null of its own satisfies every other
+       condition here, and before this clause each of those callers got its own copy of one
+       report -- transitively, so a chain of four produced four.
+
+       The callee is analysed on its own and reports there, which is the one place where the
+       call, the crash and the file all agree. A caller's copy adds nothing and is mislocated by
+       construction, for the reason spelled out at [own_locations].
+
+       This does not silence the shape where the caller supplies the failing value -- a null
+       passed to a helper that checks it. There the origin is the caller's own call, the helper
+       contributes only the exit, and the report stays where the failing call is. That is the
+       one caller-side report worth making, and it is the one that is correctly placed. *)
+    let origin_is_local ({location} : Attribute.FailureOrigin.t) =
+      Location.Map.mem location own_locs
+    in
     List.fold fatal_exits ~init:OriginMap.empty
       ~f:(fun acc (astate, location, fatal_callee, origins) ->
         (* Manifest only. A latent fatal needs something of the caller to be reachable, and this
@@ -169,6 +209,7 @@ let reportable_origins posts =
             (fun origin acc ->
               if
                 (not (OriginMap.mem origin acc))
+                && origin_is_local origin
                 && (not (reachable_without_failing origin location))
                 && (not (handled_as_this_exit_did origin origins))
                 && some_path_survives
@@ -177,9 +218,9 @@ let reportable_origins posts =
             origins acc )
 
 
-let report_errors analysis_data posts =
+let report_errors ({InterproceduralAnalysis.proc_desc} as analysis_data) posts =
   if IssueType.pulse_fatal_on_nullable_return.enabled then
-    reportable_origins posts
+    reportable_origins proc_desc posts
     |> OriginMap.iter (fun origin (exit_location, fatal_callee) ->
         PulseReport.report analysis_data ~is_suppressed:false ~latent:false
           (Diagnostic.FatalOnNullableReturn {origin; exit_location; fatal_callee}) )
