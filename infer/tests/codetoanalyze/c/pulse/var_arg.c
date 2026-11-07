@@ -216,7 +216,23 @@ void va_set_int_ptr(int n, ...) {
 
 void va_write_null_bad() { va_set_int_ptr(1, NULL); }
 
-// the position of the argument read from a [va_list] parameter is not known
+// A [va_list] is modelled as a cursor and nothing else. The variadic arguments
+// travel separately, in the globals [__infer_va_args_global_n] bound at the
+// call site of the variadic function, and [va_arg] can name one of those
+// globals only when the cursor is a known constant. So the position of the
+// argument read from a [va_list] parameter is not known, and a [va_list] handed
+// to another function carries nothing about the arguments themselves.
+//
+// The two known limitations below follow from that, and both are kept on
+// purpose: each way of removing one inside the [va_arg] model removes a real
+// report of the same shape with it. See [va_leak_from_list] and
+// [va_list_out_param_untouched_bad].
+
+// known limitation: reported whatever the caller does with the argument, so
+// this is a false positive for [FP_va_list_out_param_ok] and a true positive
+// for [va_list_out_param_never_freed_bad]. Giving the result of an
+// unknown-position [va_arg] an escaping value instead of a fresh one would
+// silence this report, and would silence [va_leak_from_list] with it.
 void va_set_from_list(va_list args) {
   char** p = va_arg(args, char**);
   *p = (char*)malloc(4);
@@ -229,8 +245,51 @@ void va_set_ptr_with_list(int n, ...) {
   va_end(args);
 }
 
+// known limitation: [va_set_from_list] does write [v], but through an argument
+// it cannot place, so the write is invisible here. Havocking the variadic
+// arguments whenever a [va_list] escapes would silence this report, and would
+// silence [va_list_out_param_untouched_bad] with it.
 void FP_va_list_out_param_ok() {
   char* v;
   va_set_ptr_with_list(1, &v);
+  free(v);
+}
+
+// the same shape as [va_set_from_list], but no caller frees the block, so the
+// leak is real: this report must survive any change aimed at the false positive
+// above
+void va_leak_from_list(va_list args) {
+  char** p = va_arg(args, char**);
+  *p = (char*)malloc(4);
+}
+
+void va_leak_ptr_with_list(int n, ...) {
+  va_list args;
+  va_start(args, n);
+  va_leak_from_list(args);
+  va_end(args);
+}
+
+// the leak is reported in [va_leak_from_list], like for [va_set_two_ptrs]
+void va_list_out_param_never_freed_bad() {
+  char* v;
+  va_leak_ptr_with_list(1, &v);
+}
+
+// a [va_list] handed to a function that reads nothing from it leaves the
+// out-parameter genuinely uninitialized: this report must survive any change
+// aimed at [FP_va_list_out_param_ok]
+void va_ignores_list(va_list args) {}
+
+void va_ignore_ptr_with_list(int n, ...) {
+  va_list args;
+  va_start(args, n);
+  va_ignores_list(args);
+  va_end(args);
+}
+
+void va_list_out_param_untouched_bad() {
+  char* v;
+  va_ignore_ptr_with_list(1, &v);
   free(v);
 }
