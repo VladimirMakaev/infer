@@ -165,3 +165,9 @@ Detect errors based on user-provided state machines describing temporal properti
 
 [Visit here for more information.](/docs/next/checker-topl)
 
+## Tree Borrows
+
+A Rust-only aliasing checker that reports undefined behaviour.
+
+[Visit here for more information.](/docs/next/checker-tree-borrows)
+
