@@ -948,6 +948,76 @@ let analyze_procedure ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
     |> Option.map ~f:(Domain.summary_of_astate proc_desc)
 
 
+(** A lock named independently of how a particular procedure spells it. [this->sessionMutex_],
+    [this->sessionTracker_->sessionMutex_] and [this->tracker_->sessionMutex_] all denote the field
+    [sessionMutex_] declared in [SessionTracker], so they get the same name. Two deadlock reports
+    about the same unordered pair of canonical locks describe one root cause, whichever side of the
+    pair they were found from and whichever caller they were found at. *)
+module CanonicalLock = struct
+  type t =
+    | Field of Fieldname.t
+    | Global of (Mangled.t * Typ.template_spec_info * SourceFile.t option)
+    | Other of Domain.Lock.t
+        (** a class object, or an address with neither a last field nor a global root. Keeping the
+            address itself makes the name injective, so two locks that cannot be shown to be the
+            same field are never merged. *)
+  [@@deriving compare]
+
+  let make lock =
+    match Domain.Lock.get_last_field_or_global lock with
+    | Some (First field) ->
+        Field field
+    | Some (Second global) ->
+        Global (Domain.Lock.global_key global)
+    | None ->
+        Other lock
+
+
+  let describe fmt = function
+    | Field field ->
+        MF.wrap_monospaced
+          (fun fmt field ->
+            F.fprintf fmt "%s::%s"
+              (Typ.Name.name (Fieldname.get_class_name field))
+              (Fieldname.get_field_name field) )
+          fmt field
+    | Global (mangled, _, _) ->
+        MF.wrap_monospaced Mangled.pp fmt mangled
+    | Other lock ->
+        Domain.Lock.describe fmt lock
+end
+
+(** What a deadlock report is about: the kind of deadlock, and the unordered pair of canonical locks
+    it is between. The kind is part of it because the pair alone does not separate the two kinds. An
+    inversion between two distinct objects of one field, [a_.mutex_] against [b_.mutex_], has the
+    canonical pair [(l, l)], exactly like a self deadlock on that field; both are real and both must
+    be reported. *)
+module CanonicalKey = struct
+  type t =
+    | SelfDeadlock of CanonicalLock.t
+    | Inversion of CanonicalLock.t * CanonicalLock.t  (** ordered, so [(l, m)] and [(m, l)] agree *)
+  [@@deriving compare]
+
+  let self_deadlock lock = SelfDeadlock (CanonicalLock.make lock)
+
+  let inversion lock other_lock =
+    let l = CanonicalLock.make lock and m = CanonicalLock.make other_lock in
+    if CanonicalLock.compare l m <= 0 then Inversion (l, m) else Inversion (m, l)
+
+
+  (** names the locks this report stands for, so the reader can see what else it covers. The report
+      itself keeps naming the concrete locks of one representative site: a canonical name says which
+      field deadlocks, not which objects. *)
+  let describe_scope fmt = function
+    | SelfDeadlock l ->
+        F.fprintf fmt "%a" CanonicalLock.describe l
+    | Inversion (l, m) when Int.equal 0 (CanonicalLock.compare l m) ->
+        (* two objects of one field, so naming it twice would say nothing *)
+        F.fprintf fmt "two objects of %a" CanonicalLock.describe l
+    | Inversion (l, m) ->
+        F.fprintf fmt "%a and %a" CanonicalLock.describe l CanonicalLock.describe m
+end
+
 (** per-file report map, which takes care of deduplication *)
 module ReportMap : sig
   type t
@@ -962,7 +1032,19 @@ module ReportMap : sig
 
   val add_arbitrary_code_execution_under_lock : report_add_t
 
-  val add_deadlock : report_add_t
+  val add_deadlock :
+       Tenv.t
+    -> ProcAttributes.t
+    -> CanonicalKey.t
+    -> canonical_message:string
+    -> Location.t list
+    -> Errlog.loc_trace
+    -> string
+    -> t
+    -> t
+  (** [canonical_message] is used instead of [message] when deduplicating: it names the concrete
+      locks of this site, as [message] does, and adds the canonical locks the one kept report stands
+      for *)
 
   val add_ipc : report_add_t
 
@@ -983,10 +1065,21 @@ module ReportMap : sig
       whole-program mode only *)
 end = struct
   type report_t =
-    {issue_type: IssueType.t; pname: Procname.t; depth: int; ltr: Errlog.loc_trace; message: string}
+    { issue_type: IssueType.t
+    ; pname: Procname.t
+    ; depth: int
+    ; ltr: Errlog.loc_trace
+    ; message: string
+    ; canonical: (CanonicalKey.t * string) option
+          (** for a deadlock, what it is about and the message to use when deduplicating *) }
 
   module LocsMap = Stdlib.Map.Make (struct
     type t = Location.t list [@@deriving compare]
+  end)
+
+  (** deadlocks are deduplicated per file and canonical key, not per location *)
+  module DeadlockMap = Stdlib.Map.Make (struct
+    type t = SourceFile.t * CanonicalKey.t [@@deriving compare]
   end)
 
   type t = report_t list IssueType.Map.t LocsMap.t
@@ -996,11 +1089,11 @@ end = struct
 
   let empty : t = LocsMap.empty
 
-  let add tenv pattrs locs ltr message issue_type loc_map =
+  let add_with_canonical tenv pattrs ?canonical locs ltr message issue_type loc_map =
     if Reporting.is_suppressed tenv pattrs issue_type then loc_map
     else
       let pname = ProcAttributes.get_proc_name pattrs in
-      let report = {issue_type; pname; ltr; message; depth= -List.length ltr} in
+      let report = {issue_type; pname; ltr; message; depth= -List.length ltr; canonical} in
       LocsMap.update locs
         (fun issue_map_opt ->
           let issue_map = Option.value issue_map_opt ~default:IssueType.Map.empty in
@@ -1013,8 +1106,13 @@ end = struct
         loc_map
 
 
-  let add_deadlock tenv pattrs locs ltr message map =
-    add tenv pattrs locs ltr message IssueType.deadlock map
+  let add tenv pattrs locs ltr message issue_type loc_map =
+    add_with_canonical tenv pattrs locs ltr message issue_type loc_map
+
+
+  let add_deadlock tenv pattrs key ~canonical_message locs ltr message map =
+    add_with_canonical tenv pattrs ~canonical:(key, canonical_message) locs ltr message
+      IssueType.deadlock map
 
 
   let add_ipc tenv pattrs locs ltr message map =
@@ -1088,11 +1186,56 @@ end = struct
         Option.fold rep_opt ~init:issue_log ~f:(log_report loc)
       else List.fold reports ~init:issue_log ~f:(log_report loc)
     in
-    let log_location locs issue_map issue_log =
-      List.fold deduplicated_issue_order ~init:issue_log
-        ~f:(log_reports (List.hd_exn locs) issue_map)
-    in
-    LocsMap.fold log_location loc_map IssueLog.empty
+    if not Config.deduplicate then
+      let log_location locs issue_map issue_log =
+        List.fold deduplicated_issue_order ~init:issue_log
+          ~f:(log_reports (List.hd_exn locs) issue_map)
+      in
+      LocsMap.fold log_location loc_map IssueLog.empty
+    else
+      (* A deadlock is one root cause per canonical key, however many procedures, callers and lock
+         spellings reach it, so it is deduplicated over the whole file rather than per location.
+         Keying on the key and not on the location is what keeps a self deadlock and an inversion
+         reported on the same line apart. *)
+      let deadlock_reps =
+        LocsMap.fold
+          (fun locs issue_map acc ->
+            let loc = List.hd_exn locs in
+            IssueType.Map.find_opt IssueType.deadlock issue_map
+            |> Option.value ~default:[]
+            |> List.fold ~init:acc ~f:(fun acc report ->
+                match report.canonical with
+                | None ->
+                    acc
+                | Some (canonical_key, canonical_message) ->
+                    let key = (loc.Location.file, canonical_key) in
+                    let candidate = (loc, {report with message= canonical_message}) in
+                    let better (loc', r') (loc, r) =
+                      (* earliest site of the pair, then a deterministic message *)
+                      match Location.compare loc' loc with
+                      | 0 ->
+                          String.compare r'.message r.message < 0
+                      | c ->
+                          c < 0
+                    in
+                    DeadlockMap.update key
+                      (function
+                        | Some incumbent when better incumbent candidate ->
+                            Some incumbent
+                        | _ ->
+                            Some candidate )
+                      acc ) )
+          loc_map DeadlockMap.empty
+      in
+      let log_location locs issue_map issue_log =
+        List.fold deduplicated_issue_order ~init:issue_log ~f:(fun issue_log issue ->
+            if IssueType.equal issue IssueType.deadlock then issue_log
+            else log_reports (List.hd_exn locs) issue_map issue_log issue )
+      in
+      LocsMap.fold log_location loc_map IssueLog.empty
+      |> DeadlockMap.fold
+           (fun _key (loc, report) issue_log -> log_report loc issue_log report)
+           deadlock_reps
 
 
   let store_multi_file loc_map =
@@ -1170,6 +1313,83 @@ let get_held_classes tenv (pair : Domain.CriticalPair.t) =
 
 
 let is_private attrs = ProcAttributes.equal_access (ProcAttributes.get_access attrs) Private
+
+(** the one procedure that performs every lock held at [pair], if there is exactly one *)
+let single_acquiring_procname (pair : Domain.CriticalPair.t) =
+  let procs =
+    Domain.Acquisitions.fold
+      (fun (acquisition : Domain.Acquisition.t) acc ->
+        Procname.Set.add acquisition.elem.procname acc )
+      pair.elem.acquisitions Procname.Set.empty
+  in
+  match Procname.Set.is_singleton_or_more procs with
+  | IContainer.Singleton pname ->
+      Some pname
+  | IContainer.Empty | IContainer.More ->
+      None
+
+
+(** The callee that performs the whole deadlock [pname] is about, if [pname] merely inherits it. A
+    caller that contributes neither of the two acquisitions only repeats its callee's report, at its
+    own location and under its own spelling of the locks, which is how one root cause reaches every
+    entry point of a service.
+
+    The callee has to be reportable for this to be safe. A private one never reports (see
+    [is_not_private] in [report_on_pair_with_file_peers]), so suppressing its callers as well would
+    lose the root cause rather than deduplicate it. *)
+let reportable_callee_holding_whole_deadlock ~pname pair =
+  if not Config.deduplicate then None
+  else
+    match single_acquiring_procname pair with
+    | Some acquiring
+      when (not (Procname.equal acquiring pname))
+           && Attributes.load acquiring
+              |> Option.exists ~f:(fun attrs -> should_report attrs && not (is_private attrs)) ->
+        Some acquiring
+    | _ ->
+        None
+
+
+let inherits_whole_deadlock_from_callee ~pname pair =
+  Option.is_some (reportable_callee_holding_whole_deadlock ~pname pair)
+
+
+(** Will the two sides of the inversion be put together anywhere other than here? Two procedures are
+    compared when one is among the other's peers, and peers are the procedures of one captured file
+    (see [FilePeers], built in [reporting] from the procedures of the file under analysis), so in
+    C/C++/ObjC that is the file boundary. In the whole-program mode everything is compared.
+
+    Nothing else is claimed. The remaining route in [is_found_by_other_side], the methods of the
+    classes on the paths of the locks, is not assumed here: for globals and for plain structs it
+    finds nothing, and assuming it would again suppress a caller whose callees stay silent. *)
+let sides_meet_elsewhere one other =
+  Config.starvation_whole_program
+  || Procname.is_clang one && Procname.is_clang other
+     &&
+     match (Attributes.load one, Attributes.load other) with
+     | Some one_attrs, Some other_attrs ->
+         SourceFile.equal one_attrs.ProcAttributes.translation_unit
+           other_attrs.ProcAttributes.translation_unit
+     | _, _ ->
+         false
+
+
+(** The callee reports the inversion in place of its callers only if the other side of it is some
+    other procedure, and only if the two will actually be compared.
+
+    Both halves lose the deadlock when they are wrong. If the two sides are the same callee reached
+    from two call sites -- a [transfer(other)] taking its own lock and then another object's, called
+    with the two objects swapped -- that callee has nothing to deadlock against on its own. If they
+    are different callees in different files, neither is a peer of the other and neither of them
+    ever puts the two together; only the caller does. *)
+let inversion_is_reported_by_a_callee ~pname ~other_pname pair other_pair =
+  match reportable_callee_holding_whole_deadlock ~pname pair with
+  | None ->
+      false
+  | Some callee ->
+      let other_side = single_acquiring_procname other_pair |> Option.value ~default:other_pname in
+      (not (Procname.equal callee other_side)) && sides_meet_elsewhere callee other_side
+
 
 (* initializers of globals normally run before any thread is started *)
 let is_global_initializer pname = Option.is_some (Procname.get_global_name_of_initializer pname)
@@ -1321,14 +1541,21 @@ let report_on_parallel_composition_with_file_peers ~file_peers ~should_report_st
           when should_report_deadlock_on_current_proc
                  ~found_by_other_side:(fun () ->
                    is_found_by_other_side tenv ~file_peers pname pair other_pname other_pair )
-                 pair other_pair ->
+                 pair other_pair
+               && not (inversion_is_reported_by_a_callee ~pname ~other_pname pair other_pair) ->
             let error_message =
               Format.asprintf
                 "%a (Trace 1) and %a (Trace 2) acquire locks %a and %a in reverse orders." pname_pp
                 pname pname_pp other_pname Lock.describe lock Lock.describe other_lock
             in
+            let canonical_key = CanonicalKey.inversion lock other_lock in
+            let canonical_message =
+              Format.asprintf "%s Reported once for %a in this file." error_message
+                CanonicalKey.describe_scope canonical_key
+            in
             let ltr, locs = make_trace_and_locs () in
-            ReportMap.add_deadlock tenv pattrs locs ltr error_message report_map
+            ReportMap.add_deadlock tenv pattrs canonical_key ~canonical_message locs ltr
+              error_message report_map
         | _ ->
             report_map )
       | _ ->
@@ -1447,13 +1674,23 @@ let report_on_pair_with_file_peers ~analyze_ondemand ~file_peers tenv pattrs
       match
         List.find locks ~f:(fun lock -> Acquisitions.lock_is_held lock pair.elem.acquisitions)
       with
+      | Some _ when inherits_whole_deadlock_from_callee ~pname pair ->
+          (* warn only in the procedure that takes the lock it then re-takes, as the
+             [MustNotOccurUnderLock] case above does, not at every caller of it *)
+          report_map
       | Some lock ->
           let error_message =
             Format.asprintf "Potential self deadlock. %a%a twice." pname_pp pname Lock.pp_locks lock
           in
+          let canonical_key = CanonicalKey.self_deadlock lock in
+          let canonical_message =
+            Format.asprintf "%s Reported once for %a in this file." error_message
+              CanonicalKey.describe_scope canonical_key
+          in
           let locs = CriticalPair.get_earliest_lock_or_call_locs ~procname:pname pair in
           let ltr = CriticalPair.make_trace ~header:"In method " pname pair in
-          ReportMap.add_deadlock tenv pattrs locs ltr error_message report_map
+          ReportMap.add_deadlock tenv pattrs canonical_key ~canonical_message locs ltr error_message
+            report_map
       | None when Config.starvation_whole_program ->
           report_map
       | None when Acquisitions.is_empty pair.elem.acquisitions && not should_report_starvation ->

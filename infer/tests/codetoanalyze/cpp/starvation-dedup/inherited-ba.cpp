@@ -1,0 +1,19 @@
+/*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#include "inherited.h"
+
+namespace inherited {
+
+// The other side, in a file of its own. Neither helper reports the inversion,
+// so the only place it can be reported is the caller that reaches both.
+void split_beta_then_alpha_bad() {
+  std::lock_guard<std::mutex> b(beta);
+  std::lock_guard<std::mutex> a(alpha);
+}
+
+} // namespace inherited

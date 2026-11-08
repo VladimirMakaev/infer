@@ -11,7 +11,11 @@ CLANG_OPTIONS = -x c++ -std=c++11 -nostdinc++ -isystem$(ROOT_DIR) -isystem$(CLAN
 
 INFER_OPTIONS = --starvation-only --project-root $(TESTS_DIR)
 
-INFERPRINT_OPTIONS = --issues-tests
+# the qualifier is recorded because what this directory tests is which reports
+# survive deduplication AND what the surviving one says about the locks it covers
+INFERPRINT_OPTIONS = \
+  --issues-tests-fields file,procedure,line_offset,bug_type,bucket,severity,bug_trace,qualifier \
+  --issues-tests
 
 SOURCES = $(wildcard *.cpp)
 
