@@ -15,6 +15,7 @@ ifeq ($(BUILD_C_ANALYZERS),yes)
 BUILD_SYSTEMS_TESTS += \
   backtrack_level \
   clang_char_signedness_recursion \
+  clang_copy_batch_independence \
   clang_compilation_db_escaped clang_compilation_db_failures clang_compilation_db_relpath \
   clang_compile_errors \
   clang_multiple_files \
