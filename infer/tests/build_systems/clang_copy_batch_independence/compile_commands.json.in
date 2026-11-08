@@ -1,0 +1,8 @@
+[
+   { "directory" : "%src%", "file" : "leaves.cpp",
+     "arguments" : ["clang++", "-std=c++17", "-c", "leaves.cpp"] },
+   { "directory" : "%src%", "file" : "renderer_base.cpp",
+     "arguments" : ["clang++", "-std=c++17", "-c", "renderer_base.cpp"] },
+   { "directory" : "%src%", "file" : "context.cpp",
+     "arguments" : ["clang++", "-std=c++17", "-c", "context.cpp"] }
+]
