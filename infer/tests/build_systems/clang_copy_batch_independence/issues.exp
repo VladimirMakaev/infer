@@ -1,0 +1,8 @@
+--- captured: leaves.cpp
+build_systems/codetoanalyze/copy_batch_independence/leaves.cpp, CopyIntoBase_bad::CopyIntoBase_bad, 0, PULSE_UNNECESSARY_COPY_INTERMEDIATE, no_bucket, ERROR, [copied here (with type `std::shared_ptr<Resource>&`)]
+--- captured: leaves.cpp renderer_base.cpp
+build_systems/codetoanalyze/copy_batch_independence/leaves.cpp, CopyIntoBase_bad::CopyIntoBase_bad, 0, PULSE_UNNECESSARY_COPY_INTERMEDIATE, no_bucket, ERROR, [copied here (with type `std::shared_ptr<Resource>&`)]
+--- captured: leaves.cpp context.cpp
+build_systems/codetoanalyze/copy_batch_independence/leaves.cpp, CopyIntoBase_bad::CopyIntoBase_bad, 0, PULSE_UNNECESSARY_COPY_INTERMEDIATE, no_bucket, ERROR, [copied here (with type `std::shared_ptr<Resource>&`)]
+--- captured: leaves.cpp renderer_base.cpp context.cpp
+build_systems/codetoanalyze/copy_batch_independence/leaves.cpp, CopyIntoBase_bad::CopyIntoBase_bad, 0, PULSE_UNNECESSARY_COPY_INTERMEDIATE, no_bucket, ERROR, [copied here (with type `std::shared_ptr<Resource>&`)]

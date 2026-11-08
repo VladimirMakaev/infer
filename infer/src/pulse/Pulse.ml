@@ -416,8 +416,51 @@ let is_read_by_sibling_actual calls (copied_into : Attribute.CopiedInto.t)
       false
 
 
-let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
-    non_disj_astate =
+(** Does [pvar] appear in any instruction the control flow can reach after [node]?
+
+    This asks about the shape of the procedure, not about which paths the analysis explored, and
+    that is the whole point. Whether an intermediate copy can become a move depends on the SOURCE
+    not being read again afterwards, and the state-based answer to that is only as good as the
+    states that got there: in a procedure with no normal exit the later instructions are never
+    executed by the analysis, so "never used after" comes back vacuously true and a copy that cannot
+    be a move looks like one that can.
+
+    Over-approximating is the safe direction here. A use on a path that is infeasible, or one before
+    the copy in the copying node itself, only costs a report. *)
+let source_used_after_node node pvar =
+  let uses_pvar (instr : Sil.instr) =
+    match instr with
+    | Metadata _ ->
+        (* ExitScope and friends name variables for bookkeeping; they read nothing *)
+        false
+    | Call (_, _, _, _, {cf_injected_destructor= true}) ->
+        (* destroying the source is not a reason to refuse the move: a moved-from object is
+           still destroyed, and every by-value local has such a call *)
+        false
+    | Load {id} when Ident.is_none id ->
+        (* a load whose result is thrown away: how the frontend materialises an object at the
+           end of its scope, not a read that a move would break *)
+        false
+    | _ ->
+        Sil.exps_of_instr instr
+        |> List.exists ~f:(fun exp -> Exp.program_vars exp |> Sequence.exists ~f:(Pvar.equal pvar))
+  in
+  let rec walk to_visit visited =
+    match to_visit with
+    | [] ->
+        false
+    | n :: rest ->
+        if Procdesc.NodeSet.mem n visited then walk rest visited
+        else if Instrs.exists (Procdesc.Node.get_instrs n) ~f:uses_pvar then true
+        else walk (Procdesc.Node.get_succs n @ rest) (Procdesc.NodeSet.add n visited)
+  in
+  (* strict successors: the copying node reads the source to make the copy, and that read is
+     the copy itself, not a later use *)
+  walk (Procdesc.Node.get_succs node) Procdesc.NodeSet.empty
+
+
+let report_unnecessary_copies ?(intermediates_only = false)
+    ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
   let reported = ref [] in
   (* lazy, so a procedure whose copies are all filtered out earlier never walks its instructions *)
@@ -428,6 +471,21 @@ let report_unnecessary_copies ({InterproceduralAnalysis.proc_desc; tenv} as anal
       ~ptr_formals:(Procdesc.get_pointer_formals proc_desc)
       ~ref_captures:(Procdesc.get_captured_by_ref proc_desc)
       non_disj_astate
+    |> List.filter ~f:(fun (copied_into, _, source_opt, node, _, _, _) ->
+        (not intermediates_only)
+        ||
+        match ((copied_into : Attribute.CopiedInto.t), source_opt) with
+        | IntoIntermediate _, Some (DecompilerExpr.PVar pvar, _) ->
+            (* the intermediate itself cannot be modified later -- it dies with the full
+                  expression -- but the advice to move is only sound if the source is not read
+                  again, and here the analysis never got as far as finding out *)
+            not (source_used_after_node node pvar)
+        | IntoIntermediate _, _ ->
+            (* no program variable to check: the source is a temporary or a return value,
+                  which nothing later can name *)
+            true
+        | (IntoVar _ | IntoField _), _ ->
+            false )
     |> List.iter
          ~f:(fun (copied_into, source_typ, source_opt, node, location, copied_location, from) ->
            let copy_name = Format.asprintf "%a" Attribute.CopiedInto.pp copied_into in
@@ -3040,11 +3098,22 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
         PulseFatalOnNullable.report_errors analysis_data posts ;
         if Config.is_checker_enabled TreeBorrows then
           report_tree_borrows_errors analysis_data summary.pre_post_list ;
-        if not (has_0_continue_program summary) then (
-          (* Do not report unnecessary copy issue when no continue program, because it may have
-             missed the statements that modify copied objects. *)
-          report_unnecessary_copies analysis_data non_disj_astate ;
-          report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
+        let has_0_continue_program = has_0_continue_program summary in
+        (* Do not report unnecessary copy issues when no continue program, because the analysis
+           may have missed the statements that modify the copied objects.
+
+           Intermediates are the exception, and reporting them here is what keeps the result
+           independent of which other translation units happen to be captured. An intermediate
+           does not outlive the full expression that creates it, so no later statement can
+           modify it and there is nothing for a truncated analysis to have missed. The copies
+           this suppression was added for are the ones that can: a copy assigned into a variable
+           and a parameter that could have been a reference both live on. Without the exception,
+           resolving a callee that never returns -- which only happens when its own unit is in
+           the same results directory -- silently deletes the report. *)
+        report_unnecessary_copies ~intermediates_only:has_0_continue_program analysis_data
+          non_disj_astate ;
+        if not has_0_continue_program then
+          report_unnecessary_parameter_copies analysis_data non_disj_astate ;
         if move_operation_copies proc_desc (Procdesc.get_proc_name proc_desc) non_disj_astate then
           { summary with
             non_disj=
