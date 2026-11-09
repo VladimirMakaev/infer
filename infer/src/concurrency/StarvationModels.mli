@@ -82,6 +82,9 @@ val is_java_main_method : Procname.t -> bool
 val may_execute_arbitrary_code : Tenv.t -> Procname.t -> HilExp.t list -> bool
 (** for example [com.google.common.util.concurrent.SettableFuture.set] *)
 
+val is_lazy_coroutine_task_name : Typ.Name.t -> bool
+(** the same test on a type name, for a constructor's class *)
+
 val is_lazy_coroutine_task_type : Typ.t -> bool
 (** does this type name a lazy coroutine task whose body has not run yet? a narrow model list, see
     the comment on [lazy_coroutine_task_types] *)
