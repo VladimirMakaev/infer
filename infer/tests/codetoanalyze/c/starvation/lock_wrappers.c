@@ -70,7 +70,10 @@ void guard_init(struct WGuard* g, struct WMutex* m) {
 void guard_release(struct WGuard* g) { pthread_mutex_unlock(g->m); }
 
 // the release through the field of the local guard is not matched with the
-// lock taken through the parameter, so wm1 is considered held when wm2 is taken
+// lock taken through the parameter, so wm1 is considered held when wm2 is taken.
+// It has no row of its own: the wm1/wm2 pair is already reported above, and one
+// pair is one report per file, so this false positive is merged into that row
+// rather than fixed.
 int FP_guard_wm1_wm2_ok(int b) {
   if (b) {
     struct WGuard g;
