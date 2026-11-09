@@ -58,7 +58,7 @@ let collect_until kinds scope =
 
 
 let rec breaks_control_flow = function
-  | `ReturnStmt _ | `BreakStmt _ | `ContinueStmt _ | `GotoStmt _ ->
+  | `ReturnStmt _ | `BreakStmt _ | `ContinueStmt _ | `GotoStmt _ | `CoreturnStmt _ ->
       true
   | `AttributedStmt (_, [stmt], _) ->
       breaks_control_flow stmt
@@ -314,6 +314,18 @@ module Variables = struct
               [Loop]
         in
         let vars_to_destroy = collect_until break_until scope in
+        L.debug Capture Verbose "~[%d:%a]" stmt_info.Clang_ast_t.si_pointer
+          (Pp.seq ~sep:"," CContext.pp_var_to_destroy)
+          vars_to_destroy ;
+        let map = ClangPointers.Map.add stmt_info.Clang_ast_t.si_pointer vars_to_destroy acc.map in
+        (scope, {acc with map})
+    | `CoreturnStmt (stmt_info, stmt_list, _) ->
+        (* [co_return] leaves the coroutine body, so the locals in scope are destroyed just as
+           they are on a plain [return]: the promise's return_void/return_value runs first, then
+           the locals go, then the final suspend. Without this the list is empty and nothing
+           destroys them, so a lock_guard held here is never released. *)
+        let scope, acc = visit_stmt_list context stmt_list scope_acc in
+        let vars_to_destroy = collect_until [InitialScope] scope in
         L.debug Capture Verbose "~[%d:%a]" stmt_info.Clang_ast_t.si_pointer
           (Pp.seq ~sep:"," CContext.pp_var_to_destroy)
           vars_to_destroy ;

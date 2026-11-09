@@ -6001,9 +6001,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         Some
           (call_function_with_args Procdesc.Node.ReturnStmt BuiltinDecl.__builtin_cxx_co_return
              trans_state stmt_info StdTyp.void args ) )
-      ~mk_second:(fun trans_state stmt_info ->
+      ~mk_second:(fun trans_state _fresh_stmt_info ->
         (* a plain [return;]: the object the caller gets was already stored in the return slot
-           before the body ran, so returning a value here would overwrite it with a fresh one *)
+           before the body ran, so returning a value here would overwrite it with a fresh one.
+
+           Pass the ORIGINAL statement info, not the fresh one [force_sequential] makes to keep
+           node identities apart: the locals to destroy here were recorded by [CScope] under
+           this statement's own pointer, and looking them up under a fresh one finds nothing,
+           which is how [co_return] came to leave its locals undestroyed. *)
         returnStmt_trans trans_state stmt_info [] )
       ~mk_return:(fun ~fst ~snd:_ -> fst.return)
 
