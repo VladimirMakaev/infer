@@ -10,9 +10,14 @@
 
 // Shapes where a lock guard is still in scope at co_return. Each one gets its own pair
 // of mutexes and its own partner taking them in the opposite order, so the per-pair
-// deadlock deduplication cannot let one shape mask another. The guards' destructors run
-// at co_return, so every coroutine below inverts against its partner and is reported;
-// before that was so, the lock looked held at the exit and the pair was dropped.
+// deadlock deduplication cannot let one shape mask another. All of them are reported.
+//
+// S1, S3, S4, S5 and S7 are the discriminating ones: before the destructors of locals in
+// scope at co_return were run there, the lock looked held at the exit and the pair was
+// dropped as unbalanced, so they were silent. S2 and S6 were reported already -- each has a
+// path that leaves the body normally, where the destructors always ran -- so they are
+// additional coverage of the same lowering rather than a regression test for it. S8, S9 and
+// S10 are controls that must not move.
 namespace co_return_shapes {
 
 template <typename T>

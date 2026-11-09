@@ -332,6 +332,46 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     let make_ret_attr return_attribute = {empty_summary with return_attribute} in
     let make_thread thread = {empty_summary with thread} in
     let actuals_acc_exps = get_access_expr_list actuals in
+    (* A lazy task keeps its meaning when it is copied or moved, and the ordinary way to hand
+       one to [blockingWait] is through a local: [auto t = body(); blockingWait(std::move(t))]
+       constructs the by-value argument from [t], so the call below sees a fresh temporary and
+       not [t] itself. Carry the attribute across that construction, and across [std::move],
+       so that waiting on a task held in a variable imports the body just as awaiting it does.
+       This only moves an existing attribute onto another expression; the call is then handled
+       exactly as before. *)
+    let astate =
+      let carried =
+        List.find_map actuals_acc_exps ~f:(fun acc_exp_opt ->
+            let open IOption.Let_syntax in
+            let* acc_exp = acc_exp_opt in
+            match Domain.AttributeDomain.find_opt acc_exp astate.attributes with
+            | Some (Domain.Attribute.LazyCoroutine _ as attribute) ->
+                Some attribute
+            | _ ->
+                None )
+      in
+      match carried with
+      | None ->
+          astate
+      | Some attribute ->
+          let destination =
+            if Procname.is_constructor callee then
+              (* ...but only into another lazy task. Anything else built FROM a task runs it
+                 somewhere else -- a task bound to an executor, or a user awaitable wrapping
+                 one -- and must not inherit the body's locks, which is the whole reason those
+                 types are not in the list. The object being constructed is the receiver. *)
+              if
+                Procname.get_class_type_name callee
+                |> Option.exists ~f:StarvationModels.is_lazy_coroutine_task_name
+              then List.hd actuals_acc_exps |> Option.join
+              else None
+            else if Procname.is_std_move callee then Some lhs
+            else None
+          in
+          Option.value_map destination ~default:astate ~f:(fun destination ->
+              { astate with
+                attributes= Domain.AttributeDomain.add destination attribute astate.attributes } )
+    in
     let get_returned_executor_summary () =
       StarvationModels.get_returned_executor tenv callee actuals
       |> Option.map ~f:(fun thread_constraint -> make_ret_attr (WorkScheduler thread_constraint))

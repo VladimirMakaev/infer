@@ -450,14 +450,17 @@ let may_execute_arbitrary_code =
     silences real deadlocks at the creation site. *)
 let lazy_coroutine_task_types = ["folly::coro::Task"; "folly::coro::AsyncGenerator"]
 
+let is_lazy_coroutine_task_name name =
+  let without_template = Typ.Name.qual_name name |> QualifiedCppName.to_qual_string in
+  List.exists lazy_coroutine_task_types ~f:(fun prefix ->
+      String.equal without_template prefix
+      || String.is_prefix without_template ~prefix:(prefix ^ "<") )
+
+
 let is_lazy_coroutine_task_type (typ : Typ.t) =
   match typ.desc with
   | Tstruct name | Tptr ({desc= Tstruct name}, _) ->
-      let qual_name = Typ.Name.qual_name name in
-      let without_template = QualifiedCppName.to_qual_string qual_name in
-      List.exists lazy_coroutine_task_types ~f:(fun prefix ->
-          String.equal without_template prefix
-          || String.is_prefix without_template ~prefix:(prefix ^ "<") )
+      is_lazy_coroutine_task_name name
   | _ ->
       false
 
@@ -466,7 +469,19 @@ let is_lazy_coroutine_task_type (typ : Typ.t) =
     body locks IS held here. *)
 let is_coroutine_blocking_wait procname =
   match procname with
-  | Procname.ObjC_Cpp _ | Procname.C _ ->
-      String.is_substring (Procname.to_string procname) ~substring:"folly::coro::blockingWait"
+  | Procname.ObjC_Cpp _ | Procname.C _ -> (
+    (* exactly this function, qualified. A substring of the printed name also matched
+         [blockingWaitAsync], which does not run the task on this thread, and anything ending
+         in the same three components, such as a lookalike in another namespace. Template
+         arguments are not part of the qualified name, so both the bare and the instantiated
+         form compare equal here. *)
+    match Procname.get_qualifiers procname |> QualifiedCppName.to_list with
+    | ["folly"; "coro"; last] ->
+        (* [get_qualifiers] keeps the template arguments on the last component, so the
+             instantiated name arrives as [blockingWait<void>]; compare the name before them so
+             that the bare and instantiated forms both match and nothing else does *)
+        String.take_while last ~f:(fun c -> not (Char.equal c '<')) |> String.equal "blockingWait"
+    | _ ->
+        false )
   | _ ->
       false
