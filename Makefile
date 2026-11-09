@@ -108,6 +108,7 @@ DIRECT_TESTS += \
   cpp_sil \
   cpp_siof \
   cpp_starvation \
+  cpp_starvation-20 \
   cpp_starvation-dedup \
 
 ifeq ($(BUILD_CPU),x86_64)
