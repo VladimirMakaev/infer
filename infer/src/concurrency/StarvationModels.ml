@@ -440,3 +440,33 @@ let may_execute_arbitrary_code =
   let open MethodMatcher in
   of_record
     {default with classname= "com.google.common.util.concurrent.SettableFuture"; methods= ["set"]}
+
+
+(** The lazy coroutine task types we recognise. This is deliberately a MODEL LIST, not a principled
+    test: whether a coroutine is lazy is decided by its promise's [initial_suspend], and that
+    expression is not in the exported clang AST (a [CoroutineBodyStmt] gives us only the body, the
+    promise declaration and the return value). Everything here returns a task whose body is known
+    not to start until it is awaited or handed to an executor. Keep it narrow: a type added wrongly
+    silences real deadlocks at the creation site. *)
+let lazy_coroutine_task_types = ["folly::coro::Task"; "folly::coro::AsyncGenerator"]
+
+let is_lazy_coroutine_task_type (typ : Typ.t) =
+  match typ.desc with
+  | Tstruct name | Tptr ({desc= Tstruct name}, _) ->
+      let qual_name = Typ.Name.qual_name name in
+      let without_template = QualifiedCppName.to_qual_string qual_name in
+      List.exists lazy_coroutine_task_types ~f:(fun prefix ->
+          String.equal without_template prefix
+          || String.is_prefix without_template ~prefix:(prefix ^ "<") )
+  | _ ->
+      false
+
+
+(** [folly::coro::blockingWait] runs the task to completion on the calling thread, so whatever the
+    body locks IS held here. *)
+let is_coroutine_blocking_wait procname =
+  match procname with
+  | Procname.ObjC_Cpp _ | Procname.C _ ->
+      String.is_substring (Procname.to_string procname) ~substring:"folly::coro::blockingWait"
+  | _ ->
+      false

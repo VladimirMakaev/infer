@@ -197,6 +197,12 @@ module Attribute : sig
     | FutureDoneGuard of HilExp.AccessExpression.t  (** boolean equivalent to [Future.isDone()] *)
     | FutureDoneState of bool  (** is a [Future] ready for non-blocking consumption *)
     | Runnable of Procname.t  (** is a Runnable/Callable with given "run" procname *)
+    | LazyCoroutine of Procname.t * HilExp.t list
+        (** the result of creating a lazy coroutine, e.g. a [folly::coro::Task]: its body has not
+            run yet, and will run wherever the task is awaited or scheduled. The actuals are the
+            ones the task was CREATED with: the body's locks are expressed over the coroutine's own
+            formals, so substituting them needs the arguments of that call, not of the [co_await]
+            that eventually runs it. *)
     | WorkScheduler of StarvationModels.scheduler_thread_constraint
         (** exp is something that schedules work on the given thread *)
     | Looper of StarvationModels.scheduler_thread_constraint  (** Android looper on given thread *)
@@ -319,7 +325,11 @@ val schedule_work :
 (** record the fact that a method is scheduled to run on a certain thread/executor *)
 
 type summary =
-  { critical_pairs: CriticalPairs.t
+  { is_lazy_coroutine: bool
+        (** the procedure is the ramp of a lazy coroutine: the frontend translates ramp and body as
+            one procedure, so its critical pairs are the BODY's and a caller that merely creates the
+            task does not run them *)
+  ; critical_pairs: CriticalPairs.t
   ; thread: ThreadDomain.t
   ; scheduled_work: ScheduledWorkDomain.t
   ; lock_state: LockState.t

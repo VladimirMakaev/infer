@@ -404,6 +404,83 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
             None
       else None
     in
+    (* Creating a lazy coroutine does not run its body: the frontend translates ramp and body as
+       one procedure, so the callee's summary holds the BODY's critical pairs while at this call
+       the task has only been built. Import nothing, and mark the value with what it will run so
+       that an await or a blockingWait can import it there. Handing the task to an executor needs
+       no handling: nothing was imported in the first place, which is the deferred behaviour. *)
+    let treat_lazy_coroutine_creation () =
+      match get_callee_summary () with
+      | Some ({is_lazy_coroutine= true} : summary) ->
+          (* a task is a by-value struct, so the callee is given an added return parameter and
+             the value arrives through a temporary, not through the call's result ident; that
+             temporary is what an await below will name *)
+          let returned_exp =
+            let has_added_return_param =
+              Attributes.load callee
+              |> Option.exists ~f:(fun (a : ProcAttributes.t) -> a.has_added_return_param)
+            in
+            if has_added_return_param then
+              List.last actuals_acc_exps |> Option.join |> Option.value ~default:lhs
+            else lhs
+          in
+          let task_is_returned =
+            (* The attribute is intra-procedural, so if the task leaves as this procedure's
+               return value we lose track of it and cannot re-import the body where it is
+               finally awaited. Fall through to the ordinary call handling in that case: that
+               is what happened before this change, and losing a real report is worse than
+               keeping a creation-site one the caller may later turn out not to deserve. *)
+            let attributes = Procdesc.get_attributes proc_desc in
+            attributes.ProcAttributes.has_added_return_param
+            &&
+            match HilExp.AccessExpression.get_base returned_exp with
+            | Var.ProgramVar pvar, _ ->
+                List.last attributes.ProcAttributes.formals
+                |> Option.exists ~f:(fun (name, _, _) -> Mangled.equal name (Pvar.get_name pvar))
+            | Var.LogicalVar _, _ ->
+                false
+          in
+          if task_is_returned then None
+          else
+            Some
+              { astate with
+                attributes=
+                  Domain.AttributeDomain.add returned_exp
+                    (Domain.Attribute.LazyCoroutine (callee, actuals))
+                    astate.attributes }
+      | _ ->
+          None
+    in
+    (* ... and the places that DO run it on this thread: [co_await task] and
+       [folly::coro::blockingWait(task)]. Whatever the body locks is held right here. *)
+    let treat_coroutine_execution () =
+      let runs_task_inline =
+        Procname.equal callee BuiltinDecl.__builtin_cxx_co_await
+        || StarvationModels.is_coroutine_blocking_wait callee
+      in
+      if runs_task_inline then
+        List.find_map actuals_acc_exps ~f:(fun acc_exp_opt ->
+            let open IOption.Let_syntax in
+            let* acc_exp = acc_exp_opt in
+            let* attribute = Domain.AttributeDomain.find_opt acc_exp astate.attributes in
+            match (attribute : Domain.Attribute.t) with
+            | LazyCoroutine (coro_procname, creation_actuals) ->
+                let+ coro_summary = analyze_dependency coro_procname |> AnalysisResult.to_option in
+                let subst =
+                  (* the body's locks are written in terms of the COROUTINE's formals, so they
+                     have to be substituted with the arguments it was created with; the only
+                     actual here is the task itself *)
+                  Lock.make_normalised_subst tenv ~guard_lock:(Domain.get_guard_lock astate) formals
+                    creation_actuals
+                in
+                (* name the coroutine, not the await builtin, in the trace *)
+                let callsite = CallSite.make coro_procname loc in
+                Domain.integrate_summary ?release_held_locks ~tenv ~procname ~lhs ~subst formals
+                  callsite astate coro_summary
+            | _ ->
+                None )
+      else None
+    in
     let treat_assume () =
       if StarvationModels.is_assume_true tenv callee actuals then
         List.hd actuals |> Option.map ~f:(fun exp -> do_assume formals exp astate)
@@ -436,6 +513,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     IList.eval_until_first_some
       [ treat_handler_constructor
       ; treat_thread_constructor
+      ; treat_coroutine_execution
+      ; treat_lazy_coroutine_creation
       ; treat_assume
       ; treat_arbitrary_code_exec
       ; treat_modeled_summaries ]
