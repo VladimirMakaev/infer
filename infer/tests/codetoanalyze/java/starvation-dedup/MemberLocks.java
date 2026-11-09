@@ -42,13 +42,13 @@ class ZMemberLocksClient {
   }
 }
 
-// Known FN; see the parent/child ordering follow-up. Both sides form a cyclic inversion.
-// The MemberLocksA/MemberLocksB deadlock is found from both sides but reported once
+// the deadlock between lockThenCallBBad() and MemberLocksB.lockThenCallABad() is found from both
+// sides but reported once
 class MemberLocksA {
   MemberLocksB b;
   private final Object mLock = new Object();
 
-  void FN_lockThenCallBBad() { // Known FN; see the parent/child ordering follow-up.
+  void lockThenCallBBad() {
     synchronized (mLock) {
       b.lockB();
     }
@@ -69,7 +69,7 @@ class MemberLocksB {
     }
   }
 
-  void FN_lockThenCallABad() { // Known FN; see the parent/child ordering follow-up.
+  void lockThenCallABad() {
     synchronized (mLock) {
       a.lockA();
     }

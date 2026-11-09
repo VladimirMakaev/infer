@@ -5,11 +5,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-class FN_BoundMemberLocksTask implements Runnable {
+// Two tasks whose locks are reached only through each other: the cycle between them is
+// what makes the two orders meet on one pair of objects.
+class BoundMemberLocksTask implements Runnable {
   final Object mLock = new Object();
-  FN_BoundMemberLocksOtherTask mOther;
+  BoundMemberLocksOtherTask mOther;
 
-  // Known FN; see the parent/child ordering follow-up.
   @Override
   public void run() {
     synchronized (mLock) {
@@ -19,11 +20,10 @@ class FN_BoundMemberLocksTask implements Runnable {
   }
 }
 
-class FN_BoundMemberLocksOtherTask implements Runnable {
+class BoundMemberLocksOtherTask implements Runnable {
   final Object mLock = new Object();
-  FN_BoundMemberLocksTask mTask;
+  BoundMemberLocksTask mTask;
 
-  // Known FN; see the parent/child ordering follow-up.
   @Override
   public void run() {
     synchronized (mLock) {
@@ -33,11 +33,10 @@ class FN_BoundMemberLocksOtherTask implements Runnable {
   }
 }
 
-class FN_BoundMemberLocksMain {
-  // Known FN; see the parent/child ordering follow-up (explicit cyclic task back-pointers).
+class BoundMemberLocksMain {
   public static void main(String args[]) {
-    FN_BoundMemberLocksTask task = new FN_BoundMemberLocksTask();
-    FN_BoundMemberLocksOtherTask other = new FN_BoundMemberLocksOtherTask();
+    BoundMemberLocksTask task = new BoundMemberLocksTask();
+    BoundMemberLocksOtherTask other = new BoundMemberLocksOtherTask();
     task.mOther = other;
     other.mTask = task;
     Thread t1 = new Thread(task);

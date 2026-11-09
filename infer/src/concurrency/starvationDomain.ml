@@ -623,6 +623,46 @@ module Acquisitions = struct
     exists (fun acq -> Lock.may_alias_across_threads tenv lock acq.elem.lock) acquisitions
 
 
+  (* the field, or global, a lock is named by: two locks with the same key are the same lock of
+     possibly different objects *)
+  module GateKey = struct
+    type t =
+      | Field of Fieldname.t
+      | Global of (Mangled.t * Typ.template_spec_info * SourceFile.t option)
+    [@@deriving compare]
+
+    let of_lock lock =
+      match Lock.get_last_field_or_global lock with
+      | Some (First field) ->
+          Some (Field field)
+      | Some (Second global) ->
+          Some (Global (Lock.global_key global))
+      | None ->
+          None
+
+
+    let equal k k' = Int.equal 0 (compare k k')
+  end
+
+  (* Do the two sides hold a lock that may be one and the same gate: the same field of the same
+     class, or the same global, which [may_alias_across_threads] could not show to be one object?
+     Not showing they are one object is not showing they are two, and a gate both traces take
+     serialises them, so their lock orders never meet. *)
+  let may_share_an_unidentified_gate tenv acqs1 acqs2 =
+    exists
+      (fun (acq1 : Acquisition.t) ->
+        match GateKey.of_lock acq1.elem.lock with
+        | None ->
+            false
+        | Some key1 ->
+            exists
+              (fun (acq2 : Acquisition.t) ->
+                GateKey.of_lock acq2.elem.lock |> Option.exists ~f:(GateKey.equal key1)
+                && not (Lock.may_alias_across_threads tenv acq1.elem.lock acq2.elem.lock) )
+              acqs2 )
+      acqs1
+
+
   (* [lock_is_held_in_other_thread], returning how the two root objects were identified *)
   let find_held_in_other_thread tenv lock acquisitions =
     fold
@@ -953,7 +993,13 @@ module CriticalPair = struct
      two traces can only run on the same pair of objects when the object graph has a cycle between
      them, as for a parent holding its child and that child pointing back at the parent. The same
      objects are then the first AND the second of their class on the composed path, which is what
-     [reaches_object] already refuses to match within one path. *)
+     [reaches_object] already refuses to match within one path.
+
+     Such a cycle is ordinary, though: an owner holding its part and the part pointing back at its
+     owner deadlock exactly like this, and that is a real deadlock rather than two unrelated pairs
+     of objects. So a cyclic identification alone says nothing, and is only a reason not to report
+     when the two traces also hold a lock that may be one gate they share -- see
+     [Acquisitions.may_share_an_unidentified_gate]. *)
   let identification_is_cyclic (d_lhs : Lock.alias_direction) (d_rhs : Lock.alias_direction) =
     match (d_lhs, d_rhs) with
     | SecondUnderFirst, SecondUnderFirst | FirstUnderSecond, FirstUnderSecond ->
@@ -973,7 +1019,10 @@ module CriticalPair = struct
             , Acquisitions.find_held_in_other_thread tenv lhs_lock rhs.elem.acquisitions )
           with
           | Some d_lhs, Some d_rhs ->
-              (not (identification_is_cyclic d_lhs d_rhs))
+              (not
+                 ( identification_is_cyclic d_lhs d_rhs
+                 && Acquisitions.may_share_an_unidentified_gate tenv lhs.elem.acquisitions
+                      rhs.elem.acquisitions ) )
               && Acquisitions.no_locks_common_across_threads tenv lhs.elem.acquisitions
                    rhs.elem.acquisitions
           | _, _ ->

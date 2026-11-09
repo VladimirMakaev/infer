@@ -31,8 +31,8 @@ class MemberLocksOtherTask implements Runnable {
   }
 }
 
-class FN_MemberLocksMain {
-  // Known FN; see the parent/child ordering follow-up (cyclic task back-pointers).
+class MemberLocksMain {
+  // the two tasks lock each other's lock last
   public static void main(String args[]) {
     Thread t1 = new Thread(new MemberLocksTask());
     t1.start();
