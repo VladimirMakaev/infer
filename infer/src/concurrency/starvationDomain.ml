@@ -1197,6 +1197,7 @@ module Attribute = struct
     | FutureDoneGuard of HilExp.AccessExpression.t
     | FutureDoneState of bool
     | Runnable of Procname.t
+    | LazyCoroutine of Procname.t * HilExp.t list
     | WorkScheduler of StarvationModels.scheduler_thread_constraint
     | Looper of StarvationModels.scheduler_thread_constraint
   [@@deriving equal]
@@ -1220,6 +1221,8 @@ module Attribute = struct
         F.fprintf fmt "FutureDoneGuard(%a)" HilExp.AccessExpression.pp exp
     | FutureDoneState state ->
         F.fprintf fmt "FutureDoneState(%b)" state
+    | LazyCoroutine (coroproc, _) ->
+        F.fprintf fmt "LazyCoroutine(%a)" Procname.pp coroproc
     | Runnable runproc ->
         F.fprintf fmt "Runnable(%a)" Procname.pp runproc
     | WorkScheduler c ->
@@ -1520,7 +1523,8 @@ let schedule_work loc thread_constraint astate procname =
 
 
 type summary =
-  { critical_pairs: CriticalPairs.t
+  { is_lazy_coroutine: bool
+  ; critical_pairs: CriticalPairs.t
   ; thread: ThreadDomain.t
   ; scheduled_work: ScheduledWorkDomain.t
   ; lock_state: LockState.t
@@ -1529,7 +1533,8 @@ type summary =
   ; return_alias: HilExp.AccessExpression.t option }
 
 let empty_summary : summary =
-  { critical_pairs= CriticalPairs.bottom
+  { is_lazy_coroutine= false
+  ; critical_pairs= CriticalPairs.bottom
   ; thread= ThreadDomain.bottom
   ; scheduled_work= ScheduledWorkDomain.bottom
   ; lock_state= LockState.top
@@ -1540,12 +1545,12 @@ let empty_summary : summary =
 
 let pp_summary fmt (summary : summary) =
   F.fprintf fmt
-    "{@[<v>thread= %a; return_attributes= %a; return_alias= %a;@;\
+    "{@[<v>is_lazy_coroutine= %b; thread= %a; return_attributes= %a; return_alias= %a;@;\
      critical_pairs=%a;@;\
      scheduled_work= %a;@;\
      lock_state= %a;@;\
      attributes= %a@]}"
-    ThreadDomain.pp summary.thread Attribute.pp summary.return_attribute
+    summary.is_lazy_coroutine ThreadDomain.pp summary.thread Attribute.pp summary.return_attribute
     (Pp.option HilExp.AccessExpression.pp)
     summary.return_alias CriticalPairs.pp summary.critical_pairs ScheduledWorkDomain.pp
     summary.scheduled_work LockState.pp summary.lock_state AttributeDomain.pp summary.attributes
@@ -1640,7 +1645,34 @@ let summary_of_astate : Procdesc.t -> t -> summary =
   let astate_without_guard =
     GuardToLockMap.fold (fun guard _locks acc -> unlock_guard acc guard) astate.guard_map astate
   in
-  { critical_pairs=
+  (* The frontend translates a coroutine as one procedure -- promise, return object, then the
+     BODY -- so a lazy task's critical pairs are its body's, and they do not happen where the
+     task is created. Record that here so callers can tell the two apart; the pairs themselves
+     stay in the summary, because the body's own ordering is still checked and whoever awaits
+     the task still needs them. *)
+  let is_lazy_coroutine =
+    (* a C++ function returning a struct gets an added return parameter and a [void] return
+       type, so the task type is the last formal's pointee, not [get_ret_type] *)
+    let effective_ret_typ =
+      let attributes = Procdesc.get_attributes proc_desc in
+      if attributes.ProcAttributes.has_added_return_param then
+        List.last attributes.ProcAttributes.formals
+        |> Option.value_map ~default:(Procdesc.get_ret_type proc_desc) ~f:(fun (_, typ, _) -> typ)
+      else Procdesc.get_ret_type proc_desc
+    in
+    StarvationModels.is_lazy_coroutine_task_type effective_ret_typ
+    && Procdesc.fold_instrs proc_desc ~init:false ~f:(fun found _node (instr : Sil.instr) ->
+        found
+        ||
+        match instr with
+        | Call (_, Const (Cfun callee), _, _, _) ->
+            Procname.equal callee BuiltinDecl.__builtin_cxx_co_return
+            || Procname.equal callee BuiltinDecl.__builtin_cxx_co_await
+        | _ ->
+            false )
+  in
+  { is_lazy_coroutine
+  ; critical_pairs=
       NullLocsCriticalPairs.to_critical_pairs astate.lock_state astate.lazily_initalized
         astate.critical_pairs
   ; thread= astate.thread
