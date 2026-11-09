@@ -14,6 +14,34 @@ open CTrans_utils
 open CTrans_utils.Nodes
 module L = Logging
 
+(** Above this many explicit initializers, an array initializer list is translated as a single
+    initialization of the whole array instead of one store per element. Translating an element costs
+    about 1.3 KiB of memory and 15 µs, so a unit that embeds a binary blob as a [0x..,] list, which
+    generators emit at hundreds of thousands to tens of millions of elements, needs tens of GiB to
+    produce a procedure no analysis can use. The limit is well above any hand written table, so
+    those keep their exact element values. *)
+let max_unrolled_init_list_elements = 10_000
+
+(** Whether an initializer list element is a literal, possibly behind implicit casts, which is what
+    a generated data blob is made of. Dropping the elements of an over-long list has to be sound:
+    anything else, a call for instance, could have a side effect that still has to happen, so a list
+    holding one is translated element by element however long it is. *)
+let rec is_literal_init_element (stmt : Clang_ast_t.stmt) =
+  match stmt with
+  | `IntegerLiteral _
+  | `FloatingLiteral _
+  | `CharacterLiteral _
+  | `StringLiteral _
+  | `FixedPointLiteral _
+  | `CXXBoolLiteralExpr _
+  | `CXXNullPtrLiteralExpr _ ->
+      true
+  | `ImplicitCastExpr (_, [sub], _, _, _) | `ConstantExpr (_, [sub], _, _) ->
+      is_literal_init_element sub
+  | _ ->
+      false
+
+
 module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = struct
   (** Returns the procname and whether is instance, according to the selector information and
       according to the method signature with the following priority: 1. method is a predefined model
@@ -3632,6 +3660,27 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         explicit_inits
 
 
+  (** Initialize the whole array [var_exp] at once, leaving the value of its elements unknown. Used
+      for an initializer list too long to translate element by element: the elements are *not* zero,
+      so this must not be [BuiltinDecl.zero_initialization], whose name invites a model that would
+      read a blob of non-zero data as zeros. *)
+  and initListExpr_whole_array_trans trans_state stmt_info var_exp array_typ =
+    let sil_loc =
+      CLocation.location_of_stmt_info trans_state.context.translation_unit_context.source_file
+        stmt_info
+    in
+    let ret_id = Ident.create_fresh Ident.knormal in
+    let call_instr =
+      Sil.Call
+        ( (ret_id, StdTyp.void)
+        , Const (Cfun BuiltinDecl.unknown_initialization)
+        , [(var_exp, array_typ)]
+        , sil_loc
+        , CallFlags.default )
+    in
+    mk_trans_result (var_exp, array_typ) {empty_control with instrs= [call_instr]}
+
+
   and initListExpr_struct_trans trans_state stmt_info stmts init_expr_typ var_exp var_typ =
     let context = trans_state.context in
     let tenv = context.tenv in
@@ -3843,9 +3892,17 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       let all_res_trans =
         match init_expr_typ.Typ.desc with
         | Tarray {elt} ->
-            initListExpr_array_trans trans_state_pri init_stmt_info stmts var_exp elt
-            |> initListExpr_array_filler_trans trans_state_pri init_stmt_info array_filler
-                 ~nb_explicit:(List.length stmts) var_exp init_expr_typ
+            let nb_explicit = List.length stmts in
+            if
+              nb_explicit > max_unrolled_init_list_elements
+              && List.for_all stmts ~f:is_literal_init_element
+            then
+              (* the array filler, if any, initializes elements this already covers *)
+              [initListExpr_whole_array_trans trans_state_pri init_stmt_info var_exp init_expr_typ]
+            else
+              initListExpr_array_trans trans_state_pri init_stmt_info stmts var_exp elt
+              |> initListExpr_array_filler_trans trans_state_pri init_stmt_info array_filler
+                   ~nb_explicit var_exp init_expr_typ
         | Tstruct _ ->
             initListExpr_struct_trans trans_state_pri init_stmt_info stmts init_expr_typ var_exp
               var_typ

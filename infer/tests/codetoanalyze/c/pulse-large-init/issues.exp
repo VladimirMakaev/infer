@@ -1,0 +1,3 @@
+codetoanalyze/c/pulse-large-init/large_init_list.c, leak_over_limit_bad, 1, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
+codetoanalyze/c/pulse-large-init/large_init_list.c, deref_null_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse-large-init/large_init_list.c, deref_short_list_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

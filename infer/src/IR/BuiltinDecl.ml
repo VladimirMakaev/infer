@@ -262,4 +262,6 @@ let objc_cpp_throw = create_procname "__infer_objc_cpp_throw"
 
 let zero_initialization = create_procname "__infer_zero_initialization"
 
+let unknown_initialization = create_procname "__infer_unknown_initialization"
+
 let match_builtin builtin _ s = String.equal s (Procname.get_method builtin)

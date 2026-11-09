@@ -133,4 +133,6 @@ module type S = sig
   val objc_cpp_throw : t
 
   val zero_initialization : t
+
+  val unknown_initialization : t
 end
