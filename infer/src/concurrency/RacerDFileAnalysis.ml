@@ -61,7 +61,8 @@ module ReportedSet : sig
   type t
 
   val reset : t -> t
-  (** Reset recorded writes and reads, while maintaining the same [IssueLog.t]. *)
+  (** Reset recorded call sites, writes and reads for the next access path, while maintaining the
+      same [IssueLog.t]. *)
 
   val empty_of_issue_log : IssueLog.t -> t
   (** Create a set of reports containing the given [IssueLog.t] but otherwise having no records of
@@ -105,7 +106,8 @@ end = struct
 
   let reset (reported_set, issue_log) =
     ( { reported_set with
-        writes= Procname.Set.empty
+        sites= CallSite.Set.empty
+      ; writes= Procname.Set.empty
       ; reads= Procname.Set.empty
       ; container_lines= ContainerLineSet.empty }
     , issue_log )
@@ -722,7 +724,8 @@ let report_unsafe_accesses ~issue_log classname aggregated_access_map =
     else init
   in
   let report grouped_accesses acc =
-    (* reset the reported reads and writes for each memory location *)
+    (* Each group has one access path, so resetting sites here deduplicates by call site and field.
+       Repeated reads or writes of that field in a method still collapse. *)
     let sorted = sort_by_rank grouped_accesses in
     ReportedSet.reset acc
     |> report_guardedby_violations_on_location sorted
