@@ -6,13 +6,13 @@
  */
 
 import android.support.annotation.UiThread;
-// Cyclic owner back-pointers can deadlock; parent/child ordering currently misses these cases.
+
 class MemberLocksA {
   MemberLocksB b;
   private final Object mLock = new Object();
 
-  // deadlock between FN_lockThenCallBBad() and MemberLocksB.FN_lockThenCallABad()
-  void FN_lockThenCallBBad() { // Known FN; see the parent/child ordering follow-up.
+  // deadlock between lockThenCallBBad() and MemberLocksB.lockThenCallABad()
+  void lockThenCallBBad() {
     synchronized (mLock) {
       b.lockB();
     }
@@ -33,7 +33,7 @@ class MemberLocksB {
     }
   }
 
-  void FN_lockThenCallABad() { // Known FN; see the parent/child ordering follow-up.
+  void lockThenCallABad() {
     synchronized (mLock) {
       a.lockA();
     }

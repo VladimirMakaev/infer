@@ -23,16 +23,16 @@ struct MemberB {
   struct MemberA* a;
 };
 
-// Cyclic owner back-pointers can deadlock; parent/child ordering currently misses this case.
-// Without this known false negative, deduplication reports the inversion only once.
-void FN_lock_a_then_b_bad(struct MemberA* a) { // Known FN; see the parent/child ordering follow-up.
+// the deadlock between lock_a_then_b_bad() and lock_b_then_a_bad() is found
+// from both sides but reported once
+void lock_a_then_b_bad(struct MemberA* a) {
   pthread_mutex_lock(&a->mutex);
   pthread_mutex_lock(&a->b->mutex);
   pthread_mutex_unlock(&a->b->mutex);
   pthread_mutex_unlock(&a->mutex);
 }
 
-void FN_lock_b_then_a_bad(struct MemberB* b) { // Known FN; see the parent/child ordering follow-up.
+void lock_b_then_a_bad(struct MemberB* b) {
   pthread_mutex_lock(&b->mutex);
   pthread_mutex_lock(&b->a->mutex);
   pthread_mutex_unlock(&b->a->mutex);
