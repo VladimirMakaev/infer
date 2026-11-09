@@ -1305,56 +1305,62 @@ end = struct
         Option.fold rep_opt ~init:issue_log ~f:(log_report loc)
       else List.fold reports ~init:issue_log ~f:(log_report loc)
     in
-    if not Config.deduplicate then
-      let log_location locs issue_map issue_log =
-        List.fold deduplicated_issue_order ~init:issue_log
-          ~f:(log_reports (List.hd_exn locs) issue_map)
-      in
-      LocsMap.fold log_location loc_map IssueLog.empty
-    else
-      (* A deadlock is one root cause per canonical key, however many procedures, callers and lock
-         spellings reach it, so it is deduplicated over the whole file rather than per location.
-         Keying on the key and not on the location is what keeps a self deadlock and an inversion
-         reported on the same line apart. *)
-      let deadlock_reps =
-        LocsMap.fold
-          (fun locs issue_map acc ->
-            let loc = List.hd_exn locs in
-            IssueType.Map.find_opt IssueType.deadlock issue_map
-            |> Option.value ~default:[]
-            |> List.fold ~init:acc ~f:(fun acc report ->
-                match report.canonical with
-                | None ->
-                    acc
-                | Some (canonical_key, canonical_message) ->
-                    let key = (loc.Location.file, canonical_key) in
-                    let candidate = (loc, {report with message= canonical_message}) in
-                    let better (loc', r') (loc, r) =
-                      (* earliest site of the pair, then a deterministic message *)
-                      match Location.compare loc' loc with
-                      | 0 ->
-                          String.compare r'.message r.message < 0
-                      | c ->
-                          c < 0
-                    in
+    (* A deadlock is one root cause per canonical key, however many procedures, callers and lock
+       spellings reach it, so it is deduplicated over the whole file rather than per location.
+       Keying on the key and not on the location is what keeps a self deadlock and an inversion
+       reported on the same line apart.
+
+       This does not depend on [Config.deduplicate]. That option asks for at most one report per
+       line, which is a different and lossy question; grouping the reports that describe one pair of
+       locks is right either way, and a run that turns the option off to keep every distinct race
+       still wants one message per deadlock. Everything the option does elsewhere, including the
+       per-location choice below for the other issue types and RacerD's own use of it, is
+       unchanged. *)
+    let keyed, unkeyed =
+      LocsMap.fold
+        (fun locs issue_map acc ->
+          let loc = List.hd_exn locs in
+          IssueType.Map.find_opt IssueType.deadlock issue_map
+          |> Option.value ~default:[]
+          |> List.fold ~init:acc ~f:(fun (keyed, unkeyed) report ->
+              match report.canonical with
+              | None ->
+                  (* [add_deadlock] always supplies a key, so this is unreachable; keep such a
+                     report at its own location rather than let it disappear here *)
+                  (keyed, (loc, report) :: unkeyed)
+              | Some (canonical_key, canonical_message) ->
+                  let key = (loc.Location.file, canonical_key) in
+                  let candidate = (loc, {report with message= canonical_message}) in
+                  let better (loc', r') (loc, r) =
+                    (* earliest site of the pair, then a deterministic message *)
+                    match Location.compare loc' loc with
+                    | 0 ->
+                        String.compare r'.message r.message < 0
+                    | c ->
+                        c < 0
+                  in
+                  let keyed =
                     DeadlockMap.update key
                       (function
                         | Some incumbent when better incumbent candidate ->
                             Some incumbent
                         | _ ->
                             Some candidate )
-                      acc ) )
-          loc_map DeadlockMap.empty
-      in
-      let log_location locs issue_map issue_log =
-        List.fold deduplicated_issue_order ~init:issue_log ~f:(fun issue_log issue ->
-            if IssueType.equal issue IssueType.deadlock then issue_log
-            else log_reports (List.hd_exn locs) issue_map issue_log issue )
-      in
-      LocsMap.fold log_location loc_map IssueLog.empty
-      |> DeadlockMap.fold
-           (fun _key (loc, report) issue_log -> log_report loc issue_log report)
-           deadlock_reps
+                      keyed
+                  in
+                  (keyed, unkeyed) ) )
+        loc_map (DeadlockMap.empty, [])
+    in
+    let log_location locs issue_map issue_log =
+      List.fold deduplicated_issue_order ~init:issue_log ~f:(fun issue_log issue ->
+          if IssueType.equal issue IssueType.deadlock then issue_log
+          else log_reports (List.hd_exn locs) issue_map issue_log issue )
+    in
+    LocsMap.fold log_location loc_map IssueLog.empty
+    |> DeadlockMap.fold (fun _key (loc, report) issue_log -> log_report loc issue_log report) keyed
+    |> fun issue_log ->
+    List.fold unkeyed ~init:issue_log ~f:(fun issue_log (loc, report) ->
+        log_report loc issue_log report )
 
 
   let store_multi_file loc_map =
@@ -1455,9 +1461,14 @@ let single_acquiring_procname (pair : Domain.CriticalPair.t) =
 
     The callee has to be reportable for this to be safe. A private one never reports (see
     [is_not_private] in [report_on_pair_with_file_peers]), so suppressing its callers as well would
-    lose the root cause rather than deduplicate it. *)
+    lose the root cause rather than deduplicate it.
+
+    None of this applies to the whole-program mode. There a deadlock is reported where the two tasks
+    are scheduled onto threads that conflict, not inside the task bodies: the procedure that
+    performs the acquisitions is the body of something posted to an executor and never reports, so
+    the scheduling caller is the only place the deadlock can appear. *)
 let reportable_callee_holding_whole_deadlock ~pname pair =
-  if not Config.deduplicate then None
+  if Config.starvation_whole_program then None
   else
     match single_acquiring_procname pair with
     | Some acquiring
@@ -1476,21 +1487,21 @@ let inherits_whole_deadlock_from_callee ~pname pair =
 (** Will the two sides of the inversion be put together anywhere other than here? Two procedures are
     compared when one is among the other's peers, and peers are the procedures of one captured file
     (see [FilePeers], built in [reporting] from the procedures of the file under analysis), so in
-    C/C++/ObjC that is the file boundary. In the whole-program mode everything is compared.
+    C/C++/ObjC that is the file boundary. Only callers reached through
+    [reportable_callee_holding_whole_deadlock] get here, so the whole-program mode never does.
 
     Nothing else is claimed. The remaining route in [is_found_by_other_side], the methods of the
     classes on the paths of the locks, is not assumed here: for globals and for plain structs it
     finds nothing, and assuming it would again suppress a caller whose callees stay silent. *)
 let sides_meet_elsewhere one other =
-  Config.starvation_whole_program
-  || Procname.is_clang one && Procname.is_clang other
-     &&
-     match (Attributes.load one, Attributes.load other) with
-     | Some one_attrs, Some other_attrs ->
-         SourceFile.equal one_attrs.ProcAttributes.translation_unit
-           other_attrs.ProcAttributes.translation_unit
-     | _, _ ->
-         false
+  Procname.is_clang one && Procname.is_clang other
+  &&
+  match (Attributes.load one, Attributes.load other) with
+  | Some one_attrs, Some other_attrs ->
+      SourceFile.equal one_attrs.ProcAttributes.translation_unit
+        other_attrs.ProcAttributes.translation_unit
+  | _, _ ->
+      false
 
 
 (** The callee reports the inversion in place of its callers only if the other side of it is some
