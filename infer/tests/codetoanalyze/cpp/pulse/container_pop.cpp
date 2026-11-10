@@ -6,6 +6,7 @@
  */
 #include <deque>
 #include <list>
+#include <map>
 #include <memory>
 #include <new>
 
@@ -136,6 +137,141 @@ int list_single_element_front_then_pop_back_bad(std::list<int>& l) {
   int& r = l.front();
   l.pop_back();
   return r;
+}
+
+// The ends reached through an iterator. `begin()` names the same cell as `front()`, so a
+// reference taken through it and the pop that removes the front are one address; an iterator with
+// no position, such as the one `find()` returns, still names a cell of its own.
+int list_begin_then_pop_front_bad(std::list<int>& l) {
+  if (l.empty()) {
+    return 0;
+  }
+  int& r = *l.begin();
+  l.pop_front();
+  return r;
+}
+
+int list_begin_read_after_pop_front_bad(std::list<int>& l) {
+  if (l.empty()) {
+    return 0;
+  }
+  std::list<int>::iterator it = l.begin();
+  l.pop_front();
+  return *it;
+}
+
+int deque_begin_then_pop_front_bad(std::deque<int>& d) {
+  if (d.empty()) {
+    return 0;
+  }
+  int& r = *d.begin();
+  d.pop_front();
+  return r;
+}
+
+// popping the other end leaves it alone, exactly as it does for `front()`
+int list_begin_then_pop_back_ok(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  int& r = *l.begin();
+  l.pop_back();
+  return r;
+}
+
+// Erasing the front removes one element and the rest take new positions, so the front afterwards
+// is a different object. This is why `erase` forgets the backing array as a pop does: without
+// that, the cell `begin()` named would still be the invalidated one and these would report.
+int list_erase_begin_then_front_ok(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  l.erase(l.begin());
+  return l.front();
+}
+
+int list_erase_begin_then_begin_ok(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  l.erase(l.begin());
+  return *l.begin();
+}
+
+int deque_erase_begin_then_front_ok(std::deque<int>& d) {
+  if (d.size() < 2) {
+    return 0;
+  }
+  d.erase(d.begin());
+  return d.front();
+}
+
+// Erasing an element that is NOT an end leaves the ends where they were, so a reference taken
+// from the front still meets the pop that removes it. This is why the array is forgotten only
+// when the erased cell is the one the ends name: forgetting it on every erase would drop this.
+int list_front_erase_other_then_pop_front_bad(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  int& r = l.front();
+  std::list<int>::iterator it = l.begin();
+  ++it;
+  l.erase(it);
+  l.pop_front();
+  return r;
+}
+
+int deque_front_erase_other_then_pop_front_bad(std::deque<int>& d) {
+  if (d.size() < 2) {
+    return 0;
+  }
+  int& r = d.front();
+  std::deque<int>::iterator it = d.begin();
+  ++it;
+  d.erase(it);
+  d.pop_front();
+  return r;
+}
+
+// erasing the front through the iterator that names it does dangle the reference
+int list_begin_then_erase_begin_bad(std::list<int>& l) {
+  if (l.empty()) {
+    return 0;
+  }
+  int& r = *l.begin();
+  l.erase(l.begin());
+  return r;
+}
+
+// ordinary traversal, and erasing while traversing, must stay silent
+int list_iterate_ok(std::list<int>& l) {
+  int n = 0;
+  for (std::list<int>::iterator it = l.begin(); it != l.end(); ++it) {
+    n += *it;
+  }
+  return n;
+}
+
+int list_erase_in_loop_ok(std::list<int>& l) {
+  for (std::list<int>::iterator it = l.begin(); it != l.end();) {
+    if (*it == 0) {
+      it = l.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return 0;
+}
+
+// An associative container has no ends to meet, so its `begin()` keeps naming a cell of its own:
+// giving it the first one would make these two iterators the same object and the erase would
+// dangle the second.
+int map_erase_begin_then_begin_ok(std::map<int, int>& m) {
+  if (m.size() < 2) {
+    return 0;
+  }
+  m.erase(m.begin());
+  return m.begin()->second;
 }
 
 // A node reached through a raw pointer, which no container model covers: ending its lifetime with
