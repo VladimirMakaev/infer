@@ -632,7 +632,7 @@ clang_plugin: clang_setup
 	  SDKPATH='$(XCODE_ISYSROOT)' \
 	)
 .PHONY: clang_plugin_test
-clang_plugin_test: clang_setup
+clang_plugin_test: clang_setup clang_init_list_threshold_test
 	$(QUIET)$(call silent_on_success,Running facebook-clang-plugins/libtooling/ tests,\
 	$(MAKE) -C $(FCP_DIR)/libtooling test \
 	  CC='$(CC)' CXX='$(CXX)' \
@@ -844,12 +844,16 @@ mod_dep: src_build_common
 	$(MAKE) -C $(SRC_DIR) mod_dep.dot)
 
 .PHONY: config_tests
-config_tests: ocaml_unit_test validate-skel mod_dep
+config_tests: ocaml_unit_test validate-skel mod_dep clang_init_list_threshold_test
 	$(MAKE) endtoend_test checkCopyright
 ifneq ($(UTOP),no)
 	$(MAKE) build_infertop_test
 endif
 	$(MAKE) manuals
+
+.PHONY: clang_init_list_threshold_test
+clang_init_list_threshold_test:
+	python3 $(ROOT_DIR)/infer/tests/check_init_list_threshold.py
 
 ifneq ($(filter endtoend_test,$(MAKECMDGOALS)),)
 checkCopyright: src_build

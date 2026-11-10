@@ -3349,6 +3349,27 @@ int ASTExporter<ATDWriter>::StmtTupleSize() {
 //@atd   pointer : pointer;
 //@atd   source_range : source_range;
 //@atd } <ocaml field_prefix="si_">
+// Match cTrans's existing whole-array initialization fallback. Only literal
+// elements behind these transparent wrappers qualify; calls and other effects
+// must still be exported, however long the list is.
+inline bool isLiteralInitElement(const Expr *E) {
+  if (const auto *Cast = llvm::dyn_cast_or_null<ImplicitCastExpr>(E)) {
+    return isLiteralInitElement(Cast->getSubExpr());
+  }
+  if (const auto *Constant = llvm::dyn_cast_or_null<ConstantExpr>(E)) {
+    return isLiteralInitElement(Constant->getSubExpr());
+  }
+  return llvm::isa_and_nonnull<IntegerLiteral, FloatingLiteral, CharacterLiteral,
+                              StringLiteral, FixedPointLiteral, CXXBoolLiteralExpr,
+                              CXXNullPtrLiteralExpr>(E);
+}
+
+inline bool isWholeArrayInitialization(const InitListExpr *E) {
+  // Keep this threshold in sync with cTrans.max_unrolled_init_list_elements.
+  return E && E->getType()->isArrayType() && E->getNumInits() > 10000 &&
+         std::all_of(E->inits().begin(), E->inits().end(), isLiteralInitElement);
+}
+
 template <class ATDWriter>
 void ASTExporter<ATDWriter>::VisitStmt(const Stmt *S) {
   {
@@ -3360,9 +3381,14 @@ void ASTExporter<ATDWriter>::VisitStmt(const Stmt *S) {
     dumpSourceRange(S->getSourceRange());
   }
   {
-    ArrayScope Scope(OF, std::distance(S->child_begin(), S->child_end()));
-    for (const Stmt *CI : S->children()) {
-      dumpStmt(CI);
+    const bool WholeArray =
+        isWholeArrayInitialization(llvm::dyn_cast<InitListExpr>(S));
+    ArrayScope Scope(
+        OF, WholeArray ? 0 : std::distance(S->child_begin(), S->child_end()));
+    if (!WholeArray) {
+      for (const Stmt *CI : S->children()) {
+        dumpStmt(CI);
+      }
     }
   }
 }
@@ -4080,6 +4106,7 @@ int ASTExporter<ATDWriter>::InitListExprTupleSize() {
 //@atd #define init_list_expr_tuple expr_tuple * init_list_expr_info
 //@atd type init_list_expr_info = {
 //@atd   ?array_filler : stmt option;
+//@atd   ~is_whole_array_initialization : bool;
 //@atd } <ocaml field_prefix="ilei_">
 template <class ATDWriter>
 void ASTExporter<ATDWriter>::VisitInitListExpr(const InitListExpr *Node) {
@@ -4088,12 +4115,14 @@ void ASTExporter<ATDWriter>::VisitInitListExpr(const InitListExpr *Node) {
   // The array filler initializes the elements that follow the explicit
   // initializers. It is not one of the children.
   const Expr *Filler = Node->getArrayFiller();
-  ObjectScope Scope(OF, 0 + (bool)Filler);
+  const bool WholeArray = isWholeArrayInitialization(Node);
+  ObjectScope Scope(OF, (bool)Filler + WholeArray);
 
   if (Filler) {
     OF.emitTag("array_filler");
     dumpStmt(Filler);
   }
+  OF.emitFlag("is_whole_array_initialization", WholeArray);
 }
 
 template <class ATDWriter>
