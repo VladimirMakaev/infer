@@ -1590,6 +1590,41 @@ module Vector = struct
     fun name -> Option.is_some (dispatch () name)
 
 
+  (* [std::shared_ptr] specifically, not [is_smart_pointer]: only the shared pointer has a
+     reference count to keep, and [std::unique_ptr]'s copy constructor is deleted. *)
+  let is_shared_ptr =
+    let open ProcnameDispatcher.TypName in
+    let dispatch = make_dispatcher [-"std" &:: "shared_ptr" &::.*--> ()] in
+    fun name -> Option.is_some (dispatch () name)
+
+
+  (* ... and the same question asked of a source argument's static type, through any reference
+     it is passed by. *)
+  let rec is_shared_ptr_typ (typ : Typ.t) =
+    match typ.desc with
+    | Tstruct name ->
+        is_shared_ptr name
+    | Tptr (pointee, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+        is_shared_ptr_typ pointee
+    | _ ->
+        false
+
+
+  (* Whether an insertion's source is one the element's move constructor can take. A container
+     reaches its element through a FORWARDING reference, which performs no overload resolution of
+     its own and keeps the argument's exact type, so [std::move] of a const source arrives as
+     [const std::shared_ptr&&]. The move constructor's parameter is [std::shared_ptr&&] and cannot
+     bind that, so C++ selects the copy constructor and the source keeps its reference. Answering
+     from the source type is that resolution; the value category alone would empty a source the
+     program leaves intact. *)
+  let is_move_source (typ : Typ.t) =
+    match typ.desc with
+    | Tptr (pointee, Pk_rvalue_reference) ->
+        not (Typ.is_const pointee.Typ.quals)
+    | _ ->
+        false
+
+
   let has_pointer_members tenv class_name =
     let rec visit visited name =
       if is_smart_pointer name then true
@@ -2641,6 +2676,33 @@ module Vector = struct
               List.map args ~f:(fun (arg : _ FuncArg.t) -> arg.FuncArg.typ)
         in
         let actuals = pointer_typ :: source_typs in
+        (* attach a constructed element to the vector; shared by the tenv-constructor path and the
+           modelled-constructor path below *)
+        let place_in_vector dst astate non_disj =
+          let ( let<**> ) x f = bind_sat_result non_disj x f in
+          let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+          let<**> astate =
+            GenericArrayBackedCollection.increase_size path location vector ~desc astate
+          in
+          let<*> astate = reallocate_unless_reserved path location vector vector_f ~desc astate in
+          let<**> astate, last = last_index path location vector astate in
+          let<*> astate, array =
+            GenericArrayBackedCollection.eval path Read location vector astate
+          in
+          let astate =
+            Memory.add_edge path array (ArrayAccess (StdTyp.void, last)) dst location astate
+          in
+          let ret_value =
+            match ret with
+            | `Vector ->
+                vector
+            | `Element ->
+                (* since C++17 the new element is returned by reference *)
+                (fst dst, Hist.add_call path location desc (snd dst))
+          in
+          ( Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) ret_value astate)
+          , non_disj )
+        in
         let constructor =
           List.find_map Typ.overloading_resolution ~f:(fun compare ->
               List.find (Tenv.find_cpp_constructor tenv class_name) ~f:(fun proc ->
@@ -2649,7 +2711,41 @@ module Vector = struct
                           attrs.is_cpp_deleted ) ) )
                   && List.equal compare (IRAttributes.load_formal_types proc) actuals ) )
         in
-        if Option.is_none constructor then fallback model_data astate non_disj
+        if Option.is_none constructor then
+          (* The element's class is not in the tenv. For libstdc++ that is the normal state of
+             affairs rather than an anomaly: captures routinely skip its headers. Pulse does model
+             these constructors, but the models are keyed on the PROCNAME while the lookup above
+             is keyed on the TENV, so the two disagree exactly when the standard library is
+             missing. Falling through to [fallback] then stores the element with no copy semantics
+             at all and silently drops the ownership effect the model would have applied: for
+             [std::shared_ptr] that is the reference-count increment, after which the pushed
+             pointer's own destructor sees a count of one, takes its "last reference" branch and
+             deletes an object the container still owns.
+
+             Apply the model instead, with the constructor the source type selects, so that
+             [push_back(x)] copies and increments while [push_back(std::move(x))] transfers and
+             empties the source: running the copy unconditionally would invent a reference the
+             moved-from source does not hold.
+
+             BOTH ends have to be a [std::shared_ptr]. A shared_ptr element is also what
+             [emplace_back(std::move(a_unique_ptr))] constructs, and running shared_ptr's model
+             over a unique_ptr source reads a reference count that source never had and loses
+             its deleter. Modelling that conversion is a separate job; until someone does it,
+             any source that is not already a shared_ptr keeps the pre-existing behaviour. *)
+          match (args, source_typs) with
+          | [arg], [source_typ] when is_shared_ptr class_name && is_shared_ptr_typ source_typ ->
+              let ( let<**> ) x f = bind_sat_result non_disj x f in
+              let<**> astate, dst = Basic.alloc_value_address typ ~desc model_data astate in
+              let fake_exp = Exp.Var (Ident.create_fresh Ident.kprimed) in
+              lift_model
+                (PulseModelsSmartPointers.SharedPtr.copy_or_move_constructor
+                   ~move:(is_move_source source_typ)
+                   {FuncArg.arg_payload= dst; typ= pointer_typ; exp= fake_exp}
+                   arg.FuncArg.arg_payload ~desc )
+                model_data astate non_disj
+              |> continue_with (place_in_vector dst)
+          | _ ->
+              fallback model_data astate non_disj
         else
           let ( let<**> ) x f = bind_sat_result non_disj x f in
           let<**> astate, dst = Basic.alloc_value_address typ ~desc model_data astate in
@@ -2711,32 +2807,7 @@ module Vector = struct
           model_data.dispatch_call_eval_args model_data.analysis_data path model_data.ret
             (Const (Cfun constructor)) ctor_args location CallFlags.default astate non_disj
             (Some constructor)
-          |> continue_with (fun astate non_disj ->
-              let ( let<**> ) x f = bind_sat_result non_disj x f in
-              let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
-              let<**> astate =
-                GenericArrayBackedCollection.increase_size path location vector ~desc astate
-              in
-              let<*> astate =
-                reallocate_unless_reserved path location vector vector_f ~desc astate
-              in
-              let<**> astate, last = last_index path location vector astate in
-              let<*> astate, array =
-                GenericArrayBackedCollection.eval path Read location vector astate
-              in
-              let astate =
-                Memory.add_edge path array (ArrayAccess (StdTyp.void, last)) dst location astate
-              in
-              let ret_value =
-                match ret with
-                | `Vector ->
-                    vector
-                | `Element ->
-                    (* since C++17 the new element is returned by reference *)
-                    (fst dst, Hist.add_call path location desc (snd dst))
-              in
-              ( Basic.ok_continue (PulseOperations.write_id (fst model_data.ret) ret_value astate)
-              , non_disj ) )
+          |> continue_with (place_in_vector dst)
     | _ ->
         fallback model_data astate non_disj
 

@@ -41,4 +41,18 @@ module SharedPtr : sig
     -> desc:string
     -> AbductiveDomain.t
     -> AbductiveDomain.t PulseOperationResult.t
+
+  val copy_or_move_constructor :
+       move:bool
+    -> (AbstractValue.t * ValueHistory.t) FuncArg.t
+    -> AbstractValue.t * ValueHistory.t
+    -> desc:string
+    -> model_no_non_disj
+  (** [copy_or_move_constructor ~move dst src] increments the reference count when [move] is false
+      and transfers it, emptying [src], when it is true. Exposed so that container models can apply
+      it when the element's own constructor is not in the tenv: these models are keyed on the
+      procname while a container's element lookup is keyed on the tenv, and the two disagree
+      whenever the standard library is not captured. The caller chooses [move], because a
+      container's insertion reaches its element through a forwarding reference and so cannot ask the
+      callee's own value category: that keeps [const T&&], which no move constructor can bind. *)
 end
