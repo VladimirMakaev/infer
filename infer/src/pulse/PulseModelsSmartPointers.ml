@@ -727,11 +727,16 @@ module SharedPtr = struct
     else copy_assignment arg other ~desc:(desc ^ " (copy)") model_data astate non_disj
 
 
-  let copy_move_constructor (FuncArg.{arg_payload= this} as arg) other ~desc : model_no_non_disj =
-   fun ({callee_procname} as model_data) ->
-    if is_rvalue callee_procname 1 then
-      move_constructor this other ~desc:(desc ^ " (move)") model_data
+  let copy_or_move_constructor ~move (FuncArg.{arg_payload= this} as arg) other ~desc :
+      model_no_non_disj =
+   fun model_data ->
+    if move then move_constructor this other ~desc:(desc ^ " (move)") model_data
     else copy_constructor arg other ~desc:(desc ^ " (copy)") model_data
+
+
+  let copy_move_constructor arg other ~desc : model_no_non_disj =
+   fun ({callee_procname} as model_data) ->
+    copy_or_move_constructor ~move:(is_rvalue callee_procname 1) arg other ~desc model_data
 
 
   let aliasing_constructor (FuncArg.{arg_payload= this} as arg) owner
