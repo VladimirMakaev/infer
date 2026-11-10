@@ -351,6 +351,19 @@ module ObjC_Cpp = struct
         is_objc_dealloc name.method_name
 
 
+  (* [is_destructor] also accepts the name [dealloc] on any kind at all, so a C++ method that
+     happens to be called that is accepted too. This one asks the language as well: a C++
+     destructor, or the Objective-C deallocator on an actual Objective-C method. *)
+  let is_cpp_destructor_or_objc_dealloc ({method_name} as pname) =
+    match pname.kind with
+    | CPPDestructor _ ->
+        true
+    | CPPMethod _ | CPPConstructor _ ->
+        false
+    | ObjCClassMethod | ObjCInstanceMethod ->
+        is_objc_dealloc method_name
+
+
   let is_inner_destructor ({method_name} as pname) =
     is_destructor pname && String.is_prefix ~prefix:Config.clang_inner_destructor_prefix method_name
 

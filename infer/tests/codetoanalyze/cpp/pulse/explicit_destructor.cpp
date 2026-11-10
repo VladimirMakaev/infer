@@ -201,4 +201,81 @@ int subobject_destroyed_other_read_ok() {
   return p->second.n;
 }
 
+// `dealloc` is the name of the Objective-C deallocator, and it is also a legal
+// name for a C++ method. A call to one is an ordinary method call, not
+// `p->~T()`, so it must not end the lifetime of its receiver. The two shapes
+// below are the ones real libraries use: a container handed a block whose
+// elements it destroys, and a buffer that destroys what it owns.
+struct Block {
+  Plain slots[4];
+};
+
+struct Container {
+  int size;
+  Block* block;
+
+  void dealloc(Block* b) { b->slots[0].~Plain(); }
+
+  // the container itself was never destroyed, only an element of the block
+  int release_then_read_own_field_ok() {
+    dealloc(block);
+    return size;
+  }
+
+  // the element really is gone, so reading it is still an error
+  int release_then_read_element_bad() {
+    dealloc(block);
+    return block->slots[0].n;
+  }
+};
+
+struct Buffer {
+  Plain* data;
+  int capacity;
+
+  void dealloc() { data->~Plain(); }
+
+  int clear_then_read_own_field_ok() {
+    dealloc();
+    return capacity;
+  }
+
+  int clear_then_read_data_bad() {
+    dealloc();
+    return data->n;
+  }
+};
+
+// a `dealloc` that really does end its own receiver's lifetime, which is the
+// one thing the change must not stop reporting
+struct SelfFreeing {
+  int v;
+  ~SelfFreeing();
+  void dealloc() { this->~SelfFreeing(); }
+};
+
+int self_dealloc_then_read_bad(SelfFreeing* s) {
+  s->dealloc();
+  return s->v;
+}
+
+// a method whose name is not `dealloc` behaved correctly all along, and is the
+// control that says the two cases above are about the name and nothing else
+struct Releaser {
+  int size;
+  Block* block;
+
+  void release(Block* b) { b->slots[0].~Plain(); }
+
+  int release_then_read_own_field_ok() {
+    release(block);
+    return size;
+  }
+
+  int release_then_read_element_bad() {
+    release(block);
+    return block->slots[0].n;
+  }
+};
+
 } // namespace explicit_destructor
