@@ -70,6 +70,8 @@ type std_container_function =
   | EmplaceFront
   | Erase
   | Insert
+  | PopBack
+  | PopFront
   | PushBack
   | PushFront
 [@@deriving compare, equal, yojson_of]
