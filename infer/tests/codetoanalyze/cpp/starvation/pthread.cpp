@@ -46,15 +46,31 @@ class Pthread {
     pthread_mutex_unlock(&mutex_);
   }
 
+  void lock_sequentially_ok() {
+    increment();
+    increment();
+  }
+
+ private:
+  pthread_mutex_t mutex_ = PTHREAD_MUTEX_INITIALIZER;
+  int x_;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock and a lock is named by the
+// field it is: a second self deadlock on Pthread::mutex_ would be merged into lock_twice_bad's
+// row and stop being asserted.
+class PthreadCallUnderLock {
+ public:
+  void increment() {
+    pthread_mutex_lock(&mutex_);
+    x_++;
+    pthread_mutex_unlock(&mutex_);
+  }
+
   void call_under_lock_bad() {
     pthread_mutex_lock(&mutex_);
     increment();
     pthread_mutex_unlock(&mutex_);
-  }
-
-  void lock_sequentially_ok() {
-    increment();
-    increment();
   }
 
  private:

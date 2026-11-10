@@ -128,7 +128,9 @@ class SequentialScopes {
   android::Mutex mutex_2;
 };
 
-// android::Mutex is not recursive
+// android::Mutex is not recursive. A class each, because a deadlock is grouped per canonical
+// lock and a lock is named by the field it is: three self deadlocks on one field would be one
+// row, and only the first would stay asserted.
 class SelfDeadlock {
  public:
   void relock_bad() {
@@ -136,6 +138,12 @@ class SelfDeadlock {
     android::Mutex::Autolock lock2(mutex_);
   }
 
+ private:
+  android::Mutex mutex_;
+};
+
+class SelfDeadlockInterproc {
+ public:
   void lock_mutex() { android::Mutex::Autolock lock(mutex_); }
 
   void interproc_bad() {
@@ -143,6 +151,12 @@ class SelfDeadlock {
     lock_mutex();
   }
 
+ private:
+  android::Mutex mutex_;
+};
+
+class SelfDeadlockLockGuard {
+ public:
   void lock_guard_bad() {
     std::lock_guard<android::Mutex> lock1(mutex_);
     std::lock_guard<android::Mutex> lock2(mutex_);

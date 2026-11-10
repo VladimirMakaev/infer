@@ -12,6 +12,12 @@ namespace capability_identity {
 
 void work();
 std::mutex auxiliary;
+// A second auxiliary global. Auxiliary and CrossRootControl below both invert the auxiliary
+// lock against the wrapped mutex, which is one canonical pair and so one row; giving one of
+// them its own global keeps both asserted. It has to be this one: CrossRootControl is the
+// only caller that instantiates auxiliary_order_control_bad, and moving it off that method
+// would take away that method's own row.
+std::mutex auxiliary_other;
 
 template <class M>
 class __attribute__((capability("mutex"))) Mutex {
@@ -23,6 +29,11 @@ class __attribute__((capability("mutex"))) Mutex {
     inner.lock();
     auxiliary.lock();
     auxiliary.unlock();
+  }
+  void lock_with_auxiliary_other() {
+    inner.lock();
+    auxiliary_other.lock();
+    auxiliary_other.unlock();
   }
   void auxiliary_order_control_bad() {
     inner.lock();
@@ -60,6 +71,23 @@ class Mixed {
     Guard<PlainMutex> a(first);
     work();
   }
+ private:
+  PlainMutex first, second;
+};
+
+// Its own class, so that Mixed's pair keeps one method on each side: a deadlock is grouped
+// per canonical lock pair, and a third method on Mixed::first and Mixed::second left one of
+// the two reverse orders unasserted.
+class DirectMixed {
+ public:
+  // its own partner: moving direct_reverse_bad out of Mixed took it away from Mixed's
+  // forward_bad, and one order on its own is not a deadlock
+  void partner_bad() {
+    Guard<PlainMutex> a(first);
+    std::lock_guard<PlainMutex> b(second);
+    work();
+  }
+
   void direct_reverse_bad() {
     second.lock();
     first.lock();
@@ -97,17 +125,27 @@ class Self {
     mutex.lock();
     mutex.unlock();
   }
-  void direct_control_bad() {
-    mutex.lock();
-    mutex.lock();
-    mutex.unlock();
-    mutex.unlock();
-  }
   void release_retake_ok() {
     mutex.lock();
     mutex.unlock();
     Guard<PlainMutex> guard(mutex);
     work();
+  }
+
+ private:
+  PlainMutex mutex;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock and a lock is named by the
+// field it is: a second self deadlock on Self::mutex would be merged into mixed_bad's row and
+// stop being asserted.
+class SelfDirect {
+ public:
+  void direct_control_bad() {
+    mutex.lock();
+    mutex.lock();
+    mutex.unlock();
+    mutex.unlock();
   }
 
  private:
@@ -173,12 +211,12 @@ class Auxiliary {
  public:
   void forward_bad() {
     Guard<PlainMutex> a(mutex);
-    auxiliary.lock();
-    auxiliary.unlock();
+    auxiliary_other.lock();
+    auxiliary_other.unlock();
   }
   void reverse_bad() {
-    std::lock_guard<std::mutex> a(auxiliary);
-    mutex.lock_with_auxiliary();
+    std::lock_guard<std::mutex> a(auxiliary_other);
+    mutex.lock_with_auxiliary_other();
     mutex.unlock();
   }
 

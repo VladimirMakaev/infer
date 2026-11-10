@@ -141,13 +141,17 @@ void self_deadlock_bad() {
   self_mutex.unlock();
 }
 
+// Its own global, because a deadlock is grouped per canonical lock: a second self deadlock
+// on self_mutex would be merged into self_deadlock_bad's row and stop being asserted.
+std::mutex interproc_self_mutex;
+
 void lock_self_mutex() {
-  std::lock_guard<std::mutex> lock(self_mutex);
+  std::lock_guard<std::mutex> lock(interproc_self_mutex);
   x++;
 }
 
 void interproc_self_deadlock_bad() {
-  std::lock_guard<std::mutex> lock(self_mutex);
+  std::lock_guard<std::mutex> lock(interproc_self_mutex);
   lock_self_mutex();
 }
 
@@ -183,9 +187,12 @@ void helper_2_then_1_bad() {
   lock_and_increment(helper_mutex_1);
 }
 
+// its own global, for the same reason as interproc_self_mutex above
+std::mutex helper_self_mutex;
+
 void helper_self_deadlock_bad() {
-  std::lock_guard<std::mutex> lock(self_mutex);
-  lock_and_increment(self_mutex);
+  std::lock_guard<std::mutex> lock(helper_self_mutex);
+  lock_and_increment(helper_self_mutex);
 }
 
 void add_under_lock(int i, std::mutex& mutex) {

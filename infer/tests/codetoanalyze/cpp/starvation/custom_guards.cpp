@@ -452,14 +452,6 @@ class ReturnedGuard {
     }
   }
 
-  // relies on C++17's guaranteed copy elision: in C++11 the temporary that the
-  // copy-initialisation is made from releases the lock at the end of the
-  // full-expression, so no guard is recognised
-  void copy_init_bad() {
-    Releaser lock1 = lock_1();
-    RefGuard lock2(mutex_2);
-  }
-
  private:
   std::mutex mutex_1;
   std::mutex mutex_2;
@@ -489,22 +481,6 @@ class ReturnedValue {
     {
       Name name = lock_1_name();
     }
-    mutex_2.lock();
-    mutex_2.unlock();
-    mutex_1.unlock();
-  }
-
-  void temporary_name_bad() {
-    lock_1_name();
-    mutex_2.lock();
-    mutex_2.unlock();
-    mutex_1.unlock();
-  }
-
-  void wrap_lock_1() { Point point = lock_1_point(); }
-
-  void wrapped_point_bad() {
-    wrap_lock_1();
     mutex_2.lock();
     mutex_2.unlock();
     mutex_1.unlock();
@@ -741,4 +717,86 @@ class WithSession {
   std::mutex mutex_2;
   std::mutex mutex_3;
 };
+// A class and a lock pair each from here down. A deadlock is grouped per canonical lock pair,
+// so these shapes sharing mutex_1 and mutex_2 with the classes above were one row apiece and
+// stopped being asserted. Each carries its own partner taking the pair the other way.
+class CopyInitGuard {
+ public:
+  Releaser lock_1() {
+    mutex_1.lock();
+    return Releaser(&mutex_1);
+  }
+
+  void partner_bad() {
+    RefGuard lock2(mutex_2);
+    RefGuard lock1(mutex_1);
+  }
+
+  // relies on C++17's guaranteed copy elision: in C++11 the temporary that the
+  // copy-initialisation is made from releases the lock at the end of the
+  // full-expression, so no guard is recognised
+  void copy_init_bad() {
+    Releaser lock1 = lock_1();
+    RefGuard lock2(mutex_2);
+  }
+
+ private:
+  std::mutex mutex_1;
+  std::mutex mutex_2;
+};
+
+class TemporaryNameValue {
+ public:
+  Name lock_1_name() {
+    mutex_1.lock();
+    return Name();
+  }
+
+  void partner_bad() {
+    mutex_2.lock();
+    mutex_1.lock();
+    mutex_1.unlock();
+    mutex_2.unlock();
+  }
+
+  void temporary_name_bad() {
+    lock_1_name();
+    mutex_2.lock();
+    mutex_2.unlock();
+    mutex_1.unlock();
+  }
+
+ private:
+  std::mutex mutex_1;
+  std::mutex mutex_2;
+};
+
+class WrappedPointValue {
+ public:
+  Point lock_1_point() {
+    mutex_1.lock();
+    return Point{1, 2};
+  }
+
+  void wrap_lock_1() { Point point = lock_1_point(); }
+
+  void partner_bad() {
+    mutex_2.lock();
+    mutex_1.lock();
+    mutex_1.unlock();
+    mutex_2.unlock();
+  }
+
+  void wrapped_point_bad() {
+    wrap_lock_1();
+    mutex_2.lock();
+    mutex_2.unlock();
+    mutex_1.unlock();
+  }
+
+ private:
+  std::mutex mutex_1;
+  std::mutex mutex_2;
+};
+
 } // namespace custom_guards
