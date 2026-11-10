@@ -46,6 +46,7 @@ BUILD_SYSTEMS_TESTS += \
   project_root_rel \
   pulse_messages_c \
   pulse_messages_cpp \
+  pulse_shared_ptr_untranslated_std \
   pulse_taint_policy_as_issue_type \
   reactive \
   replay_scheduler \
