@@ -335,12 +335,13 @@ let count ~desc this : model_no_non_disj =
   astate
 
 
-(* [at()], [front()], and [back()] succeed only on non-empty containers; this is assumed rather
-   than pruned, since a pruned size coming from the caller would make all the caller's later issues
-   latent *)
-let assume_non_empty path location this astate =
+(* Assume rather than prune a symbolic size, since pruning a size from the caller would make its
+   later issues latent. Undefined empty accessors can keep a known-zero path; throwing [at()]
+   retains its existing precondition handling. *)
+let assume_non_empty ?(keep_known_empty = false) path location this astate =
   let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
-  PulseArithmetic.and_positive size astate
+  if keep_known_empty && PulseArithmetic.is_known_zero astate size then Sat (Ok astate)
+  else PulseArithmetic.and_positive size astate
 
 
 (* Which cell of the backing array an accessor names. The ends of a sequence container are the
@@ -372,7 +373,7 @@ let element_reference ?(which = Unspecified) ~desc this : model_no_non_disj =
  fun {path; location; ret= ret_id, _} astate ->
   let event = Hist.call_event path location desc in
   let<++> astate =
-    let** astate = assume_non_empty path location this astate in
+    let** astate = assume_non_empty ~keep_known_empty:true path location this astate in
     let** astate, index = index_of_end which path location this astate in
     let=+ astate, (elem, hist) = Collection.element path location this index astate in
     Ok (PulseOperations.write_id ret_id (elem, Hist.add_event event hist) astate)
@@ -383,13 +384,14 @@ let element_reference ?(which = Unspecified) ~desc this : model_no_non_disj =
 (** [pop_front()] and [pop_back()] of the sequence containers.
 
     The element at the popped end is invalidated, the container forgets its backing array and
-    shrinks, and popping an empty one stays a precondition violation. Naming the end rather than the
-    whole array is what keeps this precise in both directions: a reference taken from the end that
-    goes is the same cell the pop destroys and is reported, while a reference from the other end is
-    a different cell and is not. The two coincide only when the container is known to hold one
-    element, which is when they really are the same object. Forgetting the array afterwards leaves
-    the surviving elements reachable from the caller's references but not from the container, so the
-    next [front()] names a cell of the new array instead of one that has shifted.
+    shrinks. A known-empty pop leaves the state intact so it does not hide unrelated later errors or
+    create a negative size. Naming the end rather than the whole array is what keeps this precise in
+    both directions: a reference taken from the end that goes is the same cell the pop destroys and
+    is reported, while a reference from the other end is a different cell and is not. The two
+    coincide only when the container is known to hold one element, which is when they really are the
+    same object. Forgetting the array afterwards leaves the surviving elements reachable from the
+    caller's references but not from the container, so the next [front()] names a cell of the new
+    array instead of one that has shifted.
 
     Without a model the implementation is analysed instead, and a second pop on a list then reports
     a use-after-lifetime: unlinking a node writes the node's successor through the node's own back
@@ -400,14 +402,17 @@ let pop ~which container_f this container ~desc : model_no_non_disj =
   let hist = Hist.single_call path location desc in
   let cause = Invalidation.StdContainer (container, container_f) in
   let<++> astate =
-    let** astate = assume_non_empty path location this astate in
-    let** astate, index = index_of_end which path location this astate in
-    let=* astate, elem = Collection.element path location this index astate in
-    let astate = invalidate_element path location cause elem astate in
-    let=* astate =
-      PulseOperations.havoc_deref_field path location this Collection.field hist astate
-    in
-    Collection.decrease_size path location this ~desc astate
+    let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
+    if PulseArithmetic.is_known_zero astate size then Sat (Ok astate)
+    else
+      let** astate = PulseArithmetic.and_positive size astate in
+      let** astate, index = index_of_end which path location this astate in
+      let=* astate, elem = Collection.element path location this index astate in
+      let astate = invalidate_element path location cause elem astate in
+      let=* astate =
+        PulseOperations.havoc_deref_field path location this Collection.field hist astate
+      in
+      Collection.decrease_size path location this ~desc astate
   in
   astate
 
