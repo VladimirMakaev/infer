@@ -666,13 +666,16 @@ module PulseTransferFunctions = struct
       An injected destructor marks a scope exit and is handled by [get_out_of_scope_object] above;
       this is the one the programmer wrote, after which the object is gone but its storage is not,
       so placement new may start a new lifetime there. Inner destructors run on sub-objects while
-      the whole object is still alive and must not invalidate anything. *)
+      the whole object is still alive and must not invalidate anything. An Objective-C [dealloc]
+      ends a lifetime too and counts, but the name alone does not: it is a legal name for a C++
+      method, and the first argument of a call to one is the receiver rather than an object anyone
+      asked to destroy. *)
   let get_explicitly_destructed_object callee_pname actuals (flags : CallFlags.t) =
     if flags.cf_injected_destructor then None
     else
       match (callee_pname, actuals) with
       | Some (Procname.ObjC_Cpp pname), (receiver, _) :: _
-        when Procname.ObjC_Cpp.is_destructor pname
+        when Procname.ObjC_Cpp.is_cpp_destructor_or_objc_dealloc pname
              && not (Procname.ObjC_Cpp.is_inner_destructor pname) ->
           Some receiver
       | _ ->
