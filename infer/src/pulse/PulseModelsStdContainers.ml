@@ -343,13 +343,38 @@ let assume_non_empty path location this astate =
   PulseArithmetic.and_positive size astate
 
 
+(* Which cell of the backing array an accessor names. The ends of a sequence container are the
+   cells at [0] and at [size - 1], so a reference taken from one end and the pop that removes that
+   same end meet on one address, while a reference from the other end does not. An accessor with
+   no positional meaning, such as the top of a priority queue, keeps naming a fresh cell. *)
+type end_of_container = Front | Back | Unspecified
+
+let index_of_end which path location this astate =
+  match which with
+  | Unspecified ->
+      Sat (Ok (astate, AbstractValue.mk_fresh ()))
+  | Front ->
+      let index = AbstractValue.mk_fresh () in
+      let++ astate = PulseArithmetic.and_eq_int index IntLit.zero astate in
+      (astate, index)
+  | Back ->
+      let index = AbstractValue.mk_fresh () in
+      let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
+      let++ astate, index =
+        PulseArithmetic.eval_binop index (MinusA None) (AbstractValueOperand size)
+          (ConstOperand (Cint IntLit.one)) astate
+      in
+      (astate, index)
+
+
 (** [front()] and [back()] *)
-let element_reference ~desc this : model_no_non_disj =
+let element_reference ?(which = Unspecified) ~desc this : model_no_non_disj =
  fun {path; location; ret= ret_id, _} astate ->
   let event = Hist.call_event path location desc in
   let<++> astate =
     let** astate = assume_non_empty path location this astate in
-    let=+ astate, (elem, hist) = fresh_element path location this astate in
+    let** astate, index = index_of_end which path location this astate in
+    let=+ astate, (elem, hist) = Collection.element path location this index astate in
     Ok (PulseOperations.write_id ret_id (elem, Hist.add_event event hist) astate)
   in
   astate
@@ -357,39 +382,28 @@ let element_reference ~desc this : model_no_non_disj =
 
 (** [pop_front()] and [pop_back()] of the sequence containers.
 
-    The container shrinks, its elements are forgotten, and popping an empty one stays a precondition
-    violation. The elements are given fresh values rather than invalidated: which one goes cannot be
-    said, since [front()] and [back()] hand out a cell at a fresh index, so invalidating would
-    accuse a reference to an element the pop did not touch. Leaving them alone is not an option
-    either, as it would claim a pop keeps its elements, which makes the copy in
-    [auto x = l.front(); l.pop_front();] look unnecessary when it is the only thing keeping the
-    value alive.
+    The element at the popped end is invalidated, the container forgets its backing array and
+    shrinks, and popping an empty one stays a precondition violation. Naming the end rather than the
+    whole array is what keeps this precise in both directions: a reference taken from the end that
+    goes is the same cell the pop destroys and is reported, while a reference from the other end is
+    a different cell and is not. The two coincide only when the container is known to hold one
+    element, which is when they really are the same object. Forgetting the array afterwards leaves
+    the surviving elements reachable from the caller's references but not from the container, so the
+    next [front()] names a cell of the new array instead of one that has shifted.
 
     Without a model the implementation is analysed instead, and a second pop on a list then reports
     a use-after-lifetime: unlinking a node writes the node's successor through the node's own back
     link, which is the sentinel when the node is the first one, but the two cannot be related, so
     the sentinel keeps pointing at the node the pop goes on to destroy. *)
-let pop ~desc this : model_no_non_disj =
+let pop ~which container_f this container ~desc : model_no_non_disj =
  fun {path; location} astate ->
   let hist = Hist.single_call path location desc in
+  let cause = Invalidation.StdContainer (container, container_f) in
   let<++> astate =
     let** astate = assume_non_empty path location this astate in
-    let=* astate, arr = Collection.eval path NoAccess location this astate in
-    let elements =
-      Memory.fold_edges (fst arr) astate ~init:[] ~f:(fun acc (access, elem) ->
-          match (access : Access.t) with
-          (* an element equal to [end()] is the past-the-end value, which [end()] keeps returning *)
-          | ArrayAccess _ when not (AddressAttributes.is_end_of_collection (fst elem) astate) ->
-              elem :: acc
-          | _ ->
-              acc )
-    in
-    let=* astate =
-      PulseResult.list_fold elements ~init:astate ~f:(fun astate elem ->
-          PulseOperations.write_deref path location ~ref:elem
-            ~obj:(AbstractValue.mk_fresh (), hist)
-            astate )
-    in
+    let** astate, index = index_of_end which path location this astate in
+    let=* astate, elem = Collection.element path location this index astate in
+    let astate = invalidate_element path location cause elem astate in
     let=* astate =
       PulseOperations.havoc_deref_field path location this Collection.field hist astate
     in
@@ -1480,14 +1494,16 @@ let matchers : matcher list =
   let front_back_matchers =
     [ ( container_method ~f:is_sequence "front"
       <>$ capt_arg_payload
-      $--> fun this -> on_container (fun _ ~desc -> element_reference ~desc this) )
+      $--> fun this -> on_container (fun _ ~desc -> element_reference ~which:Front ~desc this) )
     ; ( container_method ~f:is_sequence "back"
       <>$ capt_arg_payload
-      $--> fun this -> on_container (fun _ ~desc -> element_reference ~desc this) ) ]
-    @ List.map ["pop_front"; "pop_back"] ~f:(fun method_name ->
-        container_method ~f:is_sequence method_name
-        <>$ capt_arg_payload
-        $--> fun this -> on_container (fun _ ~desc -> pop ~desc this) )
+      $--> fun this -> on_container (fun _ ~desc -> element_reference ~which:Back ~desc this) ) ]
+    @ List.map
+        [("pop_front", Front, Invalidation.PopFront); ("pop_back", Back, Invalidation.PopBack)]
+        ~f:(fun (method_name, which, container_f) ->
+          container_method ~f:is_sequence method_name
+          <>$ capt_arg_payload
+          $--> fun this -> on_container (pop ~which container_f this) )
   in
   (* the adapters keep their elements in an underlying container and have no iterators of their
      own, so they are not in [containers]; their element accessors still have to return a

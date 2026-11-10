@@ -78,6 +78,66 @@ int copy_out_then_pop_ok(std::list<int>& l) {
   return v;
 }
 
+// A reference to an end of the container, and then the pop that removes that same end: the
+// reference is left dangling.
+int list_front_then_pop_front_bad(std::list<int>& l) {
+  if (l.empty()) {
+    return 0;
+  }
+  int& r = l.front();
+  l.pop_front();
+  return r;
+}
+
+int list_back_then_pop_back_bad(std::list<int>& l) {
+  if (l.empty()) {
+    return 0;
+  }
+  int& r = l.back();
+  l.pop_back();
+  return r;
+}
+
+int deque_front_then_pop_front_bad(std::deque<int>& d) {
+  if (d.empty()) {
+    return 0;
+  }
+  int& r = d.front();
+  d.pop_front();
+  return r;
+}
+
+// Popping the OTHER end leaves the reference alone, which is why the ends are modelled as the
+// cells at 0 and at size - 1 rather than the whole array being invalidated.
+int list_front_then_pop_back_ok(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  int& r = l.front();
+  l.pop_back();
+  return r;
+}
+
+int list_back_then_pop_front_ok(std::list<int>& l) {
+  if (l.size() < 2) {
+    return 0;
+  }
+  int& r = l.back();
+  l.pop_front();
+  return r;
+}
+
+// With one element the two ends are the same object, so popping either one does dangle the
+// reference taken from the other.
+int list_single_element_front_then_pop_back_bad(std::list<int>& l) {
+  if (l.size() != 1) {
+    return 0;
+  }
+  int& r = l.front();
+  l.pop_back();
+  return r;
+}
+
 // A node reached through a raw pointer, which no container model covers: ending its lifetime with
 // an explicit destructor call and then reading it is a real use-after-lifetime and must keep
 // reporting.
