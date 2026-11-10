@@ -104,16 +104,27 @@ class SelfDeadlock {
     std::scoped_lock l(mutex_1, mutex_2);
   }
 
-  void interproc_bad() {
-    std::lock_guard<std::mutex> g(mutex_2);
-    lock_both();
-  }
-
   void sequential_ok() {
     {
       std::scoped_lock l(mutex_1, mutex_2);
     }
     std::scoped_lock l(mutex_1, mutex_2);
+  }
+
+ private:
+  void lock_both() { std::scoped_lock l(mutex_1, mutex_2); }
+
+  std::mutex mutex_1;
+  std::mutex mutex_2;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock: a second self deadlock on
+// SelfDeadlock::mutex_2 would be merged into relock_bad's row and stop being asserted.
+class SelfDeadlockInterproc {
+ public:
+  void interproc_bad() {
+    std::lock_guard<std::mutex> g(mutex_2);
+    lock_both();
   }
 
  private:

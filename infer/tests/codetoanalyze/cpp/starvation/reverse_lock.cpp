@@ -25,13 +25,6 @@ class Restores {
     run_held(l);
   }
 
-  // released on one path only, so the lock is not given back on the other
-  void release_on_one_path_bad(bool flag) {
-    Lock l(mutex_);
-    maybe_release(l, flag);
-    std::lock_guard<std::mutex> g(mutex_);
-  }
-
  private:
   void take() { std::lock_guard<std::mutex> g(mutex_); }
 
@@ -47,6 +40,30 @@ class Restores {
     take();
   }
 
+  void maybe_release(Lock& l, bool flag) {
+    kept_ = &l;
+    l.unlock();
+    if (flag) {
+      l.lock();
+    }
+  }
+
+  std::mutex mutex_;
+  Lock* kept_;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock: this second self deadlock
+// on the guard's mutex would be merged into keep_and_take_bad's row and stop being asserted.
+class RestoresOnOnePath {
+ public:
+  // released on one path only, so the lock is not given back on the other
+  void release_on_one_path_bad(bool flag) {
+    Lock l(mutex_);
+    maybe_release(l, flag);
+    std::lock_guard<std::mutex> g(mutex_);
+  }
+
+ private:
   void maybe_release(Lock& l, bool flag) {
     kept_ = &l;
     l.unlock();

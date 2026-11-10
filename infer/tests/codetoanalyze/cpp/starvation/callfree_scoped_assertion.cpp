@@ -96,21 +96,34 @@ void FP_noop_call_assertion_ok(std::mutex& mutex) {
   std::unique_lock<std::mutex> held(mutex);
   HelperAssertion assertion(mutex);
 }
-void member_guard_bad(std::mutex& mutex) {
-  std::unique_lock<std::mutex> held(mutex);
-  MemberGuard second(mutex);
+// Each of the three takes its mutex through an owner of its own. A lock reached through a
+// formal is canonically the same lock in every procedure, so these three self deadlocks were
+// one row and only the first stayed asserted; a field names the lock apart.
+struct MemberGuardOwner {
+  std::mutex mutex;
+};
+struct BaseGuardOwner {
+  std::mutex mutex;
+};
+struct IndirectGuardOwner {
+  std::mutex mutex;
+};
+
+void member_guard_bad(MemberGuardOwner& owner) {
+  std::unique_lock<std::mutex> held(owner.mutex);
+  MemberGuard second(owner.mutex);
 }
 void default_member_guard_bad() {
   std::unique_lock<std::mutex> held(member_mutex);
   DefaultMemberGuard second(member_mutex);
 }
-void base_guard_bad(std::mutex& mutex) {
-  std::unique_lock<std::mutex> held(mutex);
-  BaseGuard second(mutex);
+void base_guard_bad(BaseGuardOwner& owner) {
+  std::unique_lock<std::mutex> held(owner.mutex);
+  BaseGuard second(owner.mutex);
 }
-void indirect_guard_bad(std::mutex& mutex) {
-  std::unique_lock<std::mutex> held(mutex);
-  IndirectGuard second(mutex, lock_mutex);
+void indirect_guard_bad(IndirectGuardOwner& owner) {
+  std::unique_lock<std::mutex> held(owner.mutex);
+  IndirectGuard second(owner.mutex, lock_mutex);
 }
 // Atomic builtins may lower to loads/stores, so no Call does not prove assertion-only.
 class TSA(capability("mutex")) SpinMutex {

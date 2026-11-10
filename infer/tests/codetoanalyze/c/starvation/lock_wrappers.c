@@ -14,6 +14,10 @@ void pthread_mutex_unlock(struct WMutex*);
 struct WMutex wm1;
 struct WMutex wm2;
 struct WMutex wm3;
+// its own pair for the connection shape below: a deadlock is grouped per canonical lock
+// pair, and sharing wm1/wm2 with the two direct inversions left one of them unasserted
+struct WMutex wm8;
+struct WMutex wm9;
 
 void lock_wrapper(struct WMutex* m) { pthread_mutex_lock(m); }
 
@@ -48,13 +52,22 @@ void conn_acquire(struct WConn* c, struct WMutex* m) {
 void conn_release(struct WConn* c) { pthread_mutex_unlock(c->m); }
 
 // the lock taken and released through the field of the connection is balanced
-int conn_wm2_wm1_bad(struct WConn* c) {
+int conn_wm9_wm8_bad(struct WConn* c) {
   conn_acquire(c, &wm3);
   conn_release(c);
-  pthread_mutex_lock(&wm2);
-  pthread_mutex_lock(&wm1);
-  pthread_mutex_unlock(&wm1);
-  pthread_mutex_unlock(&wm2);
+  pthread_mutex_lock(&wm9);
+  pthread_mutex_lock(&wm8);
+  pthread_mutex_unlock(&wm8);
+  pthread_mutex_unlock(&wm9);
+  return 0;
+}
+
+// the other order of the connection shape's own pair
+int direct_wm8_wm9_bad() {
+  pthread_mutex_lock(&wm8);
+  pthread_mutex_lock(&wm9);
+  pthread_mutex_unlock(&wm9);
+  pthread_mutex_unlock(&wm8);
   return 0;
 }
 

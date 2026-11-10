@@ -79,7 +79,17 @@ void device_b_then_a_bad(struct Device* d) {
   pthread_mutex_unlock(&d->b);
 }
 
-struct Device global_device;
+// Its own struct, so that its fields are not the fields of struct Device: a deadlock is
+// grouped per canonical lock pair, and a lock is named by the field it is, so reusing
+// struct Device here would merge these two with device_a_then_b_bad above and leave them
+// unasserted.
+struct GlobalDevice {
+  struct FakeMut a;
+  struct FakeMut b;
+  int x;
+};
+
+struct GlobalDevice global_device;
 
 // deadlock between global_device_a_then_b_bad() and
 // global_device_b_then_a_bad()
@@ -142,7 +152,7 @@ void helper_2_then_1_bad() {
   pthread_mutex_unlock(&helper_m2);
 }
 
-void increment_under_device_b(struct Device* d) {
+void increment_under_device_b(struct GlobalDevice* d) {
   pthread_mutex_lock(&d->b);
   d->x++;
   pthread_mutex_unlock(&d->b);
