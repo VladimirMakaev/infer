@@ -355,6 +355,49 @@ let element_reference ~desc this : model_no_non_disj =
   astate
 
 
+(** [pop_front()] and [pop_back()] of the sequence containers.
+
+    The container shrinks, its elements are forgotten, and popping an empty one stays a precondition
+    violation. The elements are given fresh values rather than invalidated: which one goes cannot be
+    said, since [front()] and [back()] hand out a cell at a fresh index, so invalidating would
+    accuse a reference to an element the pop did not touch. Leaving them alone is not an option
+    either, as it would claim a pop keeps its elements, which makes the copy in
+    [auto x = l.front(); l.pop_front();] look unnecessary when it is the only thing keeping the
+    value alive.
+
+    Without a model the implementation is analysed instead, and a second pop on a list then reports
+    a use-after-lifetime: unlinking a node writes the node's successor through the node's own back
+    link, which is the sentinel when the node is the first one, but the two cannot be related, so
+    the sentinel keeps pointing at the node the pop goes on to destroy. *)
+let pop ~desc this : model_no_non_disj =
+ fun {path; location} astate ->
+  let hist = Hist.single_call path location desc in
+  let<++> astate =
+    let** astate = assume_non_empty path location this astate in
+    let=* astate, arr = Collection.eval path NoAccess location this astate in
+    let elements =
+      Memory.fold_edges (fst arr) astate ~init:[] ~f:(fun acc (access, elem) ->
+          match (access : Access.t) with
+          (* an element equal to [end()] is the past-the-end value, which [end()] keeps returning *)
+          | ArrayAccess _ when not (AddressAttributes.is_end_of_collection (fst elem) astate) ->
+              elem :: acc
+          | _ ->
+              acc )
+    in
+    let=* astate =
+      PulseResult.list_fold elements ~init:astate ~f:(fun astate elem ->
+          PulseOperations.write_deref path location ~ref:elem
+            ~obj:(AbstractValue.mk_fresh (), hist)
+            astate )
+    in
+    let=* astate =
+      PulseOperations.havoc_deref_field path location this Collection.field hist astate
+    in
+    Collection.decrease_size path location this ~desc astate
+  in
+  astate
+
+
 (** [operator[]] and [at()] of maps return a reference to the mapped value of an element;
     [operator[]] inserts an element if needed *)
 let mapped_value_reference ~inserts ~desc this : model_no_non_disj =
@@ -1441,6 +1484,10 @@ let matchers : matcher list =
     ; ( container_method ~f:is_sequence "back"
       <>$ capt_arg_payload
       $--> fun this -> on_container (fun _ ~desc -> element_reference ~desc this) ) ]
+    @ List.map ["pop_front"; "pop_back"] ~f:(fun method_name ->
+        container_method ~f:is_sequence method_name
+        <>$ capt_arg_payload
+        $--> fun this -> on_container (fun _ ~desc -> pop ~desc this) )
   in
   (* the adapters keep their elements in an underlying container and have no iterators of their
      own, so they are not in [containers]; their element accessors still have to return a
