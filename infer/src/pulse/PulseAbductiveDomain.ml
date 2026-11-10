@@ -16,11 +16,9 @@ module Decompiler = PulseDecompiler
 module PathContext = PulsePathContext
 module UninitBlocklist = PulseUninitBlocklist
 
-let array_default_contents =
-  Fieldname.make
-    (Typ.CStruct (QualifiedCppName.of_list ["__infer_pulse_model"]))
-    "__infer_array_default_contents"
+let pulse_model_type = Typ.CStruct (QualifiedCppName.of_list ["__infer_pulse_model"])
 
+let array_default_contents = Fieldname.make pulse_model_type "__infer_array_default_contents"
 
 (** {2 Unsafe part of the module implementation wrt normalization} *)
 
@@ -1112,6 +1110,14 @@ module Internal = struct
                     else
                       SafeMemory.map_post_heap astate ~f:(fun post_heap ->
                           BaseMemory.add_edge addr access (downcast_fst addr_hist_dest) post_heap )
+                | FieldAccess field
+                  when is_value_visible_outside
+                       && Typ.Name.equal (Fieldname.get_class_name field) pulse_model_type
+                       && BaseMemory.has_edge addr access post_heap ->
+                    (* Models can store a replaceable value directly in a synthetic field, rather
+                       than the fixed address of a real field. Restoring its pre value would, for
+                       instance, reconnect a global string to its old invalidated buffer. *)
+                    astate
                 | FieldAccess _ | ArrayAccess _ ->
                     (* inlined aggregate value: just an offset, not the actual value yet; recurse *)
                     SafeMemory.map_post_heap astate ~f:(fun post_heap ->
