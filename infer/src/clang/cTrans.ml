@@ -19,7 +19,8 @@ module L = Logging
     about 1.3 KiB of memory and 15 µs, so a unit that embeds a binary blob as a [0x..,] list, which
     generators emit at hundreds of thousands to tens of millions of elements, needs tens of GiB to
     produce a procedure no analysis can use. The limit is well above any hand written table, so
-    those keep their exact element values. *)
+    those keep their exact element values. Keep the threshold in sync with
+    [ASTExporter.isWholeArrayInitialization]. *)
 let max_unrolled_init_list_elements = 10_000
 
 (** Whether an initializer list element is a literal, possibly behind implicit casts, which is what
@@ -3818,12 +3819,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           (Typ.pp_full Pp.text) var_typ
 
 
-  and initListExpr_trans ({context= {tenv}} as trans_state) stmt_info expr_info stmts array_filler =
+  and initListExpr_trans ({context= {tenv}} as trans_state) stmt_info expr_info stmts array_filler
+      ~is_whole_array_initialization =
     match get_transparent_init_list_elem tenv expr_info stmts with
     | Some stmt ->
         instruction trans_state stmt
     | None ->
         initListExpr_trans_aux trans_state stmt_info expr_info stmts array_filler
+          ~is_whole_array_initialization
 
 
   (** Vector types are translated to [void] but their elements are accessed like array elements, see
@@ -3852,7 +3855,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         {:http://en.cppreference.com/w/cpp/language/zero_initialization} Decision which case happens
         is based on the type of the InitListExpr *)
   and initListExpr_trans_aux ({context= {tenv}} as trans_state) stmt_info
-      ({Clang_ast_t.ei_qual_type} as expr_info) stmts array_filler =
+      ({Clang_ast_t.ei_qual_type} as expr_info) stmts array_filler ~is_whole_array_initialization =
     let var_exp, var_typ =
       match trans_state.var_exp_typ with
       | Some var_exp_typ ->
@@ -3861,7 +3864,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           create_var_exp_tmp_var trans_state expr_info ~var_name:"SIL_init_list__"
             ~clang_pointer:stmt_info.Clang_ast_t.si_pointer
     in
-    if List.is_empty stmts && Option.is_none array_filler then
+    if (not is_whole_array_initialization) && List.is_empty stmts && Option.is_none array_filler
+    then
       (* perform zero initialization of a primitive type; a record with fields has
          ImplicitValueInitExpr nodes and an array type an array filler, so the only record left
          here is one without a single field, whose storage is already in its final state. The
@@ -3894,8 +3898,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         | Tarray {elt} ->
             let nb_explicit = List.length stmts in
             if
-              nb_explicit > max_unrolled_init_list_elements
-              && List.for_all stmts ~f:is_literal_init_element
+              is_whole_array_initialization
+              || nb_explicit > max_unrolled_init_list_elements
+                 && List.for_all stmts ~f:is_literal_init_element
             then
               (* the array filler, if any, initializes elements this already covers *)
               [initListExpr_whole_array_trans trans_state_pri init_stmt_info var_exp init_expr_typ]
@@ -6448,9 +6453,12 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         cxxBindTemporaryExpr_trans trans_state stmt_info stmt_list expr_info
     | `CompoundLiteralExpr (stmt_info, stmt_list, expr_info) ->
         compoundLiteralExpr_trans trans_state stmt_list stmt_info expr_info
-    | `InitListExpr (stmt_info, stmts, expr_info, {ilei_array_filler})
-    | `CXXParenListInitExpr (stmt_info, stmts, expr_info, {ilei_array_filler}) ->
+    | `InitListExpr
+        (stmt_info, stmts, expr_info, {ilei_array_filler; ilei_is_whole_array_initialization})
+    | `CXXParenListInitExpr
+        (stmt_info, stmts, expr_info, {ilei_array_filler; ilei_is_whole_array_initialization}) ->
         initListExpr_trans trans_state stmt_info expr_info stmts ilei_array_filler
+          ~is_whole_array_initialization:ilei_is_whole_array_initialization
     | `CXXDynamicCastExpr (stmt_info, stmts, _, _, qual_type, _) ->
         cxxDynamicCastExpr_trans trans_state stmt_info stmts qual_type
     | `CXXDefaultArgExpr (_, _, _, default_expr_info)
