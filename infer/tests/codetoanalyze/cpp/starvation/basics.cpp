@@ -97,6 +97,11 @@ class StdLock {
   std::mutex mutex_2;
 };
 
+// A class per shape. A deadlock is grouped per canonical lock, and a lock is named by the
+// field it is, so several self deadlocks on one field are one row and all but the first stop
+// being asserted. The _ok shapes get their own field for the same reason pointing the other
+// way: if one of them started deadlocking, its report would be merged into a reported shape's
+// row and the suite would stay green.
 class SelfDeadlock {
  public:
   SelfDeadlock() {}
@@ -108,6 +113,12 @@ class SelfDeadlock {
     mutex_.unlock();
   }
 
+ private:
+  std::mutex mutex_;
+};
+
+class SelfDeadlockInterproc {
+ public:
   void interproc2_bad() { std::lock_guard<std::mutex> lock(mutex_); }
 
   void interproc1_bad() {
@@ -115,17 +126,35 @@ class SelfDeadlock {
     interproc2_bad();
   }
 
+ private:
+  std::mutex mutex_;
+};
+
+class SelfDeadlockSequential {
+ public:
   void foo_ok() {
     { std::lock_guard<std::mutex> lock(mutex_); }
     int i = 0;
     { std::lock_guard<std::mutex> lock(mutex_); }
   }
 
+ private:
+  std::mutex mutex_;
+};
+
+class SelfDeadlockDeferredOk {
+ public:
   void bar_ok() {
     std::unique_lock<std::mutex> lock1(mutex_, std::defer_lock);
     std::lock_guard<std::mutex> lock2(mutex_);
   }
 
+ private:
+  std::mutex mutex_;
+};
+
+class SelfDeadlockDeferred {
+ public:
   void complicated_bad() {
     std::unique_lock<std::mutex> lock1(mutex_, std::defer_lock);
     std::lock_guard<std::mutex> lock2(mutex_);

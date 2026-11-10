@@ -31,6 +31,14 @@ class SharedPtrGuards {
   std::shared_ptr<Shared> s_;
 };
 
+// Its own struct, because a deadlock is grouped per canonical lock pair and a lock is named
+// by the field it is: inverting Shared::a against Shared::b again here would be merged into
+// SharedPtrGuards' row and leave this pair unasserted.
+struct Owned {
+  std::mutex a;
+  std::mutex b;
+};
+
 class UniquePtrLocks {
  public:
   void ab_bad() {
@@ -48,7 +56,7 @@ class UniquePtrLocks {
   }
 
  private:
-  std::unique_ptr<Shared> s_;
+  std::unique_ptr<Owned> s_;
 };
 
 class ReferenceAccessor {

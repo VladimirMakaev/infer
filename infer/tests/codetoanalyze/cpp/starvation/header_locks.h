@@ -21,4 +21,16 @@ class Mutex {
   std::mutex m_;
 };
 
+// A second wrapper, so that a class using it has its own canonical lock: every lock taken
+// through Mutex is the field Mutex::m_, which makes every inversion in one client file the
+// same canonical pair and leaves all but the first unasserted.
+class CalleeMutex {
+ public:
+  void lock() { m_.lock(); }
+  void unlock() { m_.unlock(); }
+
+ private:
+  std::mutex m_;
+};
+
 } // namespace header_locks

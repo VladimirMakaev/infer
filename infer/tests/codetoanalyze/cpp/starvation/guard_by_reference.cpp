@@ -71,12 +71,6 @@ class Relock {
     std::lock_guard<std::mutex> g(mutex_);
   }
 
-  void lock_in_callee_bad() {
-    std::unique_lock<std::mutex> l(mutex_, std::defer_lock);
-    take(l);
-    std::lock_guard<std::mutex> g(mutex_);
-  }
-
  private:
   void release(std::unique_lock<std::mutex>& l) { l.unlock(); }
 
@@ -85,6 +79,22 @@ class Relock {
     l.lock();
   }
 
+  void take(std::unique_lock<std::mutex>& l) { l.lock(); }
+
+  std::mutex mutex_;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock: a second self deadlock on
+// Relock::mutex_ would be merged into relock_in_callee_bad's row and stop being asserted.
+class LockInCallee {
+ public:
+  void lock_in_callee_bad() {
+    std::unique_lock<std::mutex> l(mutex_, std::defer_lock);
+    take(l);
+    std::lock_guard<std::mutex> g(mutex_);
+  }
+
+ private:
   void take(std::unique_lock<std::mutex>& l) { l.lock(); }
 
   std::mutex mutex_;
@@ -168,6 +178,29 @@ class Park {
     std::lock_guard<std::mutex> g(mutex_);
   }
 
+ private:
+  void park(std::unique_lock<std::mutex>& l) {
+    parked_ = &l;
+    l.unlock();
+  }
+
+  void keep(std::unique_lock<std::mutex>& l) { parked_ = &l; }
+
+  void park_with_helper(std::unique_lock<std::mutex>& l) {
+    keep(l);
+    l.unlock();
+  }
+
+  void unpark() { parked_->lock(); }
+
+  std::mutex mutex_;
+  std::unique_lock<std::mutex>* parked_;
+};
+
+// Its own class, because a deadlock is grouped per canonical lock: a second self deadlock on
+// Park::mutex_ would be merged into park_unpark_bad's row and stop being asserted.
+class ParkThroughHelper {
+ public:
   void park_through_helper_bad() {
     std::unique_lock<std::mutex> l(mutex_);
     park_with_helper(l);
@@ -176,11 +209,6 @@ class Park {
   }
 
  private:
-  void park(std::unique_lock<std::mutex>& l) {
-    parked_ = &l;
-    l.unlock();
-  }
-
   void keep(std::unique_lock<std::mutex>& l) { parked_ = &l; }
 
   void park_with_helper(std::unique_lock<std::mutex>& l) {

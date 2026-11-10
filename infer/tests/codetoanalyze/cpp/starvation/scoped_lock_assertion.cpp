@@ -96,19 +96,32 @@ void assertion_does_not_release_owner_bad(std::mutex& mutex) {
   mutex.unlock();
 }
 
-void real_guard_after_unique_bad(std::mutex& mutex) {
-  std::unique_lock<std::mutex> first(mutex);
-  RealGuard second(mutex);
+// Each takes its mutex through an owner of its own. A lock reached through a formal is
+// canonically the same lock in every procedure, so these three self deadlocks were one row
+// and only the first stayed asserted; a field names them apart.
+struct RealAfterUniqueOwner {
+  std::mutex mutex;
+};
+struct RealTwiceOwner {
+  std::mutex mutex;
+};
+struct ExternalAfterUniqueOwner {
+  std::mutex mutex;
+};
+
+void real_guard_after_unique_bad(RealAfterUniqueOwner& owner) {
+  std::unique_lock<std::mutex> first(owner.mutex);
+  RealGuard second(owner.mutex);
 }
 
-void real_guard_twice_bad(std::mutex& mutex) {
-  RealGuard first(mutex);
-  RealGuard second(mutex);
+void real_guard_twice_bad(RealTwiceOwner& owner) {
+  RealGuard first(owner.mutex);
+  RealGuard second(owner.mutex);
 }
 
-void external_guard_after_unique_bad(std::mutex& mutex) {
-  std::unique_lock<std::mutex> first(mutex);
-  ExternalGuard second(mutex);
+void external_guard_after_unique_bad(ExternalAfterUniqueOwner& owner) {
+  std::unique_lock<std::mutex> first(owner.mutex);
+  ExternalGuard second(owner.mutex);
 }
 // Reading a buffer under unique_lock may assert ownership for annotated helpers.
 class BufferReader {

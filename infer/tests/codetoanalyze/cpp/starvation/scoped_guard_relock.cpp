@@ -77,12 +77,37 @@ class Session {
     take();
   }
 
+};
+
+// A class each from here down. A deadlock is grouped per canonical lock and a lock is named
+// by the field it is, so these further self deadlocks on Session::mutex_ were merged into
+// held_guard_bad's row and stopped being asserted.
+class RestoredSession {
+  Mutex mutex_;
+
+ public:
+  void take() { Guard guard(mutex_); }
+
+  void restore(Guard& guard, bool repeat) {
+    guard.unlock();
+    guard.lock();
+    if (repeat) {
+      guard.unlock();
+      guard.lock();
+    }
+  }
+
   void restored_guard_bad(bool repeat) {
     Guard guard(mutex_);
     restore(guard, repeat);
     take();
   }
+};
 
+class RelockTwiceSession {
+  Mutex mutex_;
+
+ public:
   void relock_twice_bad() {
     Guard guard(mutex_);
     guard.unlock();

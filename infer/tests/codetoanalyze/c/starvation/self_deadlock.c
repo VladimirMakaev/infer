@@ -32,9 +32,23 @@ void increment(struct Device* d) {
   pthread_mutex_unlock(&d->mutex);
 }
 
-void call_under_lock_bad(struct Device* d) {
+// Its own struct, so that the field it deadlocks on is its own. A deadlock is grouped per
+// canonical lock, and a lock is named by the field it is, so a second self deadlock on
+// Device::mutex would be merged into lock_twice_bad's row and left unasserted.
+struct CalleeDevice {
+  pthread_mutex_t mutex;
+  int count;
+};
+
+void increment_callee(struct CalleeDevice* d) {
   pthread_mutex_lock(&d->mutex);
-  increment(d);
+  d->count++;
+  pthread_mutex_unlock(&d->mutex);
+}
+
+void call_under_lock_bad(struct CalleeDevice* d) {
+  pthread_mutex_lock(&d->mutex);
+  increment_callee(d);
   pthread_mutex_unlock(&d->mutex);
 }
 
@@ -133,7 +147,13 @@ void lock_two_stripes_in_callee_ok(int i, int j) {
   lock_both(&stripes[i], &stripes[j]);
 }
 
-void lock_device_twice_in_callee_bad(struct Device* d) {
+// its own struct, for the same reason as CalleeDevice above
+struct BothDevice {
+  pthread_mutex_t mutex;
+  int count;
+};
+
+void lock_device_twice_in_callee_bad(struct BothDevice* d) {
   lock_both(&d->mutex, &d->mutex);
 }
 

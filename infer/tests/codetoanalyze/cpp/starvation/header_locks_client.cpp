@@ -75,7 +75,7 @@ class TwoLocksInCallee {
     b_.lock();
   }
 
-  Mutex a_, b_, c_;
+  CalleeMutex a_, b_, c_;
 };
 
 } // namespace header_locks

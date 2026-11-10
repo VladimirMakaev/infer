@@ -61,6 +61,14 @@ class Parameters {
 
   final java.util.concurrent.locks.Lock mLock = new java.util.concurrent.locks.ReentrantLock();
 
+  // A second instance lock and static lock. A deadlock is grouped per canonical lock pair, so
+  // the four methods below that invert an instance lock against a static one would otherwise
+  // be one row and only the pair's two ends would stay asserted. Split across two pairs, each
+  // pair keeps one method on each side, so every one of the four is named in a row and losing
+  // any of them takes its row away.
+  final java.util.concurrent.locks.Lock mLock2 = new java.util.concurrent.locks.ReentrantLock();
+  static final Object sLock2 = new Object();
+
   static Parameters getInstance() {
     return sObject;
   }
@@ -73,6 +81,14 @@ class Parameters {
     mLock.unlock();
   }
 
+  void acquire2() {
+    mLock2.lock();
+  }
+
+  void release2() {
+    mLock2.unlock();
+  }
+
   // the next three methods deadlock if the instance is sObject
   static void instanceThenStaticLockBad() {
     getInstance().acquire();
@@ -83,10 +99,10 @@ class Parameters {
 
   static void localInstanceThenStaticLockBad() {
     Parameters p = getInstance();
-    p.acquire();
-    synchronized (sLock) {
+    p.acquire2();
+    synchronized (sLock2) {
     }
-    p.release();
+    p.release2();
   }
 
   void staticLockThenInstanceBad() {
@@ -97,12 +113,12 @@ class Parameters {
   }
 
   static void acquireAndRelease(Parameters p) {
-    p.acquire();
-    p.release();
+    p.acquire2();
+    p.release2();
   }
 
   static void staticLockThenHelperBad() {
-    synchronized (sLock) {
+    synchronized (sLock2) {
       acquireAndRelease(getInstance());
     }
   }
