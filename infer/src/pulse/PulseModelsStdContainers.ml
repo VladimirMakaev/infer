@@ -244,22 +244,70 @@ module Iterator = struct
     Collection.Iterator.compare_values comparison ~desc elem_lhs elem_rhs model_data astate
 end
 
+(* The containers whose elements have positions. Only for these does naming a cell mean anything:
+   an associative container has no [front()], [back()] or pop for a named cell to meet, and giving
+   it one would make two iterators from [begin()] the same object, which [erase] would then relate
+   to each other. *)
+let is_sequence_container : Invalidation.std_container -> bool = function
+  | Deque | List ->
+      true
+  | Map
+  | Multimap
+  | Multiset
+  | Set
+  | UnorderedMap
+  | UnorderedMultimap
+  | UnorderedMultiset
+  | UnorderedSet ->
+      false
+
+
+(* Which cell of the backing array an accessor names. The ends of a sequence container are the
+   cells at [0] and at [size - 1], so a reference taken from one end and the pop that removes that
+   same end meet on one address, while a reference from the other end does not. An accessor with
+   no positional meaning, such as the top of a priority queue, keeps naming a fresh cell. *)
+type end_of_container = Front | Back | Unspecified
+
+let index_of_end which path location this astate =
+  match which with
+  | Unspecified ->
+      Sat (Ok (astate, AbstractValue.mk_fresh ()))
+  | Front ->
+      let index = AbstractValue.mk_fresh () in
+      let++ astate = PulseArithmetic.and_eq_int index IntLit.zero astate in
+      (astate, index)
+  | Back ->
+      let index = AbstractValue.mk_fresh () in
+      let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
+      let++ astate, index =
+        PulseArithmetic.eval_binop index (MinusA None) (AbstractValueOperand size)
+          (ConstOperand (Cint IntLit.one)) astate
+      in
+      (astate, index)
+
+
 (** make [iter] an iterator into [container], over the past-the-end value if the container is known
-    to be empty and over a fresh element otherwise *)
-let bind_iterator ~has_token path location event container iter astate =
+    to be empty and over the cell named by [which] otherwise. [begin()] names the cell at [0], the
+    same one [front()] names, so a reference taken through it and the pop that removes the front
+    meet on one address; an iterator with no positional meaning, such as the one [find()] returns,
+    keeps naming a fresh cell. *)
+let bind_iterator ~which ~has_token path location event container iter astate =
   let=* astate, (size, _) = Collection.to_internal_size_deref path Read location container astate in
   let** astate, elem =
     if PulseArithmetic.is_known_zero astate size then eval_end path location container astate
-    else Sat (fresh_element path location container astate)
+    else
+      let** astate, index = index_of_end which path location container astate in
+      Sat (Collection.element path location container index astate)
   in
   Sat (make_iterator ~has_token path location event container iter elem astate)
 
 
-let begin_or_find this iter container ~desc : model_no_non_disj =
+let begin_or_find ~which this iter container ~desc : model_no_non_disj =
  fun {path; location} astate ->
   let event = Hist.call_event path location desc in
+  let which = if is_sequence_container container then which else Unspecified in
   let<++> astate =
-    bind_iterator ~has_token:(has_token container) path location event this iter astate
+    bind_iterator ~which ~has_token:(has_token container) path location event this iter astate
   in
   astate
 
@@ -275,6 +323,25 @@ let end_ this iter container ~desc : model_no_non_disj =
   astate
 
 
+(** [erase] has just invalidated the cell its iterator named. The backing array has to be forgotten
+    only when that cell is the one [front()] and [begin()] name: erasing it leaves them naming an
+    invalidated address, which is not what the container holds afterwards. Erasing any other cell
+    leaves the ends where they were, and keeping the array there is what lets a reference taken from
+    an end still meet the pop that removes it. An associative container names no cell by position
+    and its elements keep their identity, so it always keeps its array. *)
+let forget_array_if_front_erased path location this container elem ~desc astate =
+  if not (is_sequence_container container) then Sat (Ok astate)
+  else
+    let** astate, front_index = index_of_end Front path location this astate in
+    let=* astate, front_cell = Collection.element path location this front_index astate in
+    if AbstractValue.equal (fst elem) (fst front_cell) then
+      Sat
+        (PulseOperations.havoc_deref_field path location this Collection.field
+           (Hist.single_call path location desc)
+           astate )
+    else Sat (Ok astate)
+
+
 let erase this pos ret_iter container ~desc : model_no_non_disj =
  fun {path; location} astate ->
   let event = Hist.call_event path location desc in
@@ -283,6 +350,7 @@ let erase this pos ret_iter container ~desc : model_no_non_disj =
     let=* astate = forget_ordered_map_cache path location this astate in
     let=* astate, elem, _ = check_iterator ~has_token ~allow_end:false path location pos astate in
     let astate = invalidate_element path location (StdContainer (container, Erase)) elem astate in
+    let** astate = forget_array_if_front_erased path location this container elem ~desc astate in
     let** astate = Collection.decrease_size path location this ~desc astate in
     let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
     let** astate, next =
@@ -342,30 +410,6 @@ let assume_non_empty ?(keep_known_empty = false) path location this astate =
   let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
   if keep_known_empty && PulseArithmetic.is_known_zero astate size then Sat (Ok astate)
   else PulseArithmetic.and_positive size astate
-
-
-(* Which cell of the backing array an accessor names. The ends of a sequence container are the
-   cells at [0] and at [size - 1], so a reference taken from one end and the pop that removes that
-   same end meet on one address, while a reference from the other end does not. An accessor with
-   no positional meaning, such as the top of a priority queue, keeps naming a fresh cell. *)
-type end_of_container = Front | Back | Unspecified
-
-let index_of_end which path location this astate =
-  match which with
-  | Unspecified ->
-      Sat (Ok (astate, AbstractValue.mk_fresh ()))
-  | Front ->
-      let index = AbstractValue.mk_fresh () in
-      let++ astate = PulseArithmetic.and_eq_int index IntLit.zero astate in
-      (astate, index)
-  | Back ->
-      let index = AbstractValue.mk_fresh () in
-      let=* astate, (size, _) = Collection.to_internal_size_deref path Read location this astate in
-      let++ astate, index =
-        PulseArithmetic.eval_binop index (MinusA None) (AbstractValueOperand size)
-          (ConstOperand (Cint IntLit.one)) astate
-      in
-      (astate, index)
 
 
 (** [front()] and [back()] *)
@@ -566,7 +610,7 @@ let equal_range this (ret : _ FuncArg.t) container ~desc : model_no_non_disj =
               (FieldAccess (Fieldname.make pair_name field))
               astate
           in
-          bind_iterator ~has_token path location event this iter astate
+          bind_iterator ~which:Unspecified ~has_token path location event this iter astate
         in
         let** astate = bind_half "first" astate in
         bind_half "second" astate
@@ -609,7 +653,7 @@ let reverse_begin_or_end ~over_end this ret container ~desc : model_no_non_disj 
         if over_end then
           let** astate, end_value = eval_end path location this astate in
           Sat (make_iterator ~has_token path location event this iter end_value astate)
-        else bind_iterator ~has_token path location event this iter astate
+        else bind_iterator ~which:Unspecified ~has_token path location event this iter astate
   in
   astate
 
@@ -1178,7 +1222,7 @@ module OrderedMap = struct
     let<*> astate, constant = key_value path location key astate in
     match constant with
     | None ->
-        begin_or_find this iter Map ~desc model_data astate
+        begin_or_find ~which:Unspecified this iter Map ~desc model_data astate
     | Some key ->
         let<*> astate, known = presence path location this key astate in
         let<**> astate, elem =
@@ -1413,8 +1457,8 @@ let matchers : matcher list =
         false
   in
   let container_matchers =
-    [ returns_iterator "begin" begin_or_find
-    ; returns_iterator "cbegin" begin_or_find
+    [ returns_iterator "begin" (begin_or_find ~which:Front)
+    ; returns_iterator "cbegin" (begin_or_find ~which:Front)
     ; returns_iterator "end" end_
     ; returns_iterator "cend" end_
       (* every container that has reverse iterators at all gets them: leaving one unmodelled
@@ -1461,19 +1505,7 @@ let matchers : matcher list =
       ; ( container_method "size" <>$ capt_arg_payload
         $--> fun this -> on_container (fun _ ~desc -> Collection.size ~desc this) ) ]
   in
-  let is_associative : Invalidation.std_container -> bool = function
-    | Deque | List ->
-        false
-    | Map
-    | Multimap
-    | Multiset
-    | Set
-    | UnorderedMap
-    | UnorderedMultimap
-    | UnorderedMultiset
-    | UnorderedSet ->
-        true
-  in
+  let is_associative container = not (is_sequence_container container) in
   (* the elements of the set-like containers are const, so nothing can be stored through an
      iterator to one and [equal_range] on them cannot lose a value the way it does on a map *)
   let lookup_matchers =
@@ -1484,7 +1516,7 @@ let matchers : matcher list =
         container_method ~f:is_associative method_name
         $ capt_arg_payload $+ any_arg
         $+ capt_arg_payload_of_typ_exists (iterator_typs ())
-        $--> fun this iter -> on_container (begin_or_find this iter) )
+        $--> fun this iter -> on_container (begin_or_find ~which:Unspecified this iter) )
     @ [ ( container_method ~f:is_map_like "equal_range"
         $ capt_arg_payload $+ any_arg $+ capt_arg
         $--> fun this ret -> on_container (equal_range this ret) ) ]
@@ -1495,18 +1527,17 @@ let matchers : matcher list =
         $ capt_arg_payload $+ any_arg
         $--> fun this -> on_container (fun _ ~desc -> count ~desc this) ) ]
   in
-  let is_sequence container = not (is_associative container) in
   let front_back_matchers =
-    [ ( container_method ~f:is_sequence "front"
+    [ ( container_method ~f:is_sequence_container "front"
       <>$ capt_arg_payload
       $--> fun this -> on_container (fun _ ~desc -> element_reference ~which:Front ~desc this) )
-    ; ( container_method ~f:is_sequence "back"
+    ; ( container_method ~f:is_sequence_container "back"
       <>$ capt_arg_payload
       $--> fun this -> on_container (fun _ ~desc -> element_reference ~which:Back ~desc this) ) ]
     @ List.map
         [("pop_front", Front, Invalidation.PopFront); ("pop_back", Back, Invalidation.PopBack)]
         ~f:(fun (method_name, which, container_f) ->
-          container_method ~f:is_sequence method_name
+          container_method ~f:is_sequence_container method_name
           <>$ capt_arg_payload
           $--> fun this -> on_container (pop ~which container_f this) )
   in
