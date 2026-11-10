@@ -104,6 +104,7 @@ DIRECT_TESTS += \
   cpp_pulse-failure-outcomes \
   cpp_pulse-force-continue \
   cpp_pulse-no-nullability-annotations \
+  cpp_pulse-shared-ptr-fallback \
   cpp_pulse-unsafe-malloc \
   cpp_racerd \
   cpp_racerd-dedup \
