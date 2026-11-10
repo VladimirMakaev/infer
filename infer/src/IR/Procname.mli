@@ -144,6 +144,11 @@ module ObjC_Cpp : sig
   val is_destructor : t -> bool
   (** Check if this is a dealloc method. *)
 
+  val is_cpp_destructor_or_objc_dealloc : t -> bool
+  (** Check if this is a C++ destructor, or the Objective-C deallocator on an Objective-C method.
+      Unlike [is_destructor] it does not accept a C++ method that is merely named [dealloc], which
+      is a legal name for one. *)
+
   val is_inner_destructor : t -> bool
   (** Check if this is a frontend-generated "inner" destructor (see D5834555/D7189239) *)
 end
