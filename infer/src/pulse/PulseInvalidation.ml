@@ -135,6 +135,8 @@ type std_container_function =
   | EmplaceFront
   | Erase
   | Insert
+  | PopBack
+  | PopFront
   | PushBack
   | PushFront
 [@@deriving compare, equal, yojson_of]
@@ -177,6 +179,10 @@ let pp_std_container_function f = function
       F.fprintf f "erase"
   | Insert ->
       F.fprintf f "insert"
+  | PopBack ->
+      F.fprintf f "pop_back"
+  | PopFront ->
+      F.fprintf f "pop_front"
   | PushBack ->
       F.fprintf f "push_back"
   | PushFront ->
