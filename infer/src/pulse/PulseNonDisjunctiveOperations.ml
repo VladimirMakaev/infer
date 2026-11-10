@@ -529,13 +529,19 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref ~is_reached_through_pointer
             is_copied_from_address_reachable_from_unowned ~is_captured_by_ref
               ~is_reached_through_pointer ~is_intermediate:false source_addr_typ_opt ~from
               proc_lvalue_ref_parameters ~astates_before
+            || Typ.is_pointer_to_const source_typ
+               && is_copied_from_address_reachable_from_unowned ~is_captured_by_ref
+                    ~is_reached_through_pointer ~is_intermediate:true source_addr_typ_opt ~from
+                    proc_lvalue_ref_parameters ~astates_before
             || Option.exists source_addr_typ_opt ~f:(fun (_, source_expr, source_typ) ->
                 is_const_captured_source proc_desc source_typ source_expr )
             || is_unmovable_copy_into_conditional_result ~is_captured_by_ref
                  ~is_reached_through_pointer tenv proc_desc node from source_typ source_addr_typ_opt
                  proc_lvalue_ref_parameters ~astates_before
           then
-            (* If source is copy assigned from a member field/global, we cannot suggest move as other procedures might access it. *)
+            (* An owning field needs its own value: a borrowed const source cannot be moved,
+               and replacing the field with a reference changes its ownership. An owned const
+               value is different, since its declaration can lose const before its last use. *)
             None
           else
             let astate', source_addr_opt, source_expr_opt =
