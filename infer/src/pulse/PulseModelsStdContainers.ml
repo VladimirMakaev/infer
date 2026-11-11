@@ -147,8 +147,15 @@ let copy_iterator ~has_token path location event ~src ~dst astate =
 
 
 (** check that [iter] is valid, and that it is not the end iterator unless [allow_end], then return
-    its element and the backing array of its container *)
-let check_iterator ~has_token ~allow_end path location iter astate =
+    its element and the backing array of its container.
+
+    [elem_storage_only] is for the operations that do not look at the value of the element the
+    iterator currently names: stepping reads the node links, or the deque's own position, so an
+    occupant destroyed in place leaves the iterator usable and the step is not a use of it. The
+    storage still has to be there, which is what keeps erasing the element, clearing the container
+    and freeing it reportable. Dereferencing and erasing do look at the element, and keep the
+    ordinary check. *)
+let check_iterator ?(elem_storage_only = false) ~has_token ~allow_end path location iter astate =
   let* astate, elem = load_field path location iter node_field astate in
   let* astate =
     if allow_end then Ok astate else Collection.Iterator.check_not_end location elem astate
@@ -159,7 +166,11 @@ let check_iterator ~has_token ~allow_end path location iter astate =
       PulseOperations.check_addr_access path NoAccess location token astate
     else Ok astate
   in
-  let* astate = PulseOperations.check_addr_access path NoAccess location elem astate in
+  let* astate =
+    PulseOperations.check_addr_access path
+      ?must_be_valid_reason:(if elem_storage_only then Some Invalidation.CppStorageOnly else None)
+      NoAccess location elem astate
+  in
   (* [clear()] invalidates the backing array, hence the iterators obtained before *)
   let* astate, arr = load_field path location iter Collection.field astate in
   let+ astate = PulseOperations.check_addr_access path NoAccess location arr astate in
@@ -212,7 +223,9 @@ module Iterator = struct
 
   let step ~has_token step path location event iter astate =
     let allow_end = match step with `PlusPlus -> false | `MinusMinus -> true in
-    let* astate, _, arr = check_iterator ~has_token ~allow_end path location iter astate in
+    let* astate, _, arr =
+      check_iterator ~elem_storage_only:true ~has_token ~allow_end path location iter astate
+    in
     let* astate, elem =
       Collection.eval_element path location arr (AbstractValue.mk_fresh ()) astate
     in
