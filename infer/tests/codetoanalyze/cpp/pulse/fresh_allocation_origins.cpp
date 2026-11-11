@@ -60,4 +60,59 @@ int live_fresh_field_ok() {
   return value;
 }
 
+// Two calls separate the local from the equality branch. A nontrivial value keeps
+// the local's lifetime in the summary, while the destination is newly allocated.
+struct Value {
+  int value;
+  Value();
+  ~Value();
+  Value& operator=(const Value&);
+};
+
+struct Array {
+  Value* elements;
+  unsigned size;
+};
+
+Value& assign_value(Value& destination, Value& source) {
+  if (&destination != &source) {
+    destination = source;
+  }
+  return destination;
+}
+
+Value& fresh_slot(Array& array) {
+  array.elements = static_cast<Value*>(malloc(4 * sizeof(Value)));
+  if (!array.elements) {
+    exit(1);
+  }
+  return array.elements[array.size];
+}
+
+Value& resized_slot(Array& array) {
+  array.elements = static_cast<Value*>(realloc(array.elements, 4 * sizeof(Value)));
+  if (!array.elements) {
+    exit(1);
+  }
+  return array.elements[0];
+}
+
+Value& set_fresh(Array& array, Value& value) {
+  return assign_value(fresh_slot(array), value);
+}
+
+Value& set_resized(Array& array, Value& value) {
+  return assign_value(resized_slot(array), value);
+}
+
+Value& fresh_slot_cannot_return_local_ok(Array& array) {
+  Value local;
+  return set_fresh(array, local);
+}
+
+Value& resized_slot_cannot_return_local_ok(Array& array) {
+  Value local;
+  return set_resized(array, local);
+}
+
 } // namespace fresh_allocation_origins
