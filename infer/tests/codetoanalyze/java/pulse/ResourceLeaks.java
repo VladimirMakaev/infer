@@ -11,6 +11,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
+import android.net.Network;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.json.UTF8StreamJsonParser;
@@ -33,6 +34,7 @@ import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.PrintWriter;
 import java.io.RandomAccessFile;
+import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -805,6 +807,42 @@ public class ResourceLeaks {
     out.write(1);
     in.read();
   }
+
+  // Binding a socket to a network does not hand the socket over: the caller still has to close
+  // it. The call used to be unknown here, and an unknown call releases every resource its
+  // arguments reach, so this leak was not reported at all.
+  public void socketBoundToNetworkNotClosedBad(Network network) throws IOException {
+    Socket socket = new Socket();
+    network.bindSocket(socket);
+    socket.getOutputStream().write(1);
+  }
+
+  public void socketBoundToNetworkClosedOk(Network network) throws IOException {
+    Socket socket = new Socket();
+    try {
+      network.bindSocket(socket);
+      socket.getOutputStream().write(1);
+    } finally {
+      socket.close();
+    }
+  }
+
+  // A datagram socket is not modeled as a resource anywhere, so there is nothing here for the
+  // model above to keep hold of. The same clause covers this overload the day it becomes one.
+  public void FN_datagramSocketBoundToNetworkNotClosedBad(Network network) throws IOException {
+    DatagramSocket socket = new DatagramSocket();
+    network.bindSocket(socket);
+  }
+
+  // The boundary of the model above, and the reason it is a model rather than a general rule:
+  // any other callee the analysis knows nothing about still takes the socket with it.
+  public void FN_socketPassedToUnknownNotClosedBad() throws IOException {
+    Socket socket = new Socket();
+    bindSocketElsewhere(socket);
+    socket.getOutputStream().write(1);
+  }
+
+  static native void bindSocketElsewhere(Socket socket);
 
   // ServerSocket tests
 

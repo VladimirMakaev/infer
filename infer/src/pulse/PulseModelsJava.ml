@@ -939,6 +939,15 @@ let matchers : matcher list =
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.ServerSocket")
     &:: "accept" <>$ any_arg $--> Basic.skip |> with_non_disj
+    (* Binding a socket to a network does not hand the socket over: the caller still has to close
+       it. An unknown call releases every resource its arguments reach, so without this model a
+       socket that is bound to a network and then leaked was not reported at all. The three
+       overloads take a socket, a datagram socket and a file descriptor, and all three behave the
+       same way; the call is declared to throw, so it also has a throwing outcome. *)
+  ; +map_context_tenv (PatternMatch.Java.implements "android.net.Network")
+    &:: "bindSocket" <>$ any_arg
+    $+...$--> Resource.use ~exn_class_name:"java.io.IOException"
+    |> with_non_disj
   ; +map_context_tenv
        (PatternMatch.Java.implements_one_of
           [ "java.io.ObjectInputStream"
