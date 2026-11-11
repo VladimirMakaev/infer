@@ -40,10 +40,40 @@ let is_nullptr_dereference_in_nullsafe_class tenv ~is_nullptr_dereference jn =
   && match NullsafeMode.of_java_procname tenv jn with Default -> false | Local | Strict -> true
 
 
+(* A leaked allocation is one bug however many ways the procedure leaves it behind: the same
+   allocation becomes unreachable once per path out of the procedure, and each of those used to
+   be logged separately, so a resource used before it is dropped was reported both where it was
+   last touched and again at the end of the method. Remember the allocations already reported in
+   the procedure being analysed and log only the first. This affects logging alone: the state
+   [report_summary_error] derives from the diagnostic is computed as before, so no path and no
+   other issue changes. *)
+let reported_leak_allocations = AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
+
+let is_already_reported_leak ~latent (diagnostic : Diagnostic.t) =
+  match diagnostic with
+  | ResourceLeak {resource; allocation_trace} ->
+      let issue_type = Diagnostic.get_issue_type ~latent diagnostic in
+      let allocation_site = Trace.get_outer_location allocation_trace in
+      let reported = DLS.get reported_leak_allocations in
+      if
+        List.exists !reported ~f:(fun (issue_type', resource', allocation_site') ->
+            IssueType.equal issue_type issue_type'
+            && Diagnostic.equal_resource resource resource'
+            && Location.equal allocation_site allocation_site' )
+      then true
+      else (
+        reported := (issue_type, resource, allocation_site) :: !reported ;
+        false )
+  | _ ->
+      false
+
+
 let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~latent
     ?location_override ?extra_trace ?reachable_from (diagnostic : Diagnostic.t) =
   let open Diagnostic in
   if is_suppressed && not Config.pulse_report_issues_for_tests then ()
+  else if is_already_reported_leak ~latent diagnostic then
+    L.d_printfln "Not reporting this leak again: its allocation is already reported here"
   else
     (* Report suppressed issues with a message to distinguish them from non-suppressed issues.
        Useful for infer's tests. *)

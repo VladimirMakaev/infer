@@ -83,6 +83,7 @@ type resource =
   | Awaitable
   | HackBuilderResource of HackClassName.t
   | Memory of Attribute.allocator
+[@@deriving equal]
 
 type assertion_error = {location: Location.t} [@@deriving compare, equal, yojson_of]
 

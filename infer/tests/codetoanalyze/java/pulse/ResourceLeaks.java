@@ -143,6 +143,20 @@ public class ResourceLeaks {
     fis = new FileOutputStream("x");
   }
 
+  // Two resources of different classes allocated on the same line. One report per leaked
+  // allocation is per allocation, not per line, so both of these are still reported.
+  public void twoResourcesOnOneLineBad() throws IOException {
+    FileInputStream fis = new FileInputStream("file.txt"); JarFile jar = new JarFile("f.jar");
+  }
+
+  // Several objects leak from one allocation site. They are one report: there is one statement
+  // to fix, and the method used to be flagged once per path out of it.
+  public void allocateInLoopNotClosedBad(int n) throws IOException {
+    for (int i = 0; i < n; i++) {
+      FileOutputStream fos = new FileOutputStream("file" + i);
+    }
+  }
+
   // TwoResources tests
 
   public static void twoResourcesBad() throws IOException {
