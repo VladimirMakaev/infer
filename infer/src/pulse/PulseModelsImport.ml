@@ -485,6 +485,13 @@ module Basic = struct
           PulseOperations.allocate allocator location ret_addr astate
     in
     let astate =
+      match allocator with
+      | Some (Attribute.CMalloc | Attribute.CRealloc) ->
+          AddressAttributes.add_one ret_addr Attribute.AddressOfAllocatedBlock astate
+      | _ ->
+          astate
+    in
+    let astate =
       if initialize then astate
       else set_uninitialized tenv path size_exp_opt location (ret_addr, ret_alloc_hist) astate
     in

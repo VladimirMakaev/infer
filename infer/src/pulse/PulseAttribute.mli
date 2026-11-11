@@ -245,6 +245,9 @@ type t =
   | FailureOutcome of FailureOriginSet.t
       (** [v] is a value some call produced to mean failure; a set because two paths reaching [v]
           can come from different calls. ALSO LAST, for the rank reason above. *)
+  | AddressOfAllocatedBlock
+      (** A cell address computed within a genuine C allocation, never a stored pointer value.
+          Post-only and non-owning. Appended to preserve existing ranks. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -274,6 +277,8 @@ module Attributes : sig
   val get_source_origin_of_copy : t -> (PulseAbstractValue.t * bool) option
 
   val get_allocation : t -> (allocator * Trace.t) option
+
+  val is_address_of_allocated_block : t -> bool
 
   val remove_allocation : t -> t
 

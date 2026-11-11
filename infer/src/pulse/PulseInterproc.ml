@@ -447,25 +447,36 @@ let fold_globals_of_callee_stack {PathContext.timestamp} call_loc stack call_sta
 
 
 let and_aliasing_arith ~addr_callee ~addr_caller0 call_state =
-  match to_caller_value call_state addr_callee with
-  | Some (addr_caller', _)
-    when AbductiveDomain.cannot_be_equal_to_local_address call_state.astate addr_caller'
-           addr_caller0 ->
-      let reason () =
-        F.asprintf "%a and %a cannot alias: one is the address of a local variable" AbstractValue.pp
-          addr_caller' AbstractValue.pp addr_caller0
-      in
-      raise_notrace (Contradiction (PathCondition {SatUnsat.reason; source= __POS__}))
-  | Some (addr_caller', _) when not (AbstractValue.equal addr_caller' addr_caller0) ->
-      let path_condition, new_eqs =
-        Formula.and_equal_vars addr_caller0 addr_caller'
-          call_state.astate.AbductiveDomain.path_condition
-        |> raise_if_unsat
-      in
-      let+ call_state = incorporate_new_eqs new_eqs call_state |> raise_if_unsat in
-      {call_state with astate= AbductiveDomain.set_path_condition path_condition call_state.astate}
-  | _ ->
-      Ok call_state
+  let from_allocation =
+    UnsafeAttributes.find_opt addr_callee call_state.callee_post.BaseDomain.attrs
+    |> Option.exists ~f:Attributes.is_address_of_allocated_block
+  in
+  if from_allocation && AbductiveDomain.is_address_of_local call_state.astate addr_caller0 then
+    let reason () =
+      F.asprintf "%a cannot be both a caller local address and an address within a C allocation"
+        AbstractValue.pp addr_caller0
+    in
+    raise_notrace (Contradiction (PathCondition {SatUnsat.reason; source= __POS__}))
+  else
+    match to_caller_value call_state addr_callee with
+    | Some (addr_caller', _)
+      when AbductiveDomain.cannot_be_equal_to_local_address call_state.astate addr_caller'
+             addr_caller0 ->
+        let reason () =
+          F.asprintf "%a and %a cannot alias: one is the address of a local variable"
+            AbstractValue.pp addr_caller' AbstractValue.pp addr_caller0
+        in
+        raise_notrace (Contradiction (PathCondition {SatUnsat.reason; source= __POS__}))
+    | Some (addr_caller', _) when not (AbstractValue.equal addr_caller' addr_caller0) ->
+        let path_condition, new_eqs =
+          Formula.and_equal_vars addr_caller0 addr_caller'
+            call_state.astate.AbductiveDomain.path_condition
+          |> raise_if_unsat
+        in
+        let+ call_state = incorporate_new_eqs new_eqs call_state |> raise_if_unsat in
+        {call_state with astate= AbductiveDomain.set_path_condition path_condition call_state.astate}
+    | _ ->
+        Ok call_state
 
 
 let and_restricted_arith ~addr_callee ~addr_caller call_state =

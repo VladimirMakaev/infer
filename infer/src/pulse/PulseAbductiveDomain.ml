@@ -940,6 +940,19 @@ module Internal = struct
             in
             let astate =
               match (access : Access.t) with
+              | Dereference ->
+                  astate
+              | FieldAccess _ | ArrayAccess _ ->
+                  let from_allocation =
+                    SafeAttributes.find_opt `Post addr_src astate
+                    |> Option.exists ~f:Attributes.is_address_of_allocated_block
+                  in
+                  if from_allocation then
+                    SafeAttributes.add_one addr_dst AddressOfAllocatedBlock astate
+                  else astate
+            in
+            let astate =
+              match (access : Access.t) with
               | FieldAccess _ | ArrayAccess _ ->
                   (* Offsets name cells within the same object. Computing their addresses does not
                      read the contents, but a later dereference must retain initialization checks.

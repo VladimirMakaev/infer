@@ -346,6 +346,9 @@ module Attribute = struct
          FAILURE. Carried as a set because two paths that reach the same value can come from
          different calls, and the set is what a join has to union rather than drop.
          ALSO LAST ON PURPOSE, for the rank reason above. *)
+    | AddressOfAllocatedBlock
+      (* A newly computed cell address within a genuine C allocation, never a value loaded
+         from the cell. Non-owning and post-only; appended to preserve existing ranks. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -457,6 +460,8 @@ module Attribute = struct
         F.fprintf f "Allocated%a"
           (Trace.pp ~pp_immediate:(pp_string_if_debug (F.asprintf "(%a)" pp_allocator allocator)))
           trace
+    | AddressOfAllocatedBlock ->
+        F.pp_print_string f "AddressOfAllocatedBlock"
     | AbsentFromContainer ->
         F.pp_print_string f "AbsentFromContainer"
     | AlwaysReachable ->
@@ -593,6 +598,7 @@ module Attribute = struct
     | Invalid _
     | AbsentFromContainer
     | Allocated _
+    | AddressOfAllocatedBlock
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | AlwaysReachable
@@ -651,6 +657,7 @@ module Attribute = struct
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | Allocated _
+    | AddressOfAllocatedBlock
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
@@ -704,6 +711,7 @@ module Attribute = struct
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | Allocated _
+    | AddressOfAllocatedBlock
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
@@ -842,7 +850,8 @@ module Attribute = struct
           proc_name
     | UsedAsBranchCond (pname, location, trace) ->
         UsedAsBranchCond (pname, location, add_call_to_trace trace)
-    | ( AbsentFromContainer
+    | ( AddressOfAllocatedBlock
+      | AbsentFromContainer
       | AddressOfCppTemporary _
       | AddressOfStackVariable _
       | AlwaysReachable
@@ -965,6 +974,7 @@ module Attribute = struct
       | AddressOfCppTemporary _
       | AddressOfStackVariable _
       | Allocated _
+      | AddressOfAllocatedBlock
       | AlwaysReachable
       | Closure _
       | ConfigUsage (ConfigName _)
@@ -1321,6 +1331,10 @@ module Attributes = struct
   let remove_initialized = remove_by_rank Attribute.initialized_rank
 
   let remove_must_be_initialized = remove_by_rank Attribute.must_be_initialized_rank
+
+  let is_address_of_allocated_block attrs =
+    Option.is_some (Set.find_rank attrs Attribute.Variants.addressofallocatedblock.rank)
+
 
   let get_allocation =
     get_by_rank Attribute.allocated_rank ~dest:(function[@warning "-partial-match"]
