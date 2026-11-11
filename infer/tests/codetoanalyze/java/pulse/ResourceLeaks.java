@@ -716,6 +716,96 @@ public class ResourceLeaks {
     }
   }
 
+  // Streams of a socket this method does not own
+  //
+  // A socket passed in or held in a field belongs to someone else. Asking it for a stream must
+  // not make this method responsible for anything: the caller, or whoever closes the field,
+  // closes the socket and with it the streams.
+
+  public void socketStreamOnBorrowedSocketOk(Socket socket) throws IOException {
+    OutputStream stream = socket.getOutputStream();
+    stream.write(1);
+    stream.flush();
+  }
+
+  public int socketStreamsOnBorrowedSocketWithCatchOk(Socket socket) {
+    try {
+      OutputStream out = socket.getOutputStream();
+      InputStream in = socket.getInputStream();
+      out.write(1);
+      if (in.read() == 1) {
+        return 1;
+      }
+      out.write(2);
+      return 2;
+    } catch (IOException e) {
+      return 3;
+    }
+  }
+
+  private Socket controlSocket;
+
+  public void socketStreamOnFieldSocketOk() throws IOException {
+    OutputStream stream = controlSocket.getOutputStream();
+    stream.write(1);
+  }
+
+  public void closeControlSocket() throws IOException {
+    controlSocket.close();
+  }
+
+  public void socketStreamOnAcceptedSocketClosedInFinallyOk(ServerSocket server)
+      throws IOException {
+    Socket client = server.accept();
+    try {
+      InputStream stream = client.getInputStream();
+      stream.read();
+    } finally {
+      client.close();
+    }
+  }
+
+  // The socket is closed on every path, including the ones the catch block creates.
+  public void socketStreamsClosedInNullCheckedFinallyOk(String host) {
+    Socket socket = null;
+    try {
+      socket = new Socket(host, 80);
+      OutputStream out = socket.getOutputStream();
+      InputStream in = socket.getInputStream();
+      out.write(1);
+      in.read();
+    } catch (IOException e) {
+      ignore(e);
+    } finally {
+      if (socket != null) {
+        try {
+          socket.close();
+        } catch (IOException ignored) {
+        }
+      }
+    }
+  }
+
+  // Closing a wrapper around the socket's stream closes the socket too.
+  public void socketStreamWrapperClosedOk() throws IOException {
+    Socket socket = new Socket();
+    BufferedInputStream wrapper = new BufferedInputStream(socket.getInputStream());
+    wrapper.close();
+  }
+
+  // Must-report twin of the cases above: nobody closes this socket, and the report belongs on
+  // the socket rather than on each stream taken from it. Two streams still give one leaking
+  // resource, but it is reported twice, once at the last access through a stream and once at
+  // the end of the method; that duplication is older than this test and is not specific to
+  // sockets.
+  public void socketWithTwoStreamsNotClosedBad() throws IOException {
+    Socket socket = new Socket();
+    OutputStream out = socket.getOutputStream();
+    InputStream in = socket.getInputStream();
+    out.write(1);
+    in.read();
+  }
+
   // ServerSocket tests
 
   // Repro for facebook/infer#2105: ServerSocket constructors were not modeled as allocating

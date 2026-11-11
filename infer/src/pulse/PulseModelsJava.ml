@@ -201,48 +201,21 @@ module Resource = struct
     @ call_may_throw_exception (JavaClassName.from_string exn_class_name) model_data astate
 
 
-  (* [FileInputStream.getChannel] and friends return a channel that is closed together with the
-     stream, and closing the channel closes the stream. The channel is not a separate resource, but
-     closing it must release the stream, otherwise the stream looks leaked or, when the call is left
-     unknown, is not tracked at all (#2103). *)
-  let get_channel stream : model_no_non_disj =
+  (* Some resources hand out a view of themselves: [FileInputStream.getChannel] returns a channel
+     closed together with the stream, and [Socket.getInputStream] and [Socket.getOutputStream]
+     return streams closed together with the socket. The view is not a resource of its own -- the
+     owner holds the handle -- but closing the view must release the owner, otherwise the owner
+     looks leaked or, when the call is left unknown, is not tracked at all (#2103). Returning a
+     value that was not allocated also means that taking a view of a resource this function does
+     not own, such as a socket it was passed, leaves nothing behind to report. *)
+  let get_view ~desc owner : model_no_non_disj =
    fun {path; location; ret= ret_id, _} astate ->
-    let event = Hist.call_event path location "getChannel" in
-    let channel = (AbstractValue.mk_fresh (), Hist.single_event event) in
+    let event = Hist.call_event path location desc in
+    let view = (AbstractValue.mk_fresh (), Hist.single_event event) in
     let<+> astate =
-      write_field path PulseOperations.ModeledField.delegated_release stream location channel astate
+      write_field path PulseOperations.ModeledField.delegated_release owner location view astate
     in
-    PulseOperations.write_id ret_id channel astate
-
-
-  (* [Socket.getInputStream] and [Socket.getOutputStream] share the socket's lifetime: closing the
-     stream closes the socket, and closing the socket closes the stream. Allocate the returned
-     stream as a resource and point [delegated_release] both ways, so either [close] releases both.
-     The stream stays reachable while the socket does, so the leak is reported when the socket
-     becomes unreachable. *)
-  let socket_stream ~stream_class_name socket : model_no_non_disj =
-   fun ({callee_procname; path; location; ret= ret_id, _} as model_data) astate ->
-    let allocator = Attribute.JavaResource (JavaClassName.from_string stream_class_name) in
-    let desc = Procname.to_simplified_string ~withclass:true callee_procname in
-    let alloc_state =
-      let<**> astate =
-        Basic.alloc_not_null ~desc allocator None ~initialize:true model_data astate
-      in
-      match PulseOperations.read_id ret_id astate with
-      | None ->
-          Basic.ok_continue astate
-      | Some stream ->
-          let<*> astate =
-            write_field path PulseOperations.ModeledField.delegated_release socket location stream
-              astate
-          in
-          let<+> astate =
-            write_field path PulseOperations.ModeledField.delegated_release stream location socket
-              astate
-          in
-          astate
-    in
-    alloc_state
+    PulseOperations.write_id ret_id view astate
 
 
   (* Common java.sql.Connection calls that do not close the connection. Left unknown, any of them
@@ -917,7 +890,9 @@ let matchers : matcher list =
   ; +map_context_tenv
        (PatternMatch.Java.implements_one_of
           ["java.io.FileInputStream"; "java.io.FileOutputStream"; "java.io.RandomAccessFile"] )
-    &:: "getChannel" <>$ capt_arg_payload $--> Resource.get_channel |> with_non_disj
+    &:: "getChannel" <>$ capt_arg_payload
+    $--> Resource.get_view ~desc:"getChannel"
+    |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.RandomAccessFile")
     &::+ (fun _ proc_name_str ->
     StringSet.mem proc_name_str Resource.random_access_file_usage_modeled_throws_IOException )
@@ -956,11 +931,11 @@ let matchers : matcher list =
     <>$ capt_arg_payload $--> Resource.release_no_exception |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.Socket")
     &:: "getOutputStream" <>$ capt_arg_payload
-    $--> Resource.socket_stream ~stream_class_name:"java.io.OutputStream"
+    $--> Resource.get_view ~desc:"getOutputStream"
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.Socket")
     &:: "getInputStream" <>$ capt_arg_payload
-    $--> Resource.socket_stream ~stream_class_name:"java.io.InputStream"
+    $--> Resource.get_view ~desc:"getInputStream"
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.ServerSocket")
     &:: "accept" <>$ any_arg $--> Basic.skip |> with_non_disj
