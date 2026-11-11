@@ -167,6 +167,9 @@ type t =
   | CopiedReturn of
       {source: AbstractValue.t; is_const_ref: bool; from: CopyOrigin.t; copied_location: Location.t}
       (** records the copied value for the return address *)
+  | DerivedFrom of AbstractValue.t
+      (** the value is the result of pointer arithmetic on the given base address: it names a
+          location inside whatever object the base points into, rather than an object of its own *)
   | DictContainConstKeys
       (** the dictionary contains only constant keys (note: only string constant is supported for
           now) *)
@@ -363,6 +366,8 @@ module Attributes : sig
   val get_std_vector_capacity : t -> IntLit.t option option
 
   val get_std_vector_erased : t -> Trace.t option
+
+  val get_derived_from : t -> AbstractValue.t option
 
   val get_last_lookup : t -> AbstractValue.t option
 

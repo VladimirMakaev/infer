@@ -592,6 +592,15 @@ and eval_to_value_origin (path : PathContext.t) ?volatile_access mode location e
         PulseArithmetic.eval_binop binop_addr bop (AbstractValueOperand addr_lhs)
           (AbstractValueOperand addr_rhs) astate
       in
+      (* pointer arithmetic: remember which address this one was computed from, so that a later
+         question about whether it names an object of its own can be answered *)
+      let astate =
+        match (bop : Binop.t) with
+        | PlusPI | MinusPI ->
+            AddressAttributes.add_one binop_addr (DerivedFrom addr_lhs) astate
+        | _ ->
+            astate
+      in
       (astate, ValueOrigin.Unknown (binop_addr, ValueHistory.binary_op bop hist_lhs hist_rhs))
   | Exn exp ->
       eval_to_value_origin path Read location exp astate
@@ -1136,9 +1145,15 @@ let check_address_escape escape_location proc_desc path address history astate =
         IContainer.iter_result ~fold:Attributes.fold attrs ~f:(fun attr ->
             match attr with
             | Attribute.AddressOfCppTemporary (variable, _)
-              when not (is_assigned_to_global address astate) ->
+              when (not (is_assigned_to_global address astate))
+                   && not (AbductiveDomain.is_derived_from_another_address astate address) ->
                 (* The returned address corresponds to a C++ temporary. It will have gone out of
-                      scope by now except if it was bound to a global. *)
+                      scope by now except if it was bound to a global, or unless it was computed
+                      from another address, in which case it names a place inside that other
+                      object and the temporary got here by being equated with it rather than by
+                      being returned. A round trip that adds an offset and removes it again
+                      arrives back at the temporary's own address, so it is not computed in this
+                      sense and still reports. *)
                 Error
                   (ReportableError
                      { diagnostic=

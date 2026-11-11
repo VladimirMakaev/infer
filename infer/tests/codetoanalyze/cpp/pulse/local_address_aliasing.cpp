@@ -250,4 +250,107 @@ int call_roundtrip_aliased_bad(std::shared_ptr<Item>* a, unsigned n) {
   return roundtrip_self_assign_bad(a, *a, n);
 }
 
+// A type whose assignment operator is written out rather than modelled, and which
+// guards against self-assignment the way such operators usually do. The guard makes
+// the analysis consider the branch where the two sides are the same object, which is
+// how a temporary's address reaches an element of a raw buffer.
+struct Guarded {
+  int* p;
+  Guarded() : p(nullptr) {}
+  explicit Guarded(int* q) : p(q) {}
+  Guarded(const Guarded& o) : p(o.p) {}
+  Guarded& operator=(const Guarded& o) {
+    if (this != &o) {
+      p = o.p;
+    }
+    return *this;
+  }
+  Guarded& operator=(Guarded&& o) {
+    if (this != &o) {
+      p = o.p;
+      o.p = nullptr;
+    }
+    return *this;
+  }
+};
+
+struct GuardedVec {
+  void* buf;
+  Guarded* at(unsigned i) { return static_cast<Guarded*>(buf) + i; }
+};
+
+void move_guarded_into_elem(GuardedVec* v, unsigned i, Guarded&& g) {
+  *v->at(i) = std::move(g);
+}
+
+// the element was computed from the buffer, so it is not the temporary that was
+// moved into it, however the two came to be equated
+Guarded& move_guarded_temporary_into_elem_then_return_ok(GuardedVec* v,
+                                                         unsigned i,
+                                                         int* q) {
+  move_guarded_into_elem(v, i, Guarded(q));
+  return *v->at(i);
+}
+
+// the same, with the temporary forwarded through one more frame before it lands
+void forward_guarded_into_elem(GuardedVec* v, unsigned i, Guarded&& g) {
+  move_guarded_into_elem(v, i, std::move(g));
+}
+
+Guarded& move_guarded_temporary_two_frames_then_return_ok(GuardedVec* v,
+                                                          unsigned i,
+                                                          int* q) {
+  forward_guarded_into_elem(v, i, Guarded(q));
+  return *v->at(i);
+}
+
+// The same storage pattern with the buffer owned by the returning frame: the
+// element dies with the call, so this really does escape, and the exclusion
+// silences it. Reported before the exclusion, not after. Two other ways of
+// writing the same escape, with the arithmetic done in this frame rather than in
+// at(), are not reported either way, so what is lost is this route and not
+// elements of local buffers in general.
+Guarded& FN_move_guarded_temporary_into_local_elem_bad(unsigned i, int* q) {
+  Guarded local_buf[4];
+  GuardedVec v;
+  v.buf = local_buf;
+  move_guarded_into_elem(&v, i, Guarded(q));
+  return *v.at(i);
+}
+
+struct Elem {
+  int x;
+};
+
+// Must-report twins for the escape check: a round trip adds an offset and takes it
+// away again, so the address returned is the temporary's own and the escape is real.
+const Elem& return_temporary_through_roundtrip_bad(long n) {
+  Elem&& r = Elem();
+  const Elem* q = (&r + n) - n;
+  return *q;
+}
+
+const Elem* roundtrip_pointer(const Elem* p, long n) { return (p + n) - n; }
+
+const Elem& return_temporary_through_callee_roundtrip_bad(long n) {
+  Elem&& r = Elem();
+  return *roundtrip_pointer(&r, n);
+}
+
+const Elem& return_temporary_plus_zero_bad() {
+  Elem&& r = Elem();
+  const Elem* q = &r + 0;
+  return *q;
+}
+
+// The address returned here is an offset of the temporary rather than the temporary
+// itself, and nothing reports it: the escape check only fires on the address the
+// temporary was marked at. Recorded so that closing that gap is noticed here, because
+// it would also be the first shape where declining a computed address could cost a
+// real report.
+const Elem* FN_return_offset_of_temporary_bad() {
+  Elem&& r = Elem();
+  return &r + 1;
+}
+
 } // namespace local_address_aliasing
