@@ -438,7 +438,8 @@ let make_racerd_access_extra (snapshot : RacerDDomain.AccessSnapshot.t) =
             | ThreadsDomain.AnyThreadButSelf ->
                 "any_but_self"
             | ThreadsDomain.AnyThread ->
-                "any" ) }
+                "any" )
+        ; related_accesses= None }
   | _, _ ->
       None
 
@@ -724,8 +725,9 @@ let report_unsafe_accesses ~issue_log classname aggregated_access_map =
     else init
   in
   let report grouped_accesses acc =
-    (* Each group has one access path, so resetting sites here deduplicates by call site and field.
-       Repeated reads or writes of that field in a method still collapse. *)
+    (* Select each access path independently so that every racy field is retained. Repeated reads
+       or writes of that field in a method still collapse; the file-level pass combines the
+       selected field reports at shared call sites. *)
     let sorted = sort_by_rank grouped_accesses in
     ReportedSet.reset acc
     |> report_guardedby_violations_on_location sorted
@@ -1094,6 +1096,141 @@ let should_keep_container_access analyze tenv ((_base, path) : PathModuloThis.t)
   List.rev path |> should_keep_container_access_inner
 
 
+module CallSiteIssueType = struct
+  type t = CallSite.t * string [@@deriving compare]
+end
+
+module CallSiteMap = Stdlib.Map.Make (CallSiteIssueType)
+
+type report_entry = {key: Errlog.err_key; data: Errlog.err_data}
+
+let compare_report_entries first second =
+  let compare_step first second = Location.compare first.Errlog.lt_loc second.Errlog.lt_loc in
+  let compared = List.compare compare_step first.data.loc_trace second.data.loc_trace in
+  if not (Int.equal compared 0) then compared
+  else
+    let compared = Errlog.compare_err_key first.key second.key in
+    if not (Int.equal compared 0) then compared else Errlog.compare_err_data first.data second.data
+
+
+let field_access_of_report {data} =
+  Option.bind data.Errlog.extras ~f:(fun extra -> extra.Jsonbug_t.racerd_access)
+
+
+(* Keep the field-level reporting decisions, including issue-type and suppression filters. Only
+   reports that made it into the issue log are combined, so a protected or suppressed field cannot
+   acquire a warning just because another field is reported at the same call site. *)
+let combine_call_site_reports issue_log =
+  if not Config.deduplicate then issue_log
+  else
+    let groups = ref CallSiteMap.empty in
+    IssueLog.iter issue_log ~f:(fun procname errlog ->
+        Errlog.iter
+          (fun key data ->
+            let site = (CallSite.make procname data.Errlog.loc, key.Errlog.issue_type.unique_id) in
+            groups :=
+              CallSiteMap.update site
+                (fun entries -> Some ({key; data} :: Option.value entries ~default:[]))
+                !groups )
+          errlog ) ;
+    let emit (site, _issue_type_id) entries issue_log =
+      (* Errlog iteration is not a source order. Pick the same representative and trace order
+         regardless of the order in which the individual field reports were collected. *)
+      let entries = List.sort entries ~compare:compare_report_entries in
+      match entries with
+      | [] ->
+          issue_log
+      | first :: rest ->
+          let primary =
+            List.fold rest ~init:first ~f:(fun primary entry ->
+                if IssueType.compare_severity entry.key.severity primary.key.severity > 0 then entry
+                else primary )
+          in
+          let entries =
+            primary :: List.filter entries ~f:(fun entry -> not (phys_equal entry primary))
+          in
+          let accesses = List.filter_map entries ~f:field_access_of_report in
+          let description, ltr, access, extras =
+            match rest with
+            | [] ->
+                ( primary.key.err_desc
+                , primary.data.loc_trace
+                , primary.data.access
+                , primary.data.extras )
+            | _ ->
+                let paths =
+                  List.map accesses ~f:(fun (access : Jsonbug_t.racerd_access) ->
+                      let ambiguous =
+                        List.exists accesses ~f:(fun (other : Jsonbug_t.racerd_access) ->
+                            String.equal access.access_path other.Jsonbug_t.access_path
+                            && not (String.equal access.field_class other.field_class) )
+                      in
+                      if ambiguous then
+                        F.asprintf "%a (declared in %a)" MF.pp_monospaced access.access_path
+                          MF.pp_monospaced access.field_class
+                      else F.asprintf "%a" MF.pp_monospaced access.access_path )
+                  |> List.dedup_and_sort ~compare:String.compare
+                in
+                let summary =
+                  if List.is_empty paths then []
+                  else
+                    [ F.asprintf "Fields involved at this call site: %a."
+                        (Pp.seq ~sep:", " F.pp_print_string)
+                        paths ]
+                in
+                let description =
+                  { primary.key.err_desc with
+                    descriptions=
+                      summary
+                      @ List.concat_map entries ~f:(fun entry -> entry.key.err_desc.descriptions) }
+                in
+                let trace entry =
+                  let label =
+                    match field_access_of_report entry with
+                    | Some access ->
+                        F.asprintf "<Access to %a>" MF.pp_monospaced access.access_path
+                    | None ->
+                        "<Related access>"
+                  in
+                  (label, entry.data.loc_trace)
+                in
+                let ltr = Errlog.concat_traces (List.map entries ~f:trace) in
+                let end_locs =
+                  List.concat_map entries ~f:(fun entry ->
+                      Option.value_map entry.data.access ~default:[] ~f:IssueAuxData.decode )
+                in
+                let access = Some (IssueAuxData.encode end_locs) in
+                let extras =
+                  match (List.find_map entries ~f:(fun entry -> entry.data.extras), accesses) with
+                  | Some extra, first_access :: related_accesses ->
+                      Some
+                        { extra with
+                          racerd_access=
+                            Some {first_access with related_accesses= Some related_accesses} }
+                  | extra, _ ->
+                      extra
+                in
+                (description, ltr, access, extras)
+          in
+          let issue_log, errlog = IssueLog.get_or_add ~proc:(CallSite.pname site) issue_log in
+          let node =
+            Option.value_map primary.data.node_key ~default:Errlog.UnknownNode ~f:(fun node_key ->
+                Errlog.FrontendNode {node_key} )
+          in
+          let error =
+            { IssueToReport.issue_type= primary.key.issue_type
+            ; description
+            ; ocaml_pos= primary.data.loc_in_ml_source }
+          in
+          Errlog.log_issue ~severity_override:primary.key.severity errlog ~loc:(CallSite.loc site)
+            ~node ~session:primary.data.session ~ltr ~access ~extras
+            ~autofix:(List.concat_map entries ~f:(fun entry -> entry.data.autofix))
+            RacerD error ;
+          issue_log
+    in
+    CallSiteMap.fold emit !groups IssueLog.empty
+
+
 (** Gathers results by analyzing all the methods in a file, then post-processes the results to check
     an (approximation of) thread safety *)
 let analyze ({InterproceduralAnalysis.analyze_file_dependency} as file_t) =
@@ -1112,3 +1249,4 @@ let analyze ({InterproceduralAnalysis.analyze_file_dependency} as file_t) =
       |> synchronized_container_filter classname
       |> report_unsafe_accesses ~issue_log classname )
     class_map IssueLog.empty
+  |> combine_call_site_reports

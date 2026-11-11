@@ -10,7 +10,9 @@ CLANG_OPTIONS = -x c++ -std=c++17 -nostdinc++ -isystem$(ROOT_DIR) -isystem$(CLAN
 
 INFER_OPTIONS = --racerd-only --deduplicate --project-root $(TESTS_DIR)
 
-INFERPRINT_OPTIONS = --issues-tests
+INFERPRINT_OPTIONS = \
+  --issues-tests-fields file,procedure,line_offset,bug_type,bucket,severity,qualifier,bug_trace,racerd_access_extra \
+  --issues-tests
 
 SOURCES = $(wildcard *.cpp)
 
