@@ -211,6 +211,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | Attribute.StdVectorCapacity _ ->
       Some (Attribute.StdVectorCapacity None)
   | AbsentFromContainer
+  | AddressOfAllocatedBlock
   | AlwaysReachable
   (* maybe we want to be more forgiving, at least we get a closure to call even if it comes from
      just one branch? *)
