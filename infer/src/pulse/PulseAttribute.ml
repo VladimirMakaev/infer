@@ -1109,6 +1109,18 @@ module Attributes = struct
                    false ) ->
           (* releasing the descriptor is invalid in more cases than using it, e.g. after [fdopen] *)
           update value attrs
+      | MustBeValid (_, _, reason)
+        when Invalidation.is_relevant_for_every_invalidation reason
+             && Option.exists (find_rank attrs must_be_valid_rank) ~f:(function
+               | MustBeValid (_, _, Some Invalidation.CppStorageOnly) ->
+                   true
+               | _ ->
+                   false ) ->
+          (* an ordinary access needs a live object, which is more than the storage-only
+             requirement already recorded here. Only one requirement is kept per address and the
+             first one wins, so without this a byte-wise write would excuse every later read of
+             the same address in the procedure, for all of its callers. *)
+          update value attrs
       | _ ->
           add attrs value
 

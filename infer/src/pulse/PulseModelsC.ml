@@ -471,10 +471,11 @@ include struct
 
   (** the object at [dest] gets unknown contents: the cells of the object already in the heap get
       fresh values, and so do the other cells when they are read later or seen by callers *)
-  let overwrite_contents dest : unit DSL.model_monad =
+  let overwrite_contents ?must_be_valid_reason dest : unit DSL.model_monad =
     let* hist = add_model_call ValueHistory.epoch in
     exec_command (AbductiveDomain.overwrite_contents hist (fst dest))
-    @@> store ~ref:dest @= fresh ()
+    @@> store ?must_be_valid_reason ~ref:dest
+    @= fresh ()
 
 
   (** the first field of [name] when an object of type [typ] at the start of a [name] is exactly
@@ -518,7 +519,8 @@ include struct
       eg the fields after a first field of type [typ], and get unknown contents otherwise. Objects
       are written once: a struct and its first field can be at the same address in the heap when the
       path condition says so. *)
-  let rec overwrite_cells ~src dest (typ : Typ.t) visited : Visited.t DSL.model_monad =
+  let rec overwrite_cells ?must_be_valid_reason ~src dest (typ : Typ.t) visited :
+      Visited.t DSL.model_monad =
     let* {analysis_data= {tenv}} = get_data in
     let* addr =
       exec_pure_operation (fun astate ->
@@ -532,10 +534,10 @@ include struct
         | _ ->
             fresh ()
       in
-      store ~ref:dest value @@> ret visited
+      store ?must_be_valid_reason ~ref:dest value @@> ret visited
     in
     let overwrite_field visited {Struct.name= field; typ= field_typ} =
-      let* dest_field = access NoAccess dest (FieldAccess field) in
+      let* dest_field = access ?must_be_valid_reason NoAccess dest (FieldAccess field) in
       let* src_field =
         match src with
         | Some src when has_pointer_cell tenv field_typ ->
@@ -544,7 +546,7 @@ include struct
         | _ ->
             ret None
       in
-      overwrite_cells ~src:src_field dest_field field_typ visited
+      overwrite_cells ?must_be_valid_reason ~src:src_field dest_field field_typ visited
     in
     let is_written visited (access : Access.t) =
       match access with
@@ -568,15 +570,15 @@ include struct
             | FieldAccess field -> (
               match first_field_holding tenv (Fieldname.get_class_name field) typ with
               | Some first_field when Fieldname.equal field first_field ->
-                  overwrite_cells ~src cell typ visited
+                  overwrite_cells ?must_be_valid_reason ~src cell typ visited
               | Some _ ->
                   ret visited
               | None ->
-                  overwrite_contents cell @@> ret visited )
+                  overwrite_contents ?must_be_valid_reason cell @@> ret visited )
             | ArrayAccess _ ->
-                overwrite_contents cell @@> ret visited
+                overwrite_contents ?must_be_valid_reason cell @@> ret visited
             | Dereference ->
-                (store ~ref:dest @= fresh ()) @@> ret visited )
+                (store ?must_be_valid_reason ~ref:dest @= fresh ()) @@> ret visited )
     in
     let visit name_opt ~write =
       if Visited.mem (addr, name_opt) visited then ret visited
@@ -588,7 +590,7 @@ include struct
     | Tstruct name -> (
       match Tenv.lookup tenv name with
       | None ->
-          overwrite_contents dest @@> ret visited
+          overwrite_contents ?must_be_valid_reason dest @@> ret visited
       | Some {fields} ->
           let fields =
             List.filter fields ~f:(fun ({name= field} : Struct.field) ->
@@ -597,7 +599,7 @@ include struct
           visit (Some name) ~write:(fun visited ->
               list_fold fields ~init:visited ~f:overwrite_field ) )
     | Tarray _ | Tvoid | Tfun _ | TVar _ ->
-        overwrite_contents dest @@> ret visited
+        overwrite_contents ?must_be_valid_reason dest @@> ret visited
 
 
   (** [Some T] when [size] is the size of exactly one [T] *)
@@ -617,14 +619,16 @@ include struct
 
   (** the object at [dest] is overwritten, with the contents of the object at [src] if given; when
       the type of the object is known and it has few cells, they are written one by one *)
-  let overwrite_object ?src dest typ_opt : unit DSL.model_monad =
+  let overwrite_object ?must_be_valid_reason ?src dest typ_opt : unit DSL.model_monad =
     let* {analysis_data= {tenv}} = get_data in
     let dest = to_aval dest in
     match typ_opt with
     | Some typ when has_few_cells tenv typ ->
-        overwrite_cells ~src:(Option.map src ~f:to_aval) dest typ Visited.empty |> ignore
+        overwrite_cells ?must_be_valid_reason ~src:(Option.map src ~f:to_aval) dest typ
+          Visited.empty
+        |> ignore
     | _ ->
-        overwrite_contents dest
+        overwrite_contents ?must_be_valid_reason dest
 
 
   let overwrite_pointee {FuncArg.arg_payload= ptr; typ} =
@@ -1083,17 +1087,22 @@ include struct
     start_model @@ fun () -> check_valid stream @@> apply_unknown_effect (to_aval buf)
 
 
+  (* The destination is written through a [void *]: it is storage, and an occupant destroyed in
+     place leaves the storage behind, so overwriting it is what the destruction was for. The
+     source stays an ordinary check: no idiom reads back the bytes of an object someone has just
+     destroyed, and that shape is worth keeping. *)
   let memcpy dest src size : model =
     start_model
     @@ fun () ->
-    check_valid dest @@> check_valid src
-    @@> overwrite_object ~src dest (single_object_type size)
+    check_valid ~must_be_valid_reason:CppStorageOnly dest
+    @@> check_valid src
+    @@> overwrite_object ~must_be_valid_reason:CppStorageOnly ~src dest (single_object_type size)
     @@> data_dependency dest [src]
     @@> assign_ret (to_aval dest)
 
 
   let fill_object s size value : unit DSL.model_monad =
-    check_valid s
+    check_valid ~must_be_valid_reason:CppStorageOnly s
     @@> option_iter (single_object_type size) ~f:(fun typ ->
         let* {path; analysis_data= {tenv}; location} = get_data in
         exec_command
