@@ -401,7 +401,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
       match reason with
       | Call _ | Model _ | ModelName _ ->
           Sat (Ok (astate, None))
-      | SkippedKnownCall proc_name ->
+      | SkippedKnownCall (proc_name, _) ->
           Sat (Ok (astate, Some (PulseFormula.Procname proc_name)))
       | SkippedUnknownCall e ->
           let++ astate, (v, _) = PulseOperations.eval path Read call_loc e astate in
@@ -426,7 +426,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
           Sat (Ok astate)
     in
     match reason with
-    | SkippedKnownCall proc_name ->
+    | SkippedKnownCall (proc_name, _) ->
         AbductiveDomain.add_skipped_call proc_name
           (Trace.Immediate {location= call_loc; history= ValueHistory.epoch})
           astate
@@ -1079,7 +1079,7 @@ let check_nonnull_args_of_unknown_callee path call_loc callee_pname ~actuals ast
   else Ok astate
 
 
-let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc
+let call_aux_unknown ~cause limit ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc
     callee_pname ~ret ~actuals ~formals_opt call_kind call_flags (astate : AbductiveDomain.t)
     non_disj_caller =
   PulseReport.note_unknown_actuals tenv actuals astate ;
@@ -1090,8 +1090,9 @@ let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) pat
       check_nonnull_args_of_unknown_callee path call_loc callee_pname ~actuals astate
     in
     PulseOperations.conservatively_initialize_args arg_values astate
-    |> unknown_call tenv path call_loc (SkippedKnownCall callee_pname) (Some callee_pname) ~ret
-         ~actuals ~formals_opt
+    |> unknown_call tenv path call_loc
+         (SkippedKnownCall (callee_pname, cause))
+         (Some callee_pname) ~ret ~actuals ~formals_opt
   in
   if Config.pulse_log_unknown_calls then
     StatsLogging.log_message_with_location ~label:"unmodeled_function_operation_pulse"
@@ -1307,8 +1308,8 @@ let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_l
 let call_as_unknown ?disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
     ~formals_opt call_kind call_flags astate non_disj_caller =
   let res, (non_disj, contradiction) =
-    call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
-      ~formals_opt call_kind call_flags astate non_disj_caller
+    call_aux_unknown ~cause:NoSummary disjunct_limit analysis_data path call_loc callee_pname ~ret
+      ~actuals ~formals_opt call_kind call_flags astate non_disj_caller
   in
   (res, non_disj, contradiction, `UnknownCall)
 
@@ -1329,9 +1330,9 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
   let record_direct_call ?(specialization = Specialization.Pulse.bottom) non_disj =
     NonDisjDomain.add_specialized_direct_callee callee_pname specialization call_loc non_disj
   in
-  let call_as_unknown () =
+  let call_as_unknown cause =
     let results, (non_disj, contradiction) =
-      call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
+      call_aux_unknown ~cause disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
         ~formals_opt call_kind call_flags astate non_disj_caller
     in
     if Option.is_some contradiction then (
@@ -1375,7 +1376,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
         L.d_printfln_escaped ~color:Orange
           "[pulse] callee %a has a Pulse summary but no IR attributes; treating as unknown call"
           Procname.pp callee_pname ;
-        let results, non_disj = call_as_unknown () in
+        let results, non_disj = call_as_unknown SummaryNotApplicable in
         (results, non_disj, None)
     | Some attrs ->
         let results, (non_disj, contradiction) =
@@ -1573,8 +1574,8 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
         Procname.pp callee_pname (List.length actuals) ;
       Stats.incr_pulse_unknown_calls_arity_mismatch () ;
       let res, (non_disj, contradiction) =
-        call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
-          ~formals_opt:None call_kind call_flags astate non_disj_caller
+        call_aux_unknown ~cause:ArityMismatch disjunct_limit analysis_data path call_loc
+          callee_pname ~ret ~actuals ~formals_opt:None call_kind call_flags astate non_disj_caller
       in
       (res, non_disj, contradiction, `UnknownCall)
   | Ok summary ->
@@ -1606,7 +1607,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
           L.d_printfln_escaped ~color:Orange
             "Could not apply the summary of %a, treating the call as unknown" Procname.pp
             callee_pname ;
-          let unknown_results, non_disj = call_as_unknown () in
+          let unknown_results, non_disj = call_as_unknown SummaryNotApplicable in
           (unknown_results @ res, non_disj) )
         else if
           Config.pulse_force_continue
@@ -1620,7 +1621,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
           L.d_printfln_escaped ~color:Orange
             "No disjuncts of type ContinueProgram, treating the call to %a as unknown" Procname.pp
             callee_pname ;
-          let unknown_results, non_disj = call_as_unknown () in
+          let unknown_results, non_disj = call_as_unknown ForceContinue in
           (unknown_results @ res, non_disj) )
         else (res, non_disj)
       in
@@ -1647,7 +1648,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
       | None ->
           check_uninit_method analysis_data call_loc callee_pname actuals astate ) ;
       let res, (non_disj, contradiction) =
-        call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
-          ~formals_opt call_kind call_flags astate non_disj_caller
+        call_aux_unknown ~cause:NoSummary disjunct_limit analysis_data path call_loc callee_pname
+          ~ret ~actuals ~formals_opt call_kind call_flags astate non_disj_caller
       in
       (res, non_disj, contradiction, `UnknownCall)
