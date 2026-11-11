@@ -121,6 +121,10 @@ let prune_eq_one v astate =
 
 let is_known_zero astate v = Formula.is_known_zero astate.AbductiveDomain.path_condition v
 
+let occurs_in_linear_equation_rhs astate v =
+  Formula.occurs_in_linear_equation_rhs astate.AbductiveDomain.path_condition v
+
+
 let is_manifest summary =
   Formula.is_manifest (AbductiveDomain.Summary.get_path_condition summary) ~is_allocated:(fun v ->
       AbductiveDomain.Summary.is_heap_allocated summary v

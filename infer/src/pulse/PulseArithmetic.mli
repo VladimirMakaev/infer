@@ -103,6 +103,9 @@ val prune_eq_one :
 
 val is_known_zero : AbductiveDomain.t -> AbstractValue.t -> bool
 
+val occurs_in_linear_equation_rhs : AbductiveDomain.t -> AbstractValue.t -> bool
+(** see {!PulseFormula.occurs_in_linear_equation_rhs} *)
+
 val is_manifest : AbductiveDomain.Summary.t -> bool
 (** whether the state is *manifest* according to {!PulseFormula.is_manifest}, with an additional
     condition that some equalities path conditions may be represented implicitly by having several

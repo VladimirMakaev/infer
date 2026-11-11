@@ -159,6 +159,13 @@ val simplify :
 
 val is_known_zero : t -> Var.t -> bool
 
+val occurs_in_linear_equation_rhs : t -> Var.t -> bool
+(** whether [v] occurs on the right-hand side of some linear equation. Equations are normalised with
+    the simplest, and so the oldest, variable on the left, which means an address computed from
+    others ends up on the right and the opaque base it was computed from ends up on the left. So
+    this holds of computed addresses and not of the bases they came from, which is the opposite of
+    what the names of the two sides suggest. *)
+
 val as_constant_q : t -> Var.t -> Q.t option
 
 val as_constant_string : t -> Var.t -> string option
