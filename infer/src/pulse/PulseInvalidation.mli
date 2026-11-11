@@ -150,13 +150,19 @@ type must_be_valid_reason =
       (** the value is a file descriptor that gets closed or handed over to a stream: [FClose] and
           [HandedOverToStream] make it invalid *)
   | CppStorageOnly
-      (** the access only needs the STORAGE to be there, not a live object in it: it is the new
-          occupant's own initialisation, reached after a lifetime began here. Null and freed storage
-          still fail it; an occupant destroyed in place does not, because leaving that behind is
-          what placement new is for. *)
+      (** the access only needs the STORAGE to be there, not a live object in it: the new occupant's
+          own initialisation, reached after a lifetime began here, or a byte-wise write through a
+          [void *] such as [memcpy]'s destination. Null and freed storage still fail it; an occupant
+          destroyed in place does not, because leaving that behind is what placement new, and
+          overwriting the storage, are for. *)
 [@@deriving compare, equal, yojson_of]
 
 val is_file_descriptor_reason : must_be_valid_reason -> bool
+
+val is_relevant_for_every_invalidation : must_be_valid_reason option -> bool
+(** whether [is_relevant_for_reason] holds of this reason for every invalidation: these are the
+    strongest requirements, the ones an ordinary access makes, and the only ones that may replace a
+    weaker requirement already recorded on an address *)
 
 val is_relevant_for_reason : must_be_valid_reason option -> t -> bool
 (** whether accessing a value invalidated with the given invalidation is an error when the value

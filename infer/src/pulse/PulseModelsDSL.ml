@@ -374,10 +374,10 @@ module Syntax = struct
     >> sat |> exec_partial_command
 
 
-  let access access_mode aval access : aval model_monad =
+  let access ?must_be_valid_reason access_mode aval access : aval model_monad =
     let* {path; location} = get_data in
     let* addr, hist =
-      PulseOperations.eval_access path access_mode location aval access
+      PulseOperations.eval_access path ?must_be_valid_reason access_mode location aval access
       >> sat |> exec_partial_operation
     in
     let* event = get_event () in
@@ -708,9 +708,10 @@ module Syntax = struct
     write path location ~ref ~obj field >> sat |> exec_partial_command
 
 
-  let store ~ref obj : unit model_monad =
+  let store ?must_be_valid_reason ~ref obj : unit model_monad =
     let* {path; location} = get_data in
-    PulseOperations.write_deref path location ~ref ~obj >> sat |> exec_partial_command
+    PulseOperations.write_deref path ?must_be_valid_reason location ~ref ~obj
+    >> sat |> exec_partial_command
 
 
   let havoc_pointee ptr : unit model_monad =

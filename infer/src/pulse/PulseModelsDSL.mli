@@ -175,7 +175,12 @@ module Syntax : sig
 
   val string_concat : aval -> aval -> aval model_monad
 
-  val access : access_mode -> aval -> Access.t -> aval model_monad
+  val access :
+       ?must_be_valid_reason:Invalidation.must_be_valid_reason
+    -> access_mode
+    -> aval
+    -> Access.t
+    -> aval model_monad
 
   val load_access : ?no_access:bool -> ?deref:bool -> aval -> Access.t -> aval model_monad
 
@@ -220,7 +225,8 @@ module Syntax : sig
 
   val store_field : ?deref:bool -> ref:aval -> Fieldname.t -> aval -> unit model_monad
 
-  val store : ref:aval -> aval -> unit model_monad
+  val store :
+    ?must_be_valid_reason:Invalidation.must_be_valid_reason -> ref:aval -> aval -> unit model_monad
 
   val havoc_pointee : aval -> unit model_monad
   (** [havoc_pointee ptr] checks that [ptr] can be written to, then writes fresh values to [*ptr]
