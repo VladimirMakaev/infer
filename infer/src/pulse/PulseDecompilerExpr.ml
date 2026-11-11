@@ -101,7 +101,7 @@ let tuple_field_position name =
 
 let is_arrow_operator (call : CallEvent.t) =
   match call with
-  | Call procname | ModelName procname | SkippedKnownCall procname ->
+  | Call procname | ModelName procname | SkippedKnownCall (procname, _) ->
       String.equal (Procname.get_method procname) "operator->"
   | Model _ | SkippedUnknownCall _ ->
       false
@@ -133,7 +133,7 @@ let rec pp_access_expr fmt access_expr =
   let pp_call ~with_class fmt call =
     let java_or_objc =
       match (call : CallEvent.t) with
-      | Call procname | ModelName procname | SkippedKnownCall procname -> (
+      | Call procname | ModelName procname | SkippedKnownCall (procname, _) -> (
           Procname.is_java procname || Procname.is_objc_method procname
           ||
           match Attributes.load procname with

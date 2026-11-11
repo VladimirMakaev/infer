@@ -499,7 +499,8 @@ module BasicString = struct
           false
     in
     let<++> astate =
-      PulseCallOperations.unknown_call tenv path location (SkippedKnownCall callee_procname)
+      PulseCallOperations.unknown_call tenv path location
+        (SkippedKnownCall (callee_procname, CallEvent.NoSummary))
         (Some callee_procname) ~ret ~actuals ~formals_opt astate
     in
     if returns_this then PulseOperations.write_id (fst ret) this astate else astate

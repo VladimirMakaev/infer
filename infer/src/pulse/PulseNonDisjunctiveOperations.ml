@@ -350,7 +350,7 @@ let is_const_lvalue_reference (typ : Typ.t) =
 
 let returns_const_reference (call : CallEvent.t) =
   match call with
-  | Call pname | ModelName pname | SkippedKnownCall pname ->
+  | Call pname | ModelName pname | SkippedKnownCall (pname, _) ->
       Option.exists (IRAttributes.load pname) ~f:(fun {ProcAttributes.ret_type} ->
           is_const_lvalue_reference ret_type )
   | Model _ | SkippedUnknownCall _ ->

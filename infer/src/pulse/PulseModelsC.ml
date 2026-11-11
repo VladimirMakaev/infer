@@ -910,7 +910,8 @@ include struct
           (arg_payload, typ) )
     in
     let<++> astate =
-      PulseCallOperations.unknown_call tenv path location (SkippedKnownCall callee_procname)
+      PulseCallOperations.unknown_call tenv path location
+        (SkippedKnownCall (callee_procname, CallEvent.NoSummary))
         (Some callee_procname) ~ret ~actuals ~formals_opt:None astate
     in
     astate

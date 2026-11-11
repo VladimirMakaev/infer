@@ -142,7 +142,7 @@ let add_iterator_source v call ~src ~is_reference_receiver decompiler =
       let accesses = DecompilerExpr.MethodCall call :: accesses in
       let accesses =
         match (call : CallEvent.t) with
-        | (Call procname | ModelName procname | SkippedKnownCall procname)
+        | (Call procname | ModelName procname | SkippedKnownCall (procname, _))
           when String.equal (Procname.get_method procname) "operator->" ->
             (* The arrow operator returns a pointer; its member access must use [->]. *)
             DecompilerExpr.Dereference :: accesses
@@ -184,7 +184,7 @@ let replace_getter_call_with_property_access procname v call actuals decompiler 
 let add_call_source v (call : CallEvent.t) actuals decompiler =
   let+ decompiler in
   match call with
-  | (Call procname | ModelName procname | SkippedKnownCall procname)
+  | (Call procname | ModelName procname | SkippedKnownCall (procname, _))
     when Procname.is_std_forward procname -> (
     (* Forwarding only changes the value category of its argument, so the result is still the
        same object. Naming it after the call loses that, and whoever asks the decompiler where a
@@ -199,7 +199,7 @@ let add_call_source v (call : CallEvent.t) actuals decompiler =
           Map.add v (ReturnValue call, []) decompiler )
     | None ->
         Map.add v (ReturnValue call, []) decompiler )
-  | Call procname | SkippedKnownCall procname -> (
+  | Call procname | SkippedKnownCall (procname, _) -> (
     match (Attributes.load procname, actuals) with
     | Some {objc_accessor= Some (Objc_getter _)}, _ ->
         replace_getter_call_with_property_access procname v call actuals decompiler
