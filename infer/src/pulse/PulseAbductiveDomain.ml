@@ -2927,6 +2927,10 @@ let is_address_of_local astate v =
     astate
 
 
+let is_known_equal astate v1 v2 =
+  CanonValue.equal (CanonValue.canon' astate v1) (CanonValue.canon' astate v2)
+
+
 let cannot_be_equal_to_local_address astate v1 v2 =
   (not (CanonValue.equal (CanonValue.canon' astate v1) (CanonValue.canon' astate v2)))
   && (is_address_of_local astate v1 || is_address_of_local astate v2)

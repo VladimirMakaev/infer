@@ -638,6 +638,24 @@ module SharedPtr = struct
     else copy_untracked_constructor this other ~desc model_data astate
 
 
+  (* Assigning an object to itself has no effect, so the assignment models explore a disjunct where
+     the two objects are the same one. That abduction is worth making when the two addresses are
+     alike: both opaque, or both computed, as two elements of one buffer are, where the caller may
+     well supply the same index. It is not worth making when exactly one of them has been computed,
+     e.g. an element reached by pointer arithmetic against an argument that is the address of a
+     temporary: there the equality does not relate two unknown objects, it pins the temporary onto
+     that computation, and the caller adopts a fact that cannot hold. Pulse does not refute it
+     either, since it only rules out such aliasing when the memory-graph walk finds it, not when
+     the callee's arithmetic forces it. *)
+  let may_be_self_assignment astate this other =
+    AbductiveDomain.is_known_equal astate this other
+    || (not (AbductiveDomain.cannot_be_equal_to_local_address astate this other))
+       && not
+            (Bool.( <> )
+               (PulseArithmetic.occurs_in_linear_equation_rhs astate this)
+               (PulseArithmetic.occurs_in_linear_equation_rhs astate other) )
+
+
   let copy_assignment (FuncArg.{arg_payload= this} as arg) other ~desc : model =
    fun model_data astate non_disj ->
     let ( let<**> ) x f = bind_sat_result non_disj x f in
@@ -645,7 +663,7 @@ module SharedPtr = struct
     let op2 = Formula.AbstractValueOperand (fst other) in
     let astate_equals =
       (* self-assignment *)
-      if AbductiveDomain.cannot_be_equal_to_local_address astate (fst this) (fst other) then []
+      if not (may_be_self_assignment astate (fst this) (fst other)) then []
       else
         PulseArithmetic.and_equal op1 op2 astate >>|| ExecutionDomain.continue |> SatUnsat.to_list
     in
@@ -680,7 +698,7 @@ module SharedPtr = struct
     let lhs = Formula.AbstractValueOperand (fst this) in
     let rhs = Formula.AbstractValueOperand (fst other) in
     let self =
-      if AbductiveDomain.cannot_be_equal_to_local_address astate (fst this) (fst other) then []
+      if not (may_be_self_assignment astate (fst this) (fst other)) then []
       else
         PulseArithmetic.and_equal lhs rhs astate >>|| ExecutionDomain.continue |> SatUnsat.to_list
     in

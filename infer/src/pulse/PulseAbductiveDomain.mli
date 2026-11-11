@@ -411,6 +411,9 @@ val overwrite_contents :
 
 val is_local : Var.t -> t -> bool
 
+val is_known_equal : t -> AbstractValue.t -> AbstractValue.t -> bool
+(** the state already proves that the two values are equal *)
+
 val cannot_be_equal_to_local_address : t -> AbstractValue.t -> AbstractValue.t -> bool
 
 val is_address_of_local : t -> AbstractValue.t -> bool

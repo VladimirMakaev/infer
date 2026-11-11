@@ -1234,6 +1234,11 @@ let is_manifest ~is_allocated formula =
 
 let get_var_repr formula v = (Formula.get_repr formula.phi v :> Var.t)
 
+let occurs_in_linear_equation_rhs formula v =
+  Var.Map.find_opt (get_var_repr formula v) formula.phi.linear_eqs_occurrences
+  |> Option.exists ~f:(fun occurrences -> not (Var.Set.is_empty occurrences))
+
+
 let as_constant_q formula v =
   Var.Map.find_opt (get_var_repr formula v) formula.phi.linear_eqs
   |> Option.bind ~f:LinArith.get_as_const
