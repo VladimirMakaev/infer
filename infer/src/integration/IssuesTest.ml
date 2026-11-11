@@ -18,9 +18,15 @@ let pp_taint_extra fmt
       F.fprintf fmt ", privacy effect: %s" privacy_effect )
 
 
-let pp_racerd_access fmt Jsonbug_t.{field_class; field_name; access_path; kind; lock_held; thread} =
+let rec pp_racerd_access fmt
+    Jsonbug_t.{field_class; field_name; access_path; kind; lock_held; thread; related_accesses} =
   F.fprintf fmt "field: %s.%s, path: %s, kind: %s, lock_held: %b, thread: %s" field_class field_name
-    access_path kind lock_held thread
+    access_path kind lock_held thread ;
+  Option.iter related_accesses ~f:(function
+    | [] ->
+        ()
+    | accesses ->
+        F.fprintf fmt ", related: [%a]" (Pp.seq ~sep:"; " pp_racerd_access) accesses )
 
 
 let pp_trace fmt trace comma =

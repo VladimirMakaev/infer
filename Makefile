@@ -336,6 +336,7 @@ DIRECT_TESTS += \
   java_pulse \
   java_purity \
   java_racerd \
+  java_racerd-dedup \
   java_racerd-extras \
   java_scopeleakage \
   java_starvation \
