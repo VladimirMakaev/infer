@@ -279,6 +279,7 @@ module Attribute = struct
         ; is_const_ref: bool
         ; from: CopyOrigin.t
         ; copied_location: Location.t }
+    | DerivedFrom of AbstractValue.t
     | DictContainConstKeys
     | DictReadConstKeys of (ConstKeys.t[@yojson.opaque])
     | EndOfCollection
@@ -399,6 +400,8 @@ module Attribute = struct
 
   let java_resource_released_rank = Variants.javaresourcereleased.rank
 
+  let derived_from_rank = Variants.derivedfrom.rank
+
   let last_lookup_rank = Variants.lastlookup.rank
 
   let last_lookup_value_rank = Variants.lastlookupvalue.rank
@@ -480,6 +483,8 @@ module Attribute = struct
         F.fprintf f "CopiedReturn (%a%t by %a at %a)" AbstractValue.pp source
           (fun f -> if is_const_ref then F.pp_print_string f ":const&")
           CopyOrigin.pp from Location.pp copied_location
+    | DerivedFrom base ->
+        F.fprintf f "DerivedFrom(%a)" AbstractValue.pp base
     | DictContainConstKeys ->
         F.pp_print_string f "DictContainConstKeys"
     | DictReadConstKeys keys ->
@@ -607,6 +612,7 @@ module Attribute = struct
     | ContentsOverwritten _
     | CopiedInto _
     | CopiedReturn _
+    | DerivedFrom _
     | DictContainConstKeys
     | EndOfCollection
     | GlobalInitializerCalled
@@ -664,6 +670,7 @@ module Attribute = struct
     | ContentsOverwritten _
     | CopiedInto _
     | CopiedReturn _
+    | DerivedFrom _
     | DictContainConstKeys
     | EndOfCollection
     | GlobalInitializerCalled
@@ -718,6 +725,7 @@ module Attribute = struct
     | ContentsOverwritten _
     | CopiedReturn _
     | CppLifetimeBegun
+    | DerivedFrom _
     | DictContainConstKeys
     | DictReadConstKeys _
     | EndOfCollection
@@ -782,6 +790,8 @@ module Attribute = struct
         ContentsOverwritten (add_call_to_history hist)
     | CopiedReturn {source; is_const_ref; from; copied_location} ->
         CopiedReturn {source= subst source; is_const_ref; from; copied_location}
+    | DerivedFrom base ->
+        DerivedFrom (subst base)
     | DictReadConstKeys const_keys ->
         DictReadConstKeys
           (ConstKeys.map
@@ -956,7 +966,7 @@ module Attribute = struct
       else Some (Hashtbl.to_seq_keys to_keep |> Stdlib.List.of_seq)
     in
     match attr with
-    | ConfigUsage (StringParam {v= source}) | CopiedReturn {source} ->
+    | ConfigUsage (StringParam {v= source}) | CopiedReturn {source} | DerivedFrom source ->
         Option.some_if (f_keep source) attr
     | PropagateTaintFrom (reason, taints_in) ->
         filter_aux taints_in ~get_addr:(fun {v} -> v) ~set_addr:(fun v thing -> {thing with v})
@@ -1291,6 +1301,11 @@ module Attributes = struct
   let get_std_vector_erased =
     get_by_rank Attribute.std_vector_erased_rank ~dest:(function[@warning "-partial-match"]
         | StdVectorErased trace -> trace )
+
+
+  let get_derived_from =
+    get_by_rank Attribute.derived_from_rank ~dest:(function[@warning "-partial-match"]
+        | DerivedFrom base -> base )
 
 
   let get_last_lookup =

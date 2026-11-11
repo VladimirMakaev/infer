@@ -414,6 +414,11 @@ val is_local : Var.t -> t -> bool
 val is_known_equal : t -> AbstractValue.t -> AbstractValue.t -> bool
 (** the state already proves that the two values are equal *)
 
+val is_derived_from_another_address : t -> AbstractValue.t -> bool
+(** whether [v] was computed by pointer arithmetic from a base address that is not [v] itself, and
+    so names a location inside whatever object that base points into. A round trip that adds an
+    offset and removes it again gets back to [v], so it does not count. *)
+
 val cannot_be_equal_to_local_address : t -> AbstractValue.t -> AbstractValue.t -> bool
 
 val is_address_of_local : t -> AbstractValue.t -> bool

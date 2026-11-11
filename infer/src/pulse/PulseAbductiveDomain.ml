@@ -725,6 +725,10 @@ module Internal = struct
       BaseAddressAttributes.is_std_vector_reserved addr (astate.post :> base_domain).attrs
 
 
+    let get_derived_from addr astate =
+      BaseAddressAttributes.get_derived_from addr (astate.post :> base_domain).attrs
+
+
     let get_last_lookup addr astate =
       BaseAddressAttributes.get_last_lookup addr (astate.post :> base_domain).attrs
 
@@ -3350,6 +3354,10 @@ module AddressAttributes = struct
     SafeAttributes.is_std_vector_reserved (CanonValue.canon' astate v) astate
 
 
+  let get_derived_from v astate =
+    SafeAttributes.get_derived_from (CanonValue.canon' astate v) astate
+
+
   let get_last_lookup v astate = SafeAttributes.get_last_lookup (CanonValue.canon' astate v) astate
 
   let std_vector_reserve v astate =
@@ -3396,6 +3404,27 @@ module AddressAttributes = struct
   let is_hack_constinit_called v astate =
     SafeAttributes.is_hack_constinit_called (CanonValue.canon' astate v) astate
 end
+
+(* Follow [DerivedFrom] to the address the program started from: the first one that was not itself
+   computed. A value equal to its own root was computed and then brought back, e.g. by adding an
+   offset and taking it away again, and so names the same object it started from; one whose root is
+   a different address names a location inside the object that root points into. *)
+let derivation_root astate v =
+  let rec aux visited v =
+    if AbstractValue.Set.mem v visited then v
+    else
+      match AddressAttributes.get_derived_from v astate with
+      | None ->
+          v
+      | Some base ->
+          aux (AbstractValue.Set.add v visited) base
+  in
+  aux AbstractValue.Set.empty v
+
+
+let is_derived_from_another_address astate v =
+  not (is_known_equal astate v (derivation_root astate v))
+
 
 let is_read_from_pre_cell astate (v, hist) =
   (* the result of an unknown call is a fresh value, but its history carries the cell ids of the

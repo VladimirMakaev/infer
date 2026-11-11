@@ -242,6 +242,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | ContentsOverwritten _
   | CopiedInto _
   | CopiedReturn _
+  | DerivedFrom _
   | InReportedRetainCycle
   | LastLookup _
   | SourceOriginOfCopy _
@@ -342,6 +343,8 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       if Invalidation.equal invalidation1 invalidation2 then
         Some (Invalid (invalidation1, join_traces trace1 trace2))
       else None
+  | DerivedFrom base1, DerivedFrom base2 ->
+      mk_from_joined_values base1 base2 ~f:(fun base -> DerivedFrom base)
   | LastLookup v1, LastLookup v2 ->
       mk_from_joined_values v1 v2 ~f:(fun v -> LastLookup v)
   | ( LastLookupValue {key= key1; first_key= first1; known_present= present1}
