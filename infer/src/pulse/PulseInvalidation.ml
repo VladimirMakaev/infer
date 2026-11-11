@@ -313,6 +313,21 @@ let is_file_descriptor_reason = function
       false
 
 
+(* keep this exhaustive: a new reason has to say whether it tolerates anything, rather than
+   inherit an answer *)
+let is_relevant_for_every_invalidation = function
+  | None
+  | Some
+      ( BlockCall
+      | InsertionIntoCollectionKey
+      | InsertionIntoCollectionValue
+      | SelfOfNonPODReturnMethod _
+      | NullArgumentWhereNonNullExpected _ ) ->
+      true
+  | Some (FileDescriptorUse | FileDescriptorRelease | CppStorageOnly) ->
+      false
+
+
 let is_relevant_for_reason must_be_valid_reason invalidation =
   match must_be_valid_reason with
   | Some ((FileDescriptorUse | FileDescriptorRelease) as reason) -> (

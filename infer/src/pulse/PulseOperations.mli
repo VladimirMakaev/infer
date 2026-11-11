@@ -253,6 +253,7 @@ val write_arr_index :
 
 val write_deref :
      PathContext.t
+  -> ?must_be_valid_reason:Invalidation.must_be_valid_reason
   -> ?volatile_access:bool
   -> Location.t
   -> ref:AbstractValue.t * ValueHistory.t
