@@ -840,7 +840,8 @@ let call tenv path location return ~call_was_unknown (call : _ Either.t)
           in
           if should_propagate_for_unknown then
             propagate_taint_for_unknown_calls tenv path location return ~has_added_return_param
-              (SkippedKnownCall proc_name) (Some proc_name) actuals astate
+              (SkippedKnownCall (proc_name, CallEvent.NoSummary))
+              (Some proc_name) actuals astate
           else astate )
 
 

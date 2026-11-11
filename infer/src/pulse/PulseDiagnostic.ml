@@ -498,16 +498,17 @@ let pp_calling_context_prefix fmt calling_context =
   | [] ->
       ()
   | [(call_event, _)] ->
-      F.fprintf fmt "The call to %a may trigger the following issue: " CallEvent.pp call_event
+      F.fprintf fmt "The call to %a may trigger the following issue: " CallEvent.pp_for_report
+        call_event
   | [(call_event1, _); (call_event2, _)] ->
       F.fprintf fmt "The call to %a in turn calls %a and may trigger the following issue: "
-        CallEvent.pp call_event1 CallEvent.pp call_event2
+        CallEvent.pp_for_report call_event1 CallEvent.pp_for_report call_event2
   | (call_event, _) :: _ :: _ :: _ ->
       let in_between_calls = List.length calling_context - 2 in
       F.fprintf fmt
         "The call to %a ends up calling %a (after %d more call%s) and may trigger the following \
          issue: "
-        CallEvent.pp call_event CallEvent.pp
+        CallEvent.pp_for_report call_event CallEvent.pp_for_report
         (List.last_exn calling_context |> fst)
         in_between_calls
         (if in_between_calls > 1 then "s" else "")
@@ -515,7 +516,7 @@ let pp_calling_context_prefix fmt calling_context =
 
 let is_from_std_move (base, _) =
   match (base : DecompilerExpr.base) with
-  | ReturnValue (Call pname | ModelName pname | SkippedKnownCall pname) ->
+  | ReturnValue (Call pname | ModelName pname | SkippedKnownCall (pname, _)) ->
       String.is_prefix (Procname.to_string pname) ~prefix:"std::move"
   | ReturnValue (Model pname) ->
       String.is_prefix pname ~prefix:"std::move"
@@ -725,7 +726,7 @@ let get_message_and_suggestion diagnostic =
                  let {Location.file} = Trace.get_outer_location invalidation_trace in
                  let null =
                    match call_event with
-                   | Call proc_name | ModelName proc_name | SkippedKnownCall proc_name ->
+                   | Call proc_name | ModelName proc_name | SkippedKnownCall (proc_name, _) ->
                        if Procname.is_objc_method proc_name then "nil" else "null"
                    | Model _ | SkippedUnknownCall _ ->
                        if
@@ -736,7 +737,7 @@ let get_message_and_suggestion diagnostic =
                  in
                  F.fprintf fmt
                    "%a is passed as argument to %a; this function requires a non-%s argument"
-                   pp_prefix null CallEvent.pp call_event null ;
+                   pp_prefix null CallEvent.pp_for_report call_event null ;
                  Option.iter index ~f:(fun index -> F.fprintf fmt " at position #%i" index)
              | None | Some (FileDescriptorUse | FileDescriptorRelease | CppStorageOnly) ->
                  F.fprintf fmt "%a is dereferenced%a" pp_prefix "null" pp_access_trace access_trace
@@ -1151,7 +1152,7 @@ let get_trace_calling_context calling_context errlog =
                ~init:(errlog, List.length calling_context - 1)
                ~f:(fun (errlog, depth) (call, loc) ->
                  ( Errlog.make_trace_element depth loc
-                     (F.asprintf "in call to %a" CallEvent.pp call)
+                     (F.asprintf "in call to %a" CallEvent.pp_for_report call)
                      []
                    :: errlog
                  , depth - 1 ) )

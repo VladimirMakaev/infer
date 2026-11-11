@@ -448,8 +448,9 @@ module Comparison = struct
       let procname_none = None in
       let reason =
         CallEvent.SkippedKnownCall
-          (Procname.make_erlang ~module_name:ErlangTypeName.unsupported ~function_name:"comparison"
-             ~arity:2 )
+          ( Procname.make_erlang ~module_name:ErlangTypeName.unsupported ~function_name:"comparison"
+              ~arity:2
+          , CallEvent.NoSummary )
       in
       let++ astate =
         PulseCallOperations.unknown_call tenv path location reason procname_none

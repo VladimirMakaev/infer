@@ -238,7 +238,8 @@ module Basic = struct
       IRAttributes.load callee_procname |> Option.map ~f:ProcAttributes.get_pvar_formals
     in
     let reason =
-      if force_pure then CallEvent.SkippedKnownCall callee_procname else CallEvent.Model skip_reason
+      if force_pure then CallEvent.SkippedKnownCall (callee_procname, CallEvent.NoSummary)
+      else CallEvent.Model skip_reason
     in
     let<++> astate =
       PulseCallOperations.unknown_call tenv path location reason ~force_pure (Some callee_procname)
@@ -259,7 +260,8 @@ module Basic = struct
       IRAttributes.load callee_procname |> Option.map ~f:ProcAttributes.get_pvar_formals
     in
     let<++> astate =
-      PulseCallOperations.unknown_call tenv path location (SkippedKnownCall callee_procname)
+      PulseCallOperations.unknown_call tenv path location
+        (SkippedKnownCall (callee_procname, CallEvent.NoSummary))
         (Some callee_procname) ~ret ~actuals ~formals_opt astate
     in
     astate
