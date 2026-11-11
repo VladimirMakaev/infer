@@ -394,6 +394,8 @@ let get_unawaited_awaitable address attrs =
   match allocator with Attribute.Awaitable -> Some trace | _ -> None
 
 
+let get_derived_from address attrs = get_attribute Attributes.get_derived_from address attrs
+
 let get_last_lookup address attrs = get_attribute Attributes.get_last_lookup address attrs
 
 let get_address_of_stack_variable address attrs =
@@ -566,6 +568,8 @@ module type S = sig
   val is_std_moved : key -> t -> bool
 
   val is_std_vector_reserved : key -> t -> bool
+
+  val get_derived_from : key -> t -> AbstractValue.t option
 
   val get_last_lookup : key -> t -> AbstractValue.t option
 
