@@ -43,6 +43,7 @@ type racerd_access = {
   kind : string;         (* read | write | container_read | container_write *)
   lock_held : bool;      (* a lock acquired since entry is held at the access *)
   thread : string;       (* no_thread | any_but_self | any, from the access snapshot's ThreadsDomain *)
+  ?related_accesses : racerd_access list option; (* other fields in the same call-site report *)
 }
 
 type transitive_callee_kind = [Static | Virtual | Closure]
