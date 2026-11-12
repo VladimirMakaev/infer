@@ -184,6 +184,37 @@ module Resource = struct
     allocate_aux ~exn_class_name this_arg (Some delegation)
 
 
+  (* An opaque wrapper constructor can store a resource without creating another one. Preserve
+     its real field for calls whose bodies are captured, and the modeled release edge for close.
+     The null argument throws rather than creating a wrapper, as these constructors require. *)
+  let delegate_constructor ~field this_obj ((resource, _) as resource_obj) : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let normal =
+      PulseArithmetic.prune_binop ~negated:true Eq (AbstractValueOperand resource)
+        (ConstOperand (Cint IntLit.zero)) astate
+      |> SatUnsat.to_list
+      |> List.concat_map ~f:(fun result ->
+          let<*> astate = result in
+          let<*> astate = write_field path field resource_obj location this_obj astate in
+          let<+> astate =
+            write_field path PulseOperations.ModeledField.delegated_release resource_obj location
+              this_obj astate
+          in
+          astate )
+    in
+    let null =
+      PulseArithmetic.prune_binop ~negated:false Eq (AbstractValueOperand resource)
+        (ConstOperand (Cint IntLit.zero)) astate
+      |> SatUnsat.to_list
+      |> List.concat_map ~f:(fun result ->
+          let<*> astate = result in
+          call_may_throw_exception
+            (JavaClassName.from_string "java.lang.NullPointerException")
+            model_data astate )
+    in
+    normal @ null
+
+
   (* Static factories such as [java.nio.file.Files.newInputStream] return a fresh resource
      without going through a modeled constructor, so the returned object was never tracked
      (#2110). Allocate the return value as a resource of type [class_name] directly. *)
@@ -1052,6 +1083,9 @@ let matchers : matcher list =
     <>$ any_arg $+...$--> Basic.skip |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.Writer")
     &:: "append" <>$ capt_arg_payload $+...$--> Resource.writer_append |> with_non_disj
+  ; -"android.util.JsonReader" &:: "<init>" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> Resource.delegate_constructor ~field:(mk_java_field "android.util" "JsonReader" "in")
+    |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.Closeable")
     &:: "close" <>$ capt_arg_payload $--> Resource.release |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "com.google.common.io.Closeables")
