@@ -90,6 +90,10 @@ module Java : sig
   (** Check whether the class is one of the continuation classes kotlinc generates for a suspending
       lambda or function *)
 
+  val is_kotlin_captured_var_cell : Typ.Name.t -> bool
+  (** Check whether the class is one of the [kotlin.jvm.internal.Ref$*] cells kotlinc allocates to
+      hold a local [var] that a lambda captures *)
+
   val is_kotlin_continuation_state : Tenv.t -> Typ.Name.t -> Fieldname.t -> bool
   (** [is_kotlin_continuation_state tenv typename fieldname] holds when the field is part of a
       Kotlin coroutine's compiler-generated state machine ([label], [result], or a spill slot such

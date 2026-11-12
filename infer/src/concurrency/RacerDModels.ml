@@ -612,6 +612,44 @@ let is_continuation_state_access (access : 'a MemoryAccess.t) prefix_exp tenv =
       false
 
 
+(* A local [var] a Kotlin lambda captures is compiled into a [kotlin.jvm.internal.Ref$*] cell, and
+   where that cell ends up depends on the lowering. For a plain lambda kotlinc 2.x puts the body in
+   a method of the enclosing class and passes the cell as a parameter, so it is a formal and is
+   conditionally owned. For a suspending lambda it generates a continuation class holding the cell
+   in a field named after the source variable, so reading the variable becomes
+   [this.$first.element] -- rooted at the receiver, which is shared state as far as RacerD is
+   concerned. The same source then races or not depending on which lowering the compiler picked.
+
+   The cell is a local variable rather than program state, so recognise it and analyse both
+   lowerings the same way. Deliberately narrow: the base has to be a generated continuation, so
+   this says "a captured local reached from the coroutine that captured it" and not "any Ref".
+   Only the cell is confined -- an access made THROUGH a captured object is still an access to the
+   program's own state, which is why this matches on the type of the prefix and not on the field
+   name of the capture.
+
+   Ordered so that the free tests come first. This runs on every field access the analysis sees,
+   in every language, and both of the real tests cost a lookup: [is_kotlin_coroutine_continuation]
+   walks the supers and [get_typ] walks the expression. Matching the receiver as a [JavaClass]
+   first rules out every C/C++/ObjC access with a pattern match and no work at all, and [get_typ]
+   is reached only for an access whose receiver really is a generated continuation. *)
+let is_kotlin_captured_local_cell_access (access : 'a MemoryAccess.t) prefix_exp tenv =
+  let prefix_is_captured_cell () =
+    match HilExp.AccessExpression.get_typ prefix_exp tenv with
+    | Some ({Typ.desc= Tstruct typename} | {desc= Tptr ({desc= Tstruct typename}, _)}) ->
+        PatternMatch.Java.is_kotlin_captured_var_cell typename
+    | _ ->
+        false
+  in
+  match (access, snd (HilExp.AccessExpression.get_base prefix_exp)) with
+  | ( MemoryAccess.FieldAccess _
+    , ( {Typ.desc= Tstruct (JavaClass _ as base_typename)}
+      | {desc= Tptr ({desc= Tstruct (JavaClass _ as base_typename)}, _)} ) ) ->
+      PatternMatch.Java.is_kotlin_coroutine_continuation tenv base_typename
+      && prefix_is_captured_cell ()
+  | _ ->
+      false
+
+
 let is_builder_class tname = String.is_suffix ~suffix:"$Builder" (Typ.Name.to_string tname)
 
 let is_builder_method java_pname = is_builder_class (Procname.Java.get_class_type_name java_pname)
