@@ -49,17 +49,34 @@ let is_nullptr_dereference_in_nullsafe_class tenv ~is_nullptr_dereference jn =
    other issue changes. *)
 let reported_leak_allocations = AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
 
+(* Which allocation a leak is about: the whole chain of calls that leads to it, down to the
+   location that allocates. The outer location alone is not enough -- two different allocations
+   inside one helper share the call that reaches them, and keying on it merges two findings into
+   one. The histories are dropped because they describe how a value was reached rather than which
+   allocation it came from, and the several reports of one allocation must still collapse into
+   one. No test here needs that: the allocating [Immediate] is built with an empty history, and
+   the [ViaCall] history is the caller's history for the value at the call, the same on every
+   path that reports the leak. It is dropped so that an identity test cannot come to depend on
+   it. *)
+let rec allocation_site_of_trace (trace : Trace.t) : Trace.t =
+  match trace with
+  | Immediate {location} ->
+      Immediate {location; history= ValueHistory.epoch}
+  | ViaCall {f; location; in_call} ->
+      ViaCall {f; location; history= ValueHistory.epoch; in_call= allocation_site_of_trace in_call}
+
+
 let is_already_reported_leak ~latent (diagnostic : Diagnostic.t) =
   match diagnostic with
   | ResourceLeak {resource; allocation_trace} ->
       let issue_type = Diagnostic.get_issue_type ~latent diagnostic in
-      let allocation_site = Trace.get_outer_location allocation_trace in
+      let allocation_site = allocation_site_of_trace allocation_trace in
       let reported = DLS.get reported_leak_allocations in
       if
         List.exists !reported ~f:(fun (issue_type', resource', allocation_site') ->
             IssueType.equal issue_type issue_type'
             && Diagnostic.equal_resource resource resource'
-            && Location.equal allocation_site allocation_site' )
+            && Trace.equal allocation_site allocation_site' )
       then true
       else (
         reported := (issue_type, resource, allocation_site) :: !reported ;
