@@ -599,11 +599,17 @@ and eval_to_value_origin (path : PathContext.t) ?volatile_access mode location e
       Sat (Ok (constant_address path location i (PulseArithmetic.absval_of_int astate i)))
   | Const (Cstr s) ->
       let astate, v = PulseArithmetic.absval_of_string astate s in
-      Sat
-        (Ok
-           ( astate
-           , ValueOrigin.Unknown (v, ValueHistory.singleton (Assignment (location, path.timestamp)))
-           ) )
+      (* A string literal names an object with static storage duration, so its value is never
+         null. Without this the guard in [p = "lit"; if (p != nullptr) ...] cannot rule out the
+         branch that assigned the literal, and the null case survives to the dereference. State
+         only that it is not null: that is what the guard needs, and it says nothing about how
+         the value compares to any other address. *)
+      let++ astate =
+        PulseArithmetic.and_not_equal (AbstractValueOperand v) (ConstOperand (Cint IntLit.zero))
+          astate
+      in
+      ( astate
+      , ValueOrigin.Unknown (v, ValueHistory.singleton (Assignment (location, path.timestamp))) )
   | Const ((Cfloat _ | Cclass _) as c) ->
       let v = AbstractValue.mk_fresh () in
       let++ astate = PulseArithmetic.and_eq_const v c astate in
