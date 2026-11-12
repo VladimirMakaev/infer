@@ -1,0 +1,5 @@
+codetoanalyze/cpp/report-block-list/block_list.cpp, Partially<char>::partial_leak_bad, 0, MEMORY_LEAK_C, no_bucket, ERROR
+codetoanalyze/cpp/report-block-list/block_list.cpp, PartiallyOther<double>::other_leak_bad, 0, MEMORY_LEAK_C, no_bucket, ERROR
+codetoanalyze/cpp/report-block-list/block_list.cpp, Entirely<double>::entirely_blocked_leak, 0, MEMORY_LEAK_C, no_bucket, ERROR
+codetoanalyze/cpp/report-block-list/block_list.cpp, Never<double>::never_leak_bad, 0, MEMORY_LEAK_C, no_bucket, ERROR
+codetoanalyze/cpp/report-block-list/block_list.cpp, plain_leak_bad, 0, MEMORY_LEAK_C, no_bucket, ERROR

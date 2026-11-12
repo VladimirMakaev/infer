@@ -108,6 +108,8 @@ DIRECT_TESTS += \
   cpp_pulse-unsafe-malloc \
   cpp_racerd \
   cpp_racerd-dedup \
+  cpp_report-block-list \
+  cpp_report-block-list-none \
   cpp_sil \
   cpp_siof \
   cpp_starvation \

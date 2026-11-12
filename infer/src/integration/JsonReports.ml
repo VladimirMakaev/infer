@@ -214,6 +214,25 @@ let issue_in_report_block_list_specs ~file ~issue ~proc =
   List.exists ~f:(is_in_report_block_list_spec ~file ~issue ~proc) Config.report_block_list_spec
 
 
+(** The file an issue is attributed to: the procedure's file when we know where the procedure is,
+    otherwise the file the issue itself points at. *)
+let source_file_of_issue ~proc_location_opt ~(err_data : Errlog.err_data) =
+  match proc_location_opt with Some {Location.file} -> file | None -> err_data.loc.Location.file
+
+
+(** Whether an issue passes the per-issue report filters. Apply this before de-duplicating issues:
+    de-duplication merges issues that differ only by procedure name and keeps an arbitrary one of
+    them, so filtering afterwards lets a filter that names one procedure delete a finding that
+    another procedure reports at the same place. *)
+let is_reportable ~error_filter ~proc_name ~proc_location_opt ~(err_key : Errlog.err_key) ~err_data
+    =
+  let source_file = source_file_of_issue ~proc_location_opt ~err_data in
+  error_filter source_file err_key.issue_type
+  && (not (is_in_clang_header source_file))
+  && not
+       (issue_in_report_block_list_specs ~file:source_file ~issue:err_key.issue_type ~proc:proc_name)
+
+
 module SourceSuppressions = struct
   let cache = ref SourceFile.Map.empty
 
@@ -320,24 +339,15 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
 
 
   let to_string ({error_filter; proc_name; proc_location_opt; err_key; err_data} : elt) =
-    let source_file, procedure_start_line =
-      match proc_location_opt with
-      | Some proc_loc ->
-          (proc_loc.Location.file, proc_loc.Location.line)
-      | None ->
-          (err_data.loc.Location.file, 0)
+    let source_file = source_file_of_issue ~proc_location_opt ~err_data in
+    let procedure_start_line =
+      match proc_location_opt with Some proc_loc -> proc_loc.Location.line | None -> 0
     in
     if SourceFile.is_invalid source_file then
       L.(die InternalError)
         "Invalid source file for %a %a@.Trace: %a@." IssueType.pp err_key.issue_type
         Localise.pp_error_desc err_key.err_desc Errlog.pp_loc_trace err_data.loc_trace ;
-    if
-      error_filter source_file err_key.issue_type
-      && (not (is_in_clang_header source_file))
-      && not
-           (issue_in_report_block_list_specs ~file:source_file ~issue:err_key.issue_type
-              ~proc:proc_name )
-    then
+    if is_reportable ~error_filter ~proc_name ~proc_location_opt ~err_key ~err_data then
       let severity = IssueType.string_of_severity err_key.severity in
       let category =
         Option.value
@@ -557,7 +567,16 @@ let process_all_summaries_and_issues ~issues_outf ~costs_outf ~config_impact_out
   (* Issues that are generated and stored outside of summaries, eg file or class-level issues *)
   IssueLog.iter_all_issues ~f:(fun _checker proc_name errlog ->
       all_issues := collect_issues proc_name None errlog !all_issues ) ;
-  let all_issues = Issue.sort_filter_issues !all_issues in
+  (* Filter before de-duplicating: [Issue.sort_filter_issues] merges issues that differ only by
+     procedure name and keeps an arbitrary one of them, so a filter applied afterwards would
+     silently depend on which procedure happened to win. *)
+  let reportable_issues =
+    List.filter !all_issues ~f:(fun {Issue.proc_name; proc_location_opt; err_key; err_data} ->
+        is_reportable
+          ~error_filter:(mk_error_filter filters proc_name)
+          ~proc_name ~proc_location_opt ~err_key ~err_data )
+  in
+  let all_issues = Issue.sort_filter_issues reportable_issues in
   let n_issues = List.length all_issues in
   StatsLogging.log_count ~label:"reports_unfiltered" ~value:n_issues ;
   List.iter all_issues ~f:(fun {Issue.proc_name; proc_location_opt; err_key; err_data} ->

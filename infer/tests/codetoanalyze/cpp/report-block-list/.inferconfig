@@ -1,0 +1,31 @@
+{
+  "report-block-list-spec": [
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "Partially<double>",
+      "procedure_name": "partial_leak_bad",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp",
+      "comment": "Three of the four instantiations are blocked, including the one de-duplication keeps." },
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "Partially<char>",
+      "procedure_name": "partial_leak_bad",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp" },
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "Partially<long>",
+      "procedure_name": "partial_leak_bad",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp" },
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "PartiallyOther<int>",
+      "procedure_name": "other_leak_bad",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp",
+      "comment": "Blocks the instantiation de-duplication does not keep, so nothing changes." },
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "Entirely<int>",
+      "procedure_name": "entirely_blocked_leak",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp",
+      "comment": "Both instantiations are blocked, so the leak is reported for none of them." },
+    { "bug_type": "MEMORY_LEAK_C",
+      "class_name": "Entirely<double>",
+      "procedure_name": "entirely_blocked_leak",
+      "file": "codetoanalyze/cpp/report-block-list/block_list.cpp" }
+  ]
+}
