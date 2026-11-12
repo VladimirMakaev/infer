@@ -213,7 +213,8 @@ let log_issue ?severity_override err_log ~loc ~node ~session ~ltr ~access ~extra
     IssueType.equal_visibility error.issue_type.visibility User
     || (Config.developer_mode && IssueType.equal_visibility error.issue_type.visibility Developer)
   in
-  if should_report && (not hide_java_loc_zero) && not hide_memory_error then
+  if not (should_report && (not hide_java_loc_zero) && not hide_memory_error) then false
+  else
     let added =
       let node_id, node_key =
         match node with
@@ -262,7 +263,8 @@ let log_issue ?severity_override err_log ~loc ~node ~session ~ltr ~access ~extra
               L.d_info
         in
         d warn_str ;
-        L.d_ln () ) )
+        L.d_ln () ) ) ;
+    added
 
 
 let merge ~into x =

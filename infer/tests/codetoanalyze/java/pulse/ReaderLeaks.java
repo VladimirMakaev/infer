@@ -236,4 +236,55 @@ public class ReaderLeaks {
       else writer.close();
     }
   }
+
+  // Two readers opened by one call, each closed on one branch only, so both leak. The two leaks
+  // read the same: same constructor, same call, and the same last access. They are two findings
+  // all the same, and neither may be dropped because the other was reported.
+
+  static class TwoReaders {
+    BufferedReader first;
+    BufferedReader second;
+
+    TwoReaders(BufferedReader first, BufferedReader second) {
+      this.first = first;
+      this.second = second;
+    }
+  }
+
+  static TwoReaders openTwoReaders() throws IOException {
+    BufferedReader first = new BufferedReader(new FileReader("first.txt"));
+    BufferedReader second = new BufferedReader(new FileReader("second.txt"));
+    return new TwoReaders(first, second);
+  }
+
+  public void twoReadersFromOneCallBad(boolean b) throws IOException {
+    TwoReaders readers = openTwoReaders();
+    if (b) {
+      readers.first.close();
+    } else {
+      readers.second.close();
+    }
+  }
+
+  public void twoReadersFromOneCallOk() throws IOException {
+    TwoReaders readers = openTwoReaders();
+    try {
+      readers.first.close();
+    } finally {
+      readers.second.close();
+    }
+  }
+
+  // One reader that becomes unreachable on two ways out of the method. That is one leak and one
+  // report, and the deduplication is right to collapse it; what it may never do is drop both.
+  public void bufferedReaderNotClosedAfterReadLineBad() throws IOException {
+    BufferedReader reader = new BufferedReader(new FileReader("testing.txt"));
+    reader.readLine();
+  }
+
+  public void bufferedReaderClosedAfterReadLineOk() throws IOException {
+    try (BufferedReader reader = new BufferedReader(new FileReader("testing.txt"))) {
+      reader.readLine();
+    }
+  }
 }
