@@ -498,3 +498,43 @@ int compare_member_pointer_with_nullptr_ref_bad() {
   }
   return 0;
 }
+
+// A null case can be excluded through a flag that was assigned a STRING LITERAL. A literal
+// names an object with static storage duration, so the branch that set the flag cannot also
+// satisfy [why == nullptr]; that branch used to survive and the dereference was reported.
+int string_literal_guard_ok() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  const char* why = nullptr;
+  if (p == nullptr) {
+    why = "unknown";
+  }
+  if (why != nullptr) {
+    return 0;
+  }
+  return p->x;
+}
+
+// The same guard through a bool, which already worked. Keeps the case above honest: if this
+// one ever starts reporting, the string literal is not what is being tested.
+int bool_guard_ok() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  bool bad = false;
+  if (p == nullptr) {
+    bad = true;
+  }
+  if (bad) {
+    return 0;
+  }
+  return p->x;
+}
+
+// True positive control: a literal is present but guards nothing, so the null case still
+// reaches the dereference and must still be reported.
+int string_literal_not_guarding_bad() {
+  NullCompared* p = choice() ? get_null_compared() : nullptr;
+  const char* why = "unknown";
+  if (why == nullptr) {
+    return 0;
+  }
+  return p->x;
+}

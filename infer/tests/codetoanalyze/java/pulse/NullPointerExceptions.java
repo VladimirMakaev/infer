@@ -873,4 +873,29 @@ public class NullPointerExceptions {
   int callDerefAfterComparisonToNullOk() {
     return derefAfterComparisonToNullBad(new A());
   }
+
+  // Same shape as the C++ string_literal_guard_ok: the null case is excluded through a flag
+  // assigned a string literal, which is never null.
+  int stringLiteralGuardOk(boolean b) {
+    A a = b ? new A() : null;
+    String why = null;
+    if (a == null) {
+      why = "unknown";
+    }
+    if (why != null) {
+      return 0;
+    }
+    return a.x;
+  }
+
+  // True positive control: the literal guards nothing, so the null case still reaches the
+  // dereference.
+  int stringLiteralNotGuardingBad(boolean b) {
+    A a = b ? new A() : null;
+    String why = "unknown";
+    if (why == null) {
+      return 0;
+    }
+    return a.x;
+  }
 }
