@@ -60,6 +60,12 @@ val is_continuation_state_access : 'a MemoryAccess.t -> HilExp.AccessExpression.
     resumptions are serialised. Only the slot itself is confined: an access made through one is
     still an access to the program's own state, and callers should keep walking into it. *)
 
+val is_kotlin_captured_local_cell_access :
+  'a MemoryAccess.t -> HilExp.AccessExpression.t -> Tenv.t -> bool
+(** check if an access is to the [kotlin.jvm.internal.Ref$*] cell holding a local [var] that a
+    generated continuation captured. The cell is a local variable, not program state, and the
+    plain-lambda lowering of the same source passes it as a parameter where it is not reported. *)
+
 val should_flag_interface_call : Tenv.t -> HilExp.t list -> CallFlags.t -> Procname.t -> bool
 (** should an interface call be flagged as potentially non-thread safe? *)
 

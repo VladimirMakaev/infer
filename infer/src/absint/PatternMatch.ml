@@ -229,6 +229,26 @@ module Java = struct
     is_kotlin_continuation_state_field fieldname && is_kotlin_coroutine_continuation tenv typename
 
 
+  (** The cell kotlinc allocates for a local [var] that a lambda captures: [Ref$IntRef],
+      [Ref$ObjectRef] and the rest of the one-field boxes in [kotlin.jvm.internal]. The cell holds a
+      local variable, not program state. Matched by name because it is an implementation detail of
+      the compiler rather than a type a program declares, and because kotlin-stdlib need not have
+      been captured.
+
+      Matched on the package and class separately rather than on [Typ.Name.name]: this runs on every
+      field access the analysis sees, in every language, and for a C++ class that function joins the
+      qualifiers into a fresh string. There is no reason to allocate one per access across a C++
+      codebase only to fail a [kotlin.] prefix test. *)
+  let is_kotlin_captured_var_cell (typename : Typ.Name.t) =
+    match typename with
+    | JavaClass java_class_name ->
+        Option.exists (JavaClassName.package java_class_name) ~f:(fun package ->
+            String.equal package "kotlin.jvm.internal" )
+        && String.is_prefix (JavaClassName.classname java_class_name) ~prefix:"Ref$"
+    | _ ->
+        false
+
+
   (** Checks if the class name is a Java exception *)
   let is_throwable tenv typename = is_subtype_of_str tenv typename "java.lang.Throwable"
 
