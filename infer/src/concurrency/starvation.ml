@@ -1043,7 +1043,10 @@ let analyze_procedure ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
       let thread =
         if ConcurrencyModels.annotated_as_worker_thread tenv procname then
           Domain.ThreadDomain.BGThread
-        else if ConcurrencyModels.runs_on_ui_thread tenv procname then Domain.ThreadDomain.UIThread
+        else if
+          ConcurrencyModels.runs_on_ui_thread tenv procname
+          && not (StarvationModels.is_android_background_callback tenv procname)
+        then Domain.ThreadDomain.UIThread
         else
           ConcurrencyModels.annotated_as_named_thread procname
           |> Option.value_map ~f:(fun n -> Domain.ThreadDomain.NamedThread n) ~default:astate.thread

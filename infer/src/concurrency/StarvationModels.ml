@@ -246,6 +246,24 @@ let is_annotated_lockless tenv pname =
   ConcurrencyModels.find_override_or_superclass_annotated check tenv pname |> Option.is_some
 
 
+let is_android_background_callback tenv pname =
+  let is_background_entrypoint = function
+    | Procname.Java java_pname -> (
+      match (Procname.Java.get_class_name java_pname, Procname.Java.get_method java_pname) with
+      | "android.app.Instrumentation", "onStart"
+      | "android.media.MediaScannerConnection$OnScanCompletedListener", "onScanCompleted" ->
+          true
+      | _ ->
+          false )
+    | _ ->
+        false
+  in
+  PatternMatch.override_exists is_background_entrypoint tenv pname
+  && Option.is_none
+       (ConcurrencyModels.find_override_or_superclass_annotated
+          Annotations.ia_is_uithread_equivalent tenv pname )
+
+
 let executor_type_str = "java.util.concurrent.Executor"
 
 let schedules_work =
