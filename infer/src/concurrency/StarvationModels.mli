@@ -31,6 +31,10 @@ val is_annotated_nonblocking : Tenv.t -> Procname.t -> bool
 val is_annotated_lockless : Tenv.t -> Procname.t -> bool
 (** is procedure transitively annotated [@Lockless] *)
 
+val is_android_background_callback : Tenv.t -> Procname.t -> bool
+(** framework callbacks whose dispatch does not imply the main thread. They can still be called
+    directly, so preserve an explicit UI annotation and a known UI caller's context. *)
+
 val schedules_work : Tenv.t -> Procname.t -> bool
 (** call known to schedule runnable first argument to some executor/handler or subclass *)
 
