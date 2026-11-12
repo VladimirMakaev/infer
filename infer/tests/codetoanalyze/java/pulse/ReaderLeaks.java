@@ -237,9 +237,12 @@ public class ReaderLeaks {
     }
   }
 
-  // Two readers opened by one call, each closed on one branch only, so both leak. The two leaks
-  // read the same: same constructor, same call, and the same last access. They are two findings
-  // all the same, and neither may be dropped because the other was reported.
+  // Two readers opened by one call, each closed on one branch only, so both leak. Where both
+  // become unreachable at once the two reports read the same -- same constructor, same call, same
+  // last access -- and the error log, which keys an entry on its message, folds them into one.
+  // The reader whose report merged away is reported again where it is last touched, reading
+  // differently, and that is the second of the two entries expected below. Counting the merged
+  // report as one already made would suppress that one too, and the leak would go unreported.
 
   static class TwoReaders {
     BufferedReader first;
@@ -277,12 +280,13 @@ public class ReaderLeaks {
 
   // One reader that becomes unreachable on two ways out of the method. That is one leak and one
   // report, and the deduplication is right to collapse it; what it may never do is drop both.
-  public void bufferedReaderNotClosedAfterReadLineBad() throws IOException {
+  // Named apart from the reader tests above because this one pins the count, not just the leak.
+  public void oneReaderNotClosedAfterReadLineBad() throws IOException {
     BufferedReader reader = new BufferedReader(new FileReader("testing.txt"));
     reader.readLine();
   }
 
-  public void bufferedReaderClosedAfterReadLineOk() throws IOException {
+  public void oneReaderClosedAfterReadLineOk() throws IOException {
     try (BufferedReader reader = new BufferedReader(new FileReader("testing.txt"))) {
       reader.readLine();
     }
