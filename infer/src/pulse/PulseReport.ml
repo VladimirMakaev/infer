@@ -66,30 +66,41 @@ let rec allocation_site_of_trace (trace : Trace.t) : Trace.t =
       ViaCall {f; location; history= ValueHistory.epoch; in_call= allocation_site_of_trace in_call}
 
 
-let is_already_reported_leak ~latent (diagnostic : Diagnostic.t) =
+let leak_allocation ~latent (diagnostic : Diagnostic.t) =
   match diagnostic with
   | ResourceLeak {resource; allocation_trace} ->
-      let issue_type = Diagnostic.get_issue_type ~latent diagnostic in
-      let allocation_site = allocation_site_of_trace allocation_trace in
-      let reported = DLS.get reported_leak_allocations in
-      if
-        List.exists !reported ~f:(fun (issue_type', resource', allocation_site') ->
-            IssueType.equal issue_type issue_type'
-            && Diagnostic.equal_resource resource resource'
-            && Trace.equal allocation_site allocation_site' )
-      then true
-      else (
-        reported := (issue_type, resource, allocation_site) :: !reported ;
-        false )
+      Some
+        ( Diagnostic.get_issue_type ~latent diagnostic
+        , resource
+        , allocation_site_of_trace allocation_trace )
   | _ ->
-      false
+      None
+
+
+let is_already_reported_leak (issue_type, resource, allocation_site) =
+  DLS.get reported_leak_allocations |> ( ! )
+  |> List.exists ~f:(fun (issue_type', resource', allocation_site') ->
+      IssueType.equal issue_type issue_type'
+      && Diagnostic.equal_resource resource resource'
+      && Trace.equal allocation_site allocation_site' )
+
+
+(* Only an allocation whose report really reached the error log counts as reported. The log keys
+   an entry on its message, so two allocations that read the same become one entry, and an issue
+   can also be filtered out or suppressed on its way there. Remembering an allocation whose report
+   went nowhere would make the next report of it -- which may well read differently, and so be an
+   entry of its own -- look like a repeat, and the leak would not be reported at all. *)
+let remember_reported_leak leak =
+  let reported = DLS.get reported_leak_allocations in
+  reported := leak :: !reported
 
 
 let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~latent
     ?location_override ?extra_trace ?reachable_from (diagnostic : Diagnostic.t) =
   let open Diagnostic in
+  let leak = leak_allocation ~latent diagnostic in
   if is_suppressed && not Config.pulse_report_issues_for_tests then ()
-  else if is_already_reported_leak ~latent diagnostic then
+  else if Option.exists leak ~f:is_already_reported_leak then
     L.d_printfln "Not reporting this leak again: its allocation is already reported here"
   else
     (* Report suppressed issues with a message to distinguish them from non-suppressed issues.
@@ -245,8 +256,11 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
             extra_trace ltr )
     in
     L.d_printfln ~color:Red "Reporting issue: %a: %s" IssueType.pp issue_type message ;
-    Reporting.log_issue proc_desc err_log ~loc ?loc_instantiated ~ltr ~extras ~autofix ?suggestion
-      Pulse issue_type message
+    let recorded =
+      Reporting.log_issue_recorded proc_desc err_log ~loc ?loc_instantiated ~ltr ~extras ~autofix
+        ?suggestion Pulse issue_type message
+    in
+    if recorded then Option.iter leak ~f:remember_reported_leak
 
 
 let report analysis_data ~is_suppressed ~latent diagnostic =

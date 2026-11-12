@@ -93,7 +93,10 @@ val log_issue :
   -> ?autofix:Jsonbug_j.autofix list
   -> Checker.t
   -> IssueToReport.t
-  -> unit
+  -> bool
+(** Record an issue, and say whether it was really recorded. It is not when the issue is hidden, and
+    not when the log already holds an issue with the same severity, type and message: those are
+    keyed together, so two findings that read the same become one entry. *)
 
 val merge : into:t -> t -> [`Modified | `Intact]
 
