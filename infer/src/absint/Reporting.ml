@@ -7,7 +7,7 @@
 
 open! IStd
 
-type log_t =
+type 'a log_result =
      ?loc_instantiated:Location.t
   -> ?ltr:Errlog.loc_trace
   -> ?extras:Jsonbug_t.extra
@@ -16,7 +16,9 @@ type log_t =
   -> Checker.t
   -> IssueType.t
   -> string
-  -> unit
+  -> 'a
+
+type log_t = unit log_result
 
 module Suppression = struct
   let does_annotation_suppress_issue =
@@ -96,6 +98,7 @@ let log_issue_from_errlog ?severity_override err_log ~loc ~node ~session ~ltr ~a
   if (not Config.filtering) (* no-filtering takes priority *) || issue_type.IssueType.enabled then
     Errlog.log_issue ?severity_override err_log ~loc ~node ~session ~ltr ~access ~extras ?autofix
       checker issue_to_report
+  else false
 
 
 let log_issue_from_summary ?severity_override proc_desc err_log ~node ~session ~loc ~ltr ?extras
@@ -128,8 +131,9 @@ let log_issue_from_summary ?severity_override proc_desc err_log ~node ~session ~
   let should_suppress_lint =
     Language.curr_language_is Java && check_suppress (Procdesc.get_attributes proc_desc) issue_type
   in
-  if should_suppress_lint || is_java_generated_method || is_java_external_package then
-    Logging.debug Analysis Medium "Reporting is suppressed!@\n" (* Skip the reporting *)
+  if should_suppress_lint || is_java_generated_method || is_java_external_package then (
+    Logging.debug Analysis Medium "Reporting is suppressed!@\n" (* Skip the reporting *) ;
+    false )
   else
     log_issue_from_errlog ?severity_override err_log ~loc ~node ~session ~ltr ~access:None ~extras
       ?autofix checker exn
@@ -151,8 +155,8 @@ let log_issue_from_summary_simplified ?severity_override proc_desc err_log ~loc 
     ?autofix checker issue_to_report
 
 
-let log_issue proc_desc err_log ~loc ?loc_instantiated ?ltr ?extras ?autofix ?suggestion checker
-    issue_type error_message =
+let log_issue_recorded proc_desc err_log ~loc ?loc_instantiated ?ltr ?extras ?autofix ?suggestion
+    checker issue_type error_message =
   let ltr =
     Option.map ltr ~f:(fun default ->
         Option.value_map ~default loc_instantiated ~f:(fun loc_instantiated ->
@@ -164,13 +168,21 @@ let log_issue proc_desc err_log ~loc ?loc_instantiated ?ltr ?extras ?autofix ?su
     error_message ?suggestion
 
 
+let log_issue proc_desc err_log ~loc ?loc_instantiated ?ltr ?extras ?autofix ?suggestion checker
+    issue_type error_message =
+  log_issue_recorded proc_desc err_log ~loc ?loc_instantiated ?ltr ?extras ?autofix ?suggestion
+    checker issue_type error_message
+  |> ignore
+
+
 let log_issue_external procname ~issue_log ?severity_override ~loc ~ltr ?access ?extras ?autofix
     ?suggestion checker issue_type error_message =
   let issue_to_report = mk_issue_to_report issue_type error_message ?suggestion in
   let issue_log, errlog = IssueLog.get_or_add issue_log ~proc:procname in
   let node = Errlog.UnknownNode in
   log_issue_from_errlog ?severity_override errlog ~loc ~node ~session:0 ~ltr ~access ~extras
-    ?autofix checker issue_to_report ;
+    ?autofix checker issue_to_report
+  |> ignore ;
   issue_log
 
 

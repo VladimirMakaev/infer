@@ -1225,7 +1225,8 @@ let combine_call_site_reports issue_log =
           Errlog.log_issue ~severity_override:primary.key.severity errlog ~loc:(CallSite.loc site)
             ~node ~session:primary.data.session ~ltr ~access ~extras
             ~autofix:(List.concat_map entries ~f:(fun entry -> entry.data.autofix))
-            RacerD error ;
+            RacerD error
+          |> ignore ;
           issue_log
     in
     CallSiteMap.fold emit !groups IssueLog.empty
