@@ -24,3 +24,64 @@ void symbolic_index_ok(int x, int** res) {
   res[x] = e;
   free(res[x]);
 }
+
+// Two allocations made by one helper, reached through one call. They are two leaks, and the call
+// that reaches them is the same for both, so it does not say which of them a report is about.
+struct two_buffers {
+  char* first;
+  char* second;
+};
+
+two_buffers allocate_two() {
+  char* first = (char*)malloc(8);
+  char* second = (char*)malloc(16);
+  return {first, second};
+}
+
+void two_inner_allocations_bad(bool b) {
+  two_buffers buffers = allocate_two();
+  if (b) {
+    free(buffers.first);
+  } else {
+    free(buffers.second);
+  }
+}
+
+void two_inner_allocations_ok() {
+  two_buffers buffers = allocate_two();
+  free(buffers.first);
+  free(buffers.second);
+}
+
+// The same two leaks, where the one call and the one allocating line are shared as well, so that
+// only the calls in between tell the two allocations apart.
+char* allocate_leaf() { return (char*)malloc(8); }
+char* allocate_through_first() { return allocate_leaf(); }
+char* allocate_through_second() { return allocate_leaf(); }
+
+two_buffers allocate_two_ways() {
+  return {allocate_through_first(), allocate_through_second()};
+}
+
+void two_call_paths_bad(bool b) {
+  two_buffers buffers = allocate_two_ways();
+  if (b) {
+    free(buffers.first);
+  } else {
+    free(buffers.second);
+  }
+}
+
+// One allocation that is used and then becomes unreachable on two ways out of the procedure is
+// one leak, reported once.
+void one_allocation_two_exits_bad(bool b) {
+  char* buffer = (char*)malloc(8);
+  if (buffer == nullptr) {
+    return;
+  }
+  if (b) {
+    *buffer = 1;
+    return;
+  }
+  *buffer = 2;
+}
