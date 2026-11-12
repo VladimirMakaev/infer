@@ -665,7 +665,7 @@ public class ResourceLeaks {
     }
   }
 
-  public void socketInputStreamClosedByStreamOk() throws IOException {
+  public void socketInputStreamClosedByStreamBad() throws IOException {
     Socket socket = new Socket();
     InputStream stream = socket.getInputStream();
     stream.close();
@@ -709,7 +709,7 @@ public class ResourceLeaks {
     }
   }
 
-  public void socketOutputStreamClosedByStreamOk() throws IOException {
+  public void socketOutputStreamClosedByStreamBad() throws IOException {
     Socket socket = new Socket();
     OutputStream stream = socket.getOutputStream();
     stream.close();
@@ -803,7 +803,7 @@ public class ResourceLeaks {
   }
 
   // Closing a wrapper around the socket's stream closes the socket too.
-  public void socketStreamWrapperClosedOk() throws IOException {
+  public void socketStreamWrapperClosedBad() throws IOException {
     Socket socket = new Socket();
     BufferedInputStream wrapper = new BufferedInputStream(socket.getInputStream());
     wrapper.close();
@@ -882,7 +882,7 @@ public class ResourceLeaks {
     }
   }
 
-  public void FN_serverSocketNotClosedBad() throws IOException {
+  public void serverSocketNotClosedAfterStreamAccessorBad() throws IOException {
     ServerSocket listener = new ServerSocket(9090);
     while (true) {
       Socket socket = listener.accept();
@@ -1546,5 +1546,37 @@ public class ResourceLeaks {
 
   public void optionalOfNullableNotClosedBad() throws IOException {
     Optional<FileInputStream> stream = Optional.ofNullable(new FileInputStream("file.txt"));
+  }
+
+  // Closing only the returned stream is too late if the accessor throws. These twins also
+  // close the owner in finally, including when no stream or wrapper was returned.
+  public void socketInputStreamClosedByStreamOk() throws IOException {
+    Socket socket = new Socket();
+    try {
+      InputStream stream = socket.getInputStream();
+      stream.close();
+    } finally {
+      socket.close();
+    }
+  }
+
+  public void socketOutputStreamClosedByStreamOk() throws IOException {
+    Socket socket = new Socket();
+    try {
+      OutputStream stream = socket.getOutputStream();
+      stream.close();
+    } finally {
+      socket.close();
+    }
+  }
+
+  public void socketStreamWrapperClosedOk() throws IOException {
+    Socket socket = new Socket();
+    try {
+      BufferedInputStream wrapper = new BufferedInputStream(socket.getInputStream());
+      wrapper.close();
+    } finally {
+      socket.close();
+    }
   }
 }

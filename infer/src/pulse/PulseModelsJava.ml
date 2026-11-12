@@ -239,14 +239,19 @@ module Resource = struct
      looks leaked or, when the call is left unknown, is not tracked at all (#2103). Returning a
      value that was not allocated also means that taking a view of a resource this function does
      not own, such as a socket it was passed, leaves nothing behind to report. *)
-  let get_view ~desc owner : model_no_non_disj =
-   fun {path; location; ret= ret_id, _} astate ->
+  let get_view ?exn_class_name ~desc () owner : model_no_non_disj =
+   fun ({path; location; ret= ret_id, _} as model_data) astate ->
     let event = Hist.call_event path location desc in
     let view = (AbstractValue.mk_fresh (), Hist.single_event event) in
-    let<+> astate =
-      write_field path PulseOperations.ModeledField.delegated_release owner location view astate
+    let view_state =
+      let<+> astate =
+        write_field path PulseOperations.ModeledField.delegated_release owner location view astate
+      in
+      PulseOperations.write_id ret_id view astate
     in
-    PulseOperations.write_id ret_id view astate
+    view_state
+    @ Option.value_map exn_class_name ~default:[] ~f:(fun class_name ->
+        call_may_throw_exception (JavaClassName.from_string class_name) model_data astate )
 
 
   (* Common java.sql.Connection calls that do not close the connection. Left unknown, any of them
@@ -922,7 +927,7 @@ let matchers : matcher list =
        (PatternMatch.Java.implements_one_of
           ["java.io.FileInputStream"; "java.io.FileOutputStream"; "java.io.RandomAccessFile"] )
     &:: "getChannel" <>$ capt_arg_payload
-    $--> Resource.get_view ~desc:"getChannel"
+    $--> Resource.get_view ~desc:"getChannel" ()
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.RandomAccessFile")
     &::+ (fun _ proc_name_str ->
@@ -962,11 +967,11 @@ let matchers : matcher list =
     <>$ capt_arg_payload $--> Resource.release_no_exception |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.Socket")
     &:: "getOutputStream" <>$ capt_arg_payload
-    $--> Resource.get_view ~desc:"getOutputStream"
+    $--> Resource.get_view ~exn_class_name:"java.io.IOException" ~desc:"getOutputStream" ()
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.Socket")
     &:: "getInputStream" <>$ capt_arg_payload
-    $--> Resource.get_view ~desc:"getInputStream"
+    $--> Resource.get_view ~exn_class_name:"java.io.IOException" ~desc:"getInputStream" ()
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.net.ServerSocket")
     &:: "accept" <>$ any_arg $--> Basic.skip |> with_non_disj
