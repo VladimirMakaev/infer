@@ -1264,6 +1264,26 @@ module Internal = struct
     AbstractValue.Set.fold (add_sub_objects heap) roots roots
 
 
+  let get_live_allocation_sub_objects astate =
+    if not (Language.supports_pointer_arithmetic (Language.get_language ())) then
+      AbstractValue.Set.empty
+    else
+      let roots =
+        BaseAddressAttributes.fold
+          (fun address attributes roots ->
+            if
+              Option.is_some (Attributes.get_allocation attributes)
+              && Option.is_none (Attributes.get_invalid attributes)
+            then AbstractValue.Set.add (downcast address) roots
+            else roots )
+          (astate.post :> base_domain).attrs AbstractValue.Set.empty
+      in
+      let addresses =
+        AbstractValue.Set.fold (add_sub_objects (astate.post :> base_domain).heap) roots roots
+      in
+      AbstractValue.Set.diff addresses roots
+
+
   let check_new_eqs (eqs : Formula.new_eq list) =
     let module V = struct
       module K = struct
@@ -1326,6 +1346,7 @@ module Internal = struct
     let new_eqs = RevList.to_list new_eqs in
     if Config.pulse_sanity_checks then check_new_eqs new_eqs ;
     let stack_allocations = lazy (get_stack_allocated astate) in
+    let live_allocation_sub_objects = lazy (get_live_allocation_sub_objects astate) in
     List.fold_until new_eqs ~init:(astate, None)
       ~finish:(fun astate_error -> Sat astate_error)
       ~f:(fun (astate, error) (new_eq : PulseFormula.new_eq) ->
@@ -1342,6 +1363,14 @@ module Internal = struct
         | EqZero v when is_stack_allocated stack_allocations v ->
             let reason () =
               F.asprintf "CONTRADICTION: %a = 0 but is allocated" AbstractValue.pp v
+            in
+            Stop (Unsat {reason; source= __POS__})
+        | EqZero v when AbstractValue.Set.mem v (Lazy.force live_allocation_sub_objects) ->
+            (* Computing a live allocation's sub-object address does not require reading its
+               contents, so it need not have any outgoing heap edges. It still cannot be null. *)
+            let reason () =
+              F.asprintf "CONTRADICTION: %a = 0 but is a live allocation sub-object"
+                AbstractValue.pp v
             in
             Stop (Unsat {reason; source= __POS__})
         | EqZero v when is_heap_allocated astate v -> (
