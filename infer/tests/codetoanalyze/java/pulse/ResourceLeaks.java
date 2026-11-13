@@ -1579,4 +1579,26 @@ public class ResourceLeaks {
       socket.close();
     }
   }
+
+  // A stream that leaks on two ways out: where the write throws, and again at the end of the
+  // method. One leak and one report, and it is reported at the EARLIEST of the two, so that the
+  // warning lands on the statement the reader can act on rather than on the closing brace. The
+  // statements after the write put the two exits far enough apart to tell them apart at a
+  // glance.
+  public void fileOutputStreamReportedAtEarliestExitBad(int x) throws IOException {
+    FileOutputStream stream = new FileOutputStream("file.txt");
+    stream.write(x);
+    int unrelated = x + 1;
+    unrelated = unrelated * 2;
+    ignore(unrelated);
+  }
+
+  public void fileOutputStreamReportedAtEarliestExitOk(int x) throws IOException {
+    FileOutputStream stream = new FileOutputStream("file.txt");
+    try {
+      stream.write(x);
+    } finally {
+      stream.close();
+    }
+  }
 }

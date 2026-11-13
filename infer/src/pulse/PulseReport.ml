@@ -87,6 +87,17 @@ let allocation_site_of_trace (trace : Trace.t) : allocation_site =
   walk [] trace
 
 
+(* What makes two leak reports the same finding: the same kind of issue, about the same kind
+   of resource, at the same allocation. *)
+type leak_key = IssueType.t * Diagnostic.resource * allocation_site
+
+let equal_leak_key (issue_type, resource, allocation_site) (issue_type', resource', allocation_site')
+    =
+  IssueType.equal issue_type issue_type'
+  && Diagnostic.equal_resource resource resource'
+  && equal_allocation_site allocation_site allocation_site'
+
+
 (* A leaked allocation is one bug however many ways the procedure leaves it behind: the same
    allocation becomes unreachable once per path out of the procedure, and each of those used to
    be logged separately, so a resource used before it is dropped was reported both where it was
@@ -94,8 +105,7 @@ let allocation_site_of_trace (trace : Trace.t) : allocation_site =
    the procedure being analysed and log only the first. This affects logging alone: the state
    [report_summary_error] derives from the diagnostic is computed as before, so no path and no
    other issue changes. *)
-let reported_leak_allocations :
-    (IssueType.t * Diagnostic.resource * allocation_site) list ref DLS.key =
+let reported_leak_allocations : leak_key list ref DLS.key =
   AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
 
 
@@ -110,12 +120,8 @@ let leak_allocation ~latent (diagnostic : Diagnostic.t) =
       None
 
 
-let is_already_reported_leak (issue_type, resource, allocation_site) =
-  DLS.get reported_leak_allocations |> ( ! )
-  |> List.exists ~f:(fun (issue_type', resource', allocation_site') ->
-      IssueType.equal issue_type issue_type'
-      && Diagnostic.equal_resource resource resource'
-      && equal_allocation_site allocation_site allocation_site' )
+let is_already_reported_leak leak =
+  DLS.get reported_leak_allocations |> ( ! ) |> List.exists ~f:(equal_leak_key leak)
 
 
 (* Only an allocation whose report really reached the error log counts as reported. The log keys
@@ -128,17 +134,139 @@ let remember_reported_leak leak =
   reported := leak :: !reported
 
 
+(* A leak report is held back until the procedure has been analysed, instead of being logged where
+   it is produced. The several exits that leak one allocation are summarised one after another and
+   only one of them is reported, and logging as we go means reporting whichever the analysis
+   reached first -- an order that comes from how the disjuncts happen to be laid out, not from
+   anything in the source. The location decides where the warning appears, so it also decides
+   where a suppression comment has to go for the reader: on the exit the order happened to pick,
+   their comment works, and on any other it silently does nothing. Collect the candidates instead
+   and, once the procedure is done, report the one at the EARLIEST exit. *)
+type deferred_leak =
+  { leak: leak_key
+  ; location: Location.t
+  ; issue_type: IssueType.t
+  ; message: string
+  ; node: Procdesc.Node.t option
+  ; emit: unit -> bool }
+
+let deferred_leaks : deferred_leak list ref DLS.key =
+  AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
+
+
+(* Earliest by file, then line, then column: [Location] compares in that order, so the choice
+   depends only on where the exits are written and not on the order they were analysed in. *)
+let compare_by_location {location= l1} {location= l2} = Location.compare l1 l2
+
+(* One candidate is held per allocation and message, not one per way out.
+
+   A procedure can leave an allocation behind on as many paths as it has disjuncts, and holding
+   every one of them would make what is retained grow with the analysis rather than with the
+   procedure's text -- each candidate keeps a message, a trace and the closure that files them.
+   Dropping all but one of the candidates that would land on the same entry is not a choice about
+   which report to make, and it is worth being exact about why. The error log keys an entry on
+   three things: the severity, the issue type and the description. The severity is the issue
+   type's own, nothing here passing an override. The description is built from the message AND a
+   suggestion -- but the equality the log uses compares neither the suggestion nor anything else,
+   only the descriptions, which for a verbatim description are the message alone. And even were
+   the suggestion compared, a leak's suggestion is a function of its resource, and the resource is
+   part of the key these candidates already share. So two candidates of one allocation with the
+   same issue type and message land on the same entry: either both reach the log or neither does.
+   The later one is kept only to be tried after the earlier fails, and it would fail in the same
+   way, so keeping the earlier alone reports exactly what keeping both would.
+
+   That rests on two independent facts and it takes BOTH of them failing to break it: a
+   description that compared more than the message, AND something in that extra part that can
+   differ between two ways out of one allocation -- a suggestion that depended on the path rather
+   than on the resource, say. A candidate dropped here could then have been recorded where the one
+   kept was not, and the finding would be lost.
+
+   What survives is one candidate per distinct message, so the number held is bounded by how many
+   different things the procedure can say about one allocation, not by how many paths it has. *)
+let defer_leak deferred =
+  let deferred_leaks = DLS.get deferred_leaks in
+  (* The issue type as it will be logged, not the one in the key: they agree for a leak, but it
+     is what the log compares that decides whether two candidates are interchangeable. *)
+  let lands_on_the_same_entry other =
+    equal_leak_key deferred.leak other.leak
+    && IssueType.equal deferred.issue_type other.issue_type
+    && String.equal deferred.message other.message
+  in
+  (* Tail-recursive, and [rev_append] puts the prefix back in order. *)
+  let rec replace prefix = function
+    | [] ->
+        None
+    | other :: rest when lands_on_the_same_entry other ->
+        (* Strictly earlier, so that candidates at one location keep the order they arrived in,
+           which is what the stable sort below would have done with them. *)
+        let keep =
+          if Location.compare deferred.location other.location < 0 then deferred else other
+        in
+        Some (List.rev_append prefix (keep :: rest))
+    | other :: rest ->
+        replace (other :: prefix) rest
+  in
+  match replace [] !deferred_leaks with
+  | Some candidates ->
+      deferred_leaks := candidates
+  | None ->
+      deferred_leaks := deferred :: !deferred_leaks
+
+
+let flush_deferred_leaks () =
+  let deferred = DLS.get deferred_leaks in
+  let candidates = List.rev !deferred in
+  deferred := [] ;
+  (* Same allocation, several exits: a group is one finding, its members are the places that
+     finding could be reported at. [Diagnostic.resource] has no comparison, only equality, so the
+     grouping is by equality rather than by sorting on the key. The groups are few and small. *)
+  let rec group_by_allocation groups = function
+    | [] ->
+        List.rev groups
+    | ({leak} as deferred) :: rest ->
+        let same, others = List.partition_tf rest ~f:(fun d -> equal_leak_key leak d.leak) in
+        let group = List.stable_sort (deferred :: same) ~compare:compare_by_location in
+        group_by_allocation (group :: groups) others
+  in
+  (* The groups are ordered by where they will be reported, so that two findings whose messages
+     turn out to read the same are resolved the same way however the analysis reached them. *)
+  group_by_allocation [] candidates
+  |> List.stable_sort ~compare:(fun g1 g2 ->
+      match (g1, g2) with d1 :: _, d2 :: _ -> compare_by_location d1 d2 | _ -> 0 )
+  |> List.iter ~f:(fun group ->
+      match group with
+      | [] ->
+          ()
+      | {leak} :: _ when is_already_reported_leak leak ->
+          (* Reported by an earlier analysis of this procedure, for another specialization. *)
+          L.d_printfln "Not reporting this leak again: its allocation is already reported here"
+      | _ :: _ ->
+          (* The earliest exit first, and the next one if that report does not reach the log:
+                it can be filtered out, or read exactly like an entry that is already there, and
+                a finding must not be lost because the place we chose to report it was taken. *)
+          let saved_node = AnalysisState.get_node () in
+          Fun.protect
+            ~finally:(fun () -> AnalysisState.set_node_opt saved_node)
+            (fun () ->
+              List.find group ~f:(fun {node; emit} ->
+                  (* [Reporting] stamps an issue with the "last node seen", which by now is the
+                        end of the procedure rather than the exit this report is about. *)
+                  AnalysisState.set_node_opt node ;
+                  emit () )
+              |> Option.iter ~f:(fun {leak} -> remember_reported_leak leak) ) )
+
+
 let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~latent
     ?location_override ?extra_trace ?reachable_from (diagnostic : Diagnostic.t) =
   let open Diagnostic in
   let is_hidden = is_suppressed && not Config.pulse_report_issues_for_tests in
   (* Which allocation a leak is about is asked only where the answer can be used: a hidden
      diagnostic is dropped on the next line, and reading its chain of calls would be work done
-     for nobody. *)
+     for nobody. The allocations already reported are not consulted here any more: a leak is held
+     back to the end of the procedure, so that question is asked of the whole group, in
+     [flush_deferred_leaks]. *)
   let leak = if is_hidden then None else leak_allocation ~latent diagnostic in
   if is_hidden then ()
-  else if Option.exists leak ~f:is_already_reported_leak then
-    L.d_printfln "Not reporting this leak again: its allocation is already reported here"
   else
     (* Report suppressed issues with a message to distinguish them from non-suppressed issues.
        Useful for infer's tests. *)
@@ -292,12 +420,18 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
             ~pp_immediate:(fun fmt -> F.fprintf fmt "original issue trace starts here")
             extra_trace ltr )
     in
-    L.d_printfln ~color:Red "Reporting issue: %a: %s" IssueType.pp issue_type message ;
-    let recorded =
+    let emit () =
+      L.d_printfln ~color:Red "Reporting issue: %a: %s" IssueType.pp issue_type message ;
       Reporting.log_issue_recorded proc_desc err_log ~loc ?loc_instantiated ~ltr ~extras ~autofix
         ?suggestion Pulse issue_type message
     in
-    if recorded then Option.iter leak ~f:remember_reported_leak
+    match leak with
+    | Some leak ->
+        L.d_printfln "Holding this leak back until the procedure is done: %a at %a" IssueType.pp
+          issue_type Location.pp loc ;
+        defer_leak {leak; location= loc; issue_type; message; node= AnalysisState.get_node (); emit}
+    | None ->
+        emit () |> ignore
 
 
 let report analysis_data ~is_suppressed ~latent diagnostic =
@@ -358,6 +492,7 @@ let with_specialization analysis_data specialization ~f =
       match f () with
       | result ->
           if scope.exposed then List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
+          flush_deferred_leaks () ;
           result
       | exception exn ->
           (* Same condition as the completed path. An analysis can be abandoned for a reason that
@@ -369,6 +504,9 @@ let with_specialization analysis_data specialization ~f =
              either. *)
           let backtrace = Stdlib.Printexc.get_raw_backtrace () in
           if scope.exposed then List.iter scope.pending ~f:(report_conditional_origin analysis_data) ;
+          (* An abandoned analysis must not report what a finished one would not have; the leaks
+             held back by a scope that never completed are dropped with it. *)
+          DLS.get deferred_leaks := [] ;
           Stdlib.Printexc.raise_with_backtrace exn backtrace )
 
 
