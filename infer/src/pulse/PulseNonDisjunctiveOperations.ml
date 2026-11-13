@@ -921,9 +921,18 @@ let init_const_refable_parameters procdesc integer_type_widths tenv astates asta
 
 
 (* [UnsafeMemory] is legit here as we are going to normalize all the values we need *)
+let is_string_model_flag = function
+  | Access.FieldAccess field ->
+      Fieldname.equal field PulseOperations.ModeledField.string_contents_unknown
+  | _ ->
+      false
+
+
 let is_matching_edges ~get_repr ~edges_curr ~edges_orig =
   Option.value_map edges_orig ~default:true ~f:(fun edges_orig ->
       UnsafeMemory.Edges.for_all edges_curr ~f:(fun (access_curr, (addr_curr, _)) ->
+          is_string_model_flag access_curr
+          ||
           match UnsafeMemory.Edges.find_opt access_curr edges_orig with
           | Some (addr_orig, _) ->
               (* check matching for the addresses on the copy and the current heap. *)
@@ -979,7 +988,8 @@ let is_modified_since_detected addr ~is_param ~get_repr ~current_heap astate ~co
                 if explore_successors then
                   UnsafeMemory.Edges.fold edges_curr ~init:addr_to_explore
                     ~f:(fun acc (access, (addr, _)) ->
-                      (addr, not (is_weak_ptr_field access)) :: acc )
+                      if is_string_model_flag access then acc
+                      else (addr, not (is_weak_ptr_field access)) :: acc )
                 else addr_to_explore
               in
               aux ~addr_to_explore ~visited )

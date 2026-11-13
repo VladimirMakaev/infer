@@ -1526,6 +1526,13 @@ module PulseTransferFunctions = struct
       | OCamlModel (model, callee_procname) ->
           L.d_printfln "Found ocaml model for call@\n" ;
           let astate =
+            if
+              Language.curr_language_is Clang
+              && not (PulseModelsCpp.preserves_string_proofs tenv callee_procname)
+            then AbductiveDomain.declare_unknown_values astate
+            else astate
+          in
+          let astate =
             let arg_values =
               List.map func_args ~f:(fun {FuncArg.arg_payload= value} -> ValueOrigin.value value)
             in

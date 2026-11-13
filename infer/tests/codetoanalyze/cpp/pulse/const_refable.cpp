@@ -298,8 +298,8 @@ void modify_string_ok(std::string s) {
   *p = 'a';
 }
 
-// currently the model semantics cannot follow the pointer arithmetics precisely
-void modify_string2_ok_FP(std::string s) {
+// Writes through character offsets mutate the string parameter.
+void modify_string2_ok(std::string s) {
   char* p = &s[3];
   *p = 'a';
 }

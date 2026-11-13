@@ -772,7 +772,23 @@ and procname_from_decl ?tenv ?block_return_type ?outer_proc meth_decl =
 
 and get_struct_methods struct_decl tenv =
   let open Clang_ast_t in
-  List.filter_map (get_struct_decls struct_decl) ~f:(fun decl ->
+  let decls =
+    List.concat_map (get_struct_decls struct_decl) ~f:(function
+      | FunctionTemplateDecl (_, _, {tdi_specializations}) ->
+          (* Generic call operators are translated from their instantiations, which are
+               absent from the record's direct method declarations. Keep those same methods
+               available to callable resolution; do not invent an uninstantiated signature. *)
+          List.filter tdi_specializations ~f:(function
+            | CXXMethodDecl (_, {ni_name}, _, _, _) ->
+                String.equal
+                  (String.lsplit2 ni_name ~on:'<' |> Option.value_map ~default:ni_name ~f:fst)
+                  "operator()"
+            | _ ->
+                false )
+      | decl ->
+          [decl] )
+  in
+  List.filter_map decls ~f:(fun decl ->
       match decl with
       | FunctionDecl _
       | CXXMethodDecl _

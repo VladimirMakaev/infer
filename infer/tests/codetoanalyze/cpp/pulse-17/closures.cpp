@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-void generic_lambda_ok_FP() {
+void generic_lambda_ok() {
   int x = 1;
   [&](auto y) { x += y; }(3);
   if (x != 4) {

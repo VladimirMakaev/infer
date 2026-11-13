@@ -173,13 +173,19 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
         ()
 
 
-  let process_one_method_decl ~inside_cpp_lambda_expr ~loc_instantiated trans_unit_ctx tenv cfg
+  let rec process_one_method_decl ~inside_cpp_lambda_expr ~loc_instantiated trans_unit_ctx tenv cfg
       curr_class dec =
     let open Clang_ast_t in
     match dec with
     | CXXMethodDecl _ | CXXConstructorDecl _ | CXXConversionDecl _ ->
         process_method_decl ~inside_cpp_lambda_expr ?loc_instantiated trans_unit_ctx tenv cfg
           curr_class dec
+    | FunctionTemplateDecl (_, _, {tdi_specializations}) ->
+        if inside_cpp_lambda_expr then
+          List.iter tdi_specializations
+            ~f:
+              (process_one_method_decl ~inside_cpp_lambda_expr ~loc_instantiated trans_unit_ctx tenv
+                 cfg curr_class )
     | CXXDestructorDecl _ ->
         process_method_decl ?loc_instantiated trans_unit_ctx tenv cfg curr_class dec
           ~is_destructor:true
@@ -212,7 +218,6 @@ module CFrontend_decl_funct (T : CModule_type.CTranslation) : CModule_type.CFron
     | FriendDecl _
     | FriendTemplateDecl _
     | FunctionDecl _
-    | FunctionTemplateDecl _
     | HLSLBufferDecl _
     | HLSLRootSignatureDecl _
     | ImplicitConceptSpecializationDecl _

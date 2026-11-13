@@ -378,10 +378,31 @@ let get_procname_from_cpp_lambda context dec captured_vars =
   match dec with
   | Clang_ast_t.CXXRecordDecl (_, _, _, _, _, _, _, cxx_rdi) -> (
     match cxx_rdi.xrdi_lambda_call_operator with
-    | Some dr ->
+    | Some dr -> (
         let name_info, decl_ptr, _ = CAst_utils.get_info_from_decl_ref dr in
-        create_procdesc_with_pointer ~is_cpp_lambda_call_operator:true context decl_ptr None
-          name_info.ni_name ~captured_vars
+        let instantiated =
+          let declarations =
+            Clang_ast_proj.get_decl_context_tuple dec |> Option.value_map ~default:[] ~f:fst
+          in
+          List.concat_map declarations ~f:(function
+            | Clang_ast_t.FunctionTemplateDecl (_, _, {tdi_specializations}) ->
+                List.filter_map tdi_specializations ~f:(function
+                  | Clang_ast_t.CXXMethodDecl (di, ni, _, _, _)
+                    when String.equal ni.ni_name "operator()" ->
+                      Some
+                        (create_procdesc_with_pointer ~is_cpp_lambda_call_operator:true context
+                           di.di_pointer None ni.ni_name ~captured_vars )
+                  | _ ->
+                      None )
+            | _ ->
+                [] )
+        in
+        match instantiated with
+        | [procname] ->
+            procname
+        | _ ->
+            create_procdesc_with_pointer ~is_cpp_lambda_call_operator:true context decl_ptr None
+              name_info.ni_name ~captured_vars )
     | _ ->
         assert false )
   | _ ->

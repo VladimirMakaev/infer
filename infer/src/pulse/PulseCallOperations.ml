@@ -1317,6 +1317,12 @@ let call_as_unknown ?disjunct_limit analysis_data path call_loc callee_pname ~re
 let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analysis_data) path
     call_loc ?unresolved_reason ?(tb_arg_exps : Exp.t list = []) callee_pname ~ret ~actuals
     ~formals_opt call_kind call_flags (astate : AbductiveDomain.t) non_disj_caller =
+  (* An opaque effect may have changed a string even when the callee did not materialize its
+     fields. Withhold old content facts before importing a summary's equality preconditions. *)
+  let astate =
+    if astate.unknown_values then PulseOperations.invalidate_string_contents_proofs astate
+    else astate
+  in
   let has_continue_program results =
     let f one_result =
       match one_result with

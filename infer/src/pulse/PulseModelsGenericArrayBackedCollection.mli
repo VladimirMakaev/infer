@@ -101,6 +101,20 @@ val assign_size_constant :
   -> AbductiveDomain.t PulseOperationResult.t
 
 module Iterator : sig
+  val search_index :
+       AbstractValue.t * ValueHistory.t
+    -> AbductiveDomain.t
+    -> (AbstractValue.t * ValueHistory.t) option
+
+  val record_search_index :
+       AbstractValue.t * ValueHistory.t
+    -> AbstractValue.t * ValueHistory.t
+    -> AbductiveDomain.t
+    -> AbductiveDomain.t
+
+  val forget_search_index :
+    AbstractValue.t * ValueHistory.t -> AbductiveDomain.t -> AbductiveDomain.t
+
   val vector_positions_field : Fieldname.t
 
   val vector_positions :
@@ -135,6 +149,12 @@ module Iterator : sig
     -> AbstractValue.t * ValueHistory.t
     -> AbductiveDomain.t
     -> (AbductiveDomain.t * (AbstractValue.t * ValueHistory.t)) AccessResult.t
+
+  val position_in_range :
+       desc:string
+    -> AbstractValue.t * ValueHistory.t
+    -> (AbstractValue.t * ValueHistory.t) list
+    -> model_no_non_disj
 
   val compare_values :
     [< `Equal | `NotEqual] -> desc:string -> AbstractValue.t -> AbstractValue.t -> model_no_non_disj

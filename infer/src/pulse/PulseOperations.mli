@@ -49,12 +49,19 @@ end
 val pulse_model_type : Typ.name
 (** Struct type name of "__infer_pulse_model" *)
 
+val invalidate_string_contents_proofs : AbductiveDomain.t -> AbductiveDomain.t
+
 module ModeledField : sig
   val string_length : Fieldname.t
   (** Modeled field for string length *)
 
   val internal_string : Fieldname.t
   (** Modeled field for internal string *)
+
+  val string_contents_unknown : Fieldname.t
+  (** Model-only uncertainty after character references escape. *)
+
+  val vector_search_index : Fieldname.t
 
   val internal_ref_count : Fieldname.t
   (** Modeled field for reference_counting *)

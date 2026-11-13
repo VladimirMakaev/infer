@@ -271,7 +271,7 @@ int iterate_copy_of_data_after_scope_ok() {
 }
 
 // operator[] is not tied to the modelled buffer
-char FN_subscript_then_append_bad(std::string& s) {
+char subscript_then_append_bad(std::string& s) {
   const char* p = &s[0];
   s.append(1000, 'x');
   return *p;
@@ -314,7 +314,7 @@ char FN_c_str_then_extract_bad(std::string& s) {
 }
 
 // the iterator returned by cbegin() is not tied to the buffer
-char FN_cbegin_then_append_bad(std::string& s) {
+char cbegin_then_append_bad(std::string& s) {
   auto it = s.cbegin();
   s.append(1000, 'x');
   return *it;
