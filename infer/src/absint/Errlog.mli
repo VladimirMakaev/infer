@@ -50,7 +50,11 @@ type err_data = private
   ; visibility: IssueType.visibility
   ; access: string option
   ; extras: Jsonbug_t.extra option
-  ; autofix: Jsonbug_t.autofix list }
+  ; autofix: Jsonbug_t.autofix list
+  ; dedup_key: string option
+        (** Which finding this entry is about, when several entries can be the same one: entries
+            carrying an equal key are collapsed into one when the report is written. Internal
+            bookkeeping, never written to report.json. *) }
 [@@deriving compare]
 
 (** Type of the error log *)
@@ -91,6 +95,7 @@ val log_issue :
   -> access:string option
   -> extras:Jsonbug_t.extra option
   -> ?autofix:Jsonbug_j.autofix list
+  -> ?dedup_key:string
   -> Checker.t
   -> IssueToReport.t
   -> bool

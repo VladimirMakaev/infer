@@ -527,6 +527,63 @@ let collect_issues proc_name proc_location_opt err_log issues_acc =
     err_log issues_acc
 
 
+(* Several entries can be the same finding. One procedure is analysed once per specialization,
+   each analysis with its own memory of what it has reported, so a leak can be described by more
+   than one of them, at a different way out each time; the error log keys an entry on its message
+   and so cannot tell those apart. An entry that knows which finding it is about carries a
+   [dedup_key], and here, where every procedure's entries have been brought together in one
+   process, the ones that carry an EQUAL key become one.
+
+   Only an equal key merges. Nothing is inferred from how alike two entries look -- same file,
+   nearby lines, similar text -- because two allocations really can sit at one place, and merging
+   those would delete a finding rather than de-duplicate one.
+
+   The survivor is the one at the earliest place, by file then line then column, so that where
+   the warning lands follows the source rather than the order the analyses happened to run in.
+   The tie-break is the entry's own trace, which is stable across runs, so that two entries at one
+   location still resolve the same way every time. *)
+let collapse_same_finding issues =
+  let key_of ({proc_name; err_key; err_data} : Issue.t) =
+    Option.map err_data.Errlog.dedup_key ~f:(fun dedup_key ->
+        ( Procname.to_unique_id proc_name
+        , IssueType.string_of_severity err_key.Errlog.severity
+        , err_key.Errlog.issue_type.IssueType.unique_id
+        , dedup_key ) )
+  in
+  (* Earliest by file, then line, then column, and on a tie [Errlog.compare_err_data]. That is
+     not a comparison of the whole entry: despite the [@@deriving compare] in the interface it
+     is written by hand and reads a flag, comparing locations by default and traces under
+     [--deduplicate-by trace]. Using it is the point. It is the comparison the error log itself
+     orders an entry's data by, so two entries that a log kept apart are apart under it too,
+     whichever way the flag is set, and nothing is left to the order the analyses of the
+     procedure were merged in -- which, with several workers, is whichever one wrote first.
+     Under the default the tie is in fact unreachable: entries here already agree on the
+     allocation, so two of them at one location also carry one message and one key, and a log
+     holds at most one entry per location for a key. *)
+  let earlier (a : Issue.t) (b : Issue.t) =
+    let c = Location.compare a.err_data.Errlog.loc b.err_data.Errlog.loc in
+    if c <> 0 then c < 0 else Errlog.compare_err_data a.err_data b.err_data <= 0
+  in
+  let best = ref String.Map.empty in
+  let keep_order = ref [] in
+  List.iter issues ~f:(fun issue ->
+      match key_of issue with
+      | None ->
+          keep_order := `Kept issue :: !keep_order
+      | Some (proc, severity, issue_type, dedup_key) -> (
+          let k = Printf.sprintf "%s\000%s\000%s\000%s" proc severity issue_type dedup_key in
+          match Map.find !best k with
+          | Some previous when not (earlier issue previous) ->
+              ()
+          | Some _ ->
+              best := Map.set !best ~key:k ~data:issue
+          | None ->
+              best := Map.set !best ~key:k ~data:issue ;
+              keep_order := `Merged k :: !keep_order ) ) ;
+  List.rev !keep_order
+  |> List.filter_map ~f:(function `Kept issue -> Some issue | `Merged k -> Map.find !best k)
+
+
 let write_costs =
   let sil_regexp = lazy (Str.regexp ".*.sil.*") in
   fun proc_name loc cost_opt (outfile : Utils.outfile) ->
@@ -587,7 +644,7 @@ let process_all_summaries_and_issues ~issues_outf ~costs_outf ~config_impact_out
           ~error_filter:(mk_error_filter filters proc_name)
           ~proc_name ~proc_location_opt ~err_key ~err_data )
   in
-  let all_issues = Issue.sort_filter_issues reportable_issues in
+  let all_issues = Issue.sort_filter_issues (collapse_same_finding reportable_issues) in
   let n_issues = List.length all_issues in
   StatsLogging.log_count ~label:"reports_unfiltered" ~value:n_issues ;
   List.iter all_issues ~f:(fun {Issue.proc_name; proc_location_opt; err_key; err_data} ->
