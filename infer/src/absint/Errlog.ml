@@ -67,7 +67,7 @@ type err_data =
   ; access: string option
   ; extras: Jsonbug_t.extra option (* NOTE: Please consider adding new fields as part of extras *)
   ; autofix: Jsonbug_t.autofix list
-  ; dedup_key: string option
+  ; dedup_key: string list option
         (* Which finding this entry is about, when several entries can be the same one. Reporting
            is per analysis, and one procedure is analysed once per specialization, so a finding
            the analyses describe differently -- a leak reported at a different way out each time
