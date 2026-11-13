@@ -71,7 +71,11 @@ type t =
         (** whether the procedure brace-initializes a value of a type that is not modeled, e.g. a
             vector *)
   ; has_atomic_expression: bool ref
-        (** whether an atomic expression was translated, even if its node merged into a parent *) }
+        (** whether an atomic expression was translated, even if its node merged into a parent *)
+  ; mutable omp_private_copies: Pvar.t IInt.Map.t
+        (** inside an OpenMP region, the region-local copy standing in for a variable named by a
+            [private] or [firstprivate] clause, keyed on the clang pointer of its original
+            declaration *) }
 
 val get_curr_class : t -> curr_class
 
