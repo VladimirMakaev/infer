@@ -66,7 +66,16 @@ type err_data =
   ; visibility: IssueType.visibility
   ; access: string option
   ; extras: Jsonbug_t.extra option (* NOTE: Please consider adding new fields as part of extras *)
-  ; autofix: Jsonbug_t.autofix list }
+  ; autofix: Jsonbug_t.autofix list
+  ; dedup_key: string option
+        (* Which finding this entry is about, when several entries can be the same one. Reporting
+           is per analysis, and one procedure is analysed once per specialization, so a finding
+           the analyses describe differently -- a leak reported at a different way out each time
+           -- reaches the log as several entries that the log cannot tell are one, because it
+           keys an entry on its message. Entries that carry an equal key are collapsed when the
+           report is written. This field is deliberately NOT part of [extras]: it is internal
+           bookkeeping and is never written to report.json. *)
+  }
 
 let compare_err_data =
   let compare_err_data_by_location err_data1 err_data2 =
@@ -188,7 +197,7 @@ let update errlog_old errlog_new =
 
 
 let log_issue ?severity_override err_log ~loc ~node ~session ~ltr ~access ~extras ?(autofix = [])
-    checker (error : IssueToReport.t) =
+    ?dedup_key checker (error : IssueToReport.t) =
   if not (IssueType.checker_can_report checker error.issue_type) then
     L.die InternalError
       "Issue type \"%s\" cannot be reported by the checker \"%s\". The only checker that is \
@@ -235,7 +244,8 @@ let log_issue ?severity_override err_log ~loc ~node ~session ~ltr ~access ~extra
         ; visibility= error.issue_type.visibility
         ; access
         ; extras
-        ; autofix }
+        ; autofix
+        ; dedup_key }
       in
       let err_key = {severity; issue_type= error.issue_type; err_desc= error.description} in
       add_issue err_log err_key (ErrDataSet.singleton err_data)
