@@ -957,6 +957,21 @@ module Internal = struct
             in
             let astate =
               match (access : Access.t) with
+              | Dereference ->
+                  (* the pointer was copied away, not what it points at *)
+                  astate
+              | FieldAccess _ | ArrayAccess _ ->
+                  (* a copy of the whole object copied each of its parts, so a write over just
+                     one part may not conclude its memory is leaked either *)
+                  let copied_away =
+                    SafeAttributes.find_opt `Post addr_src astate
+                    |> Option.exists ~f:Attributes.is_copied_somewhere_unseen
+                  in
+                  if copied_away then SafeAttributes.add_one addr_dst CopiedSomewhereUnseen astate
+                  else astate
+            in
+            let astate =
+              match (access : Access.t) with
               | FieldAccess _ | ArrayAccess _ ->
                   (* Offsets name cells within the same object. Computing their addresses does not
                      read the contents, but a later dereference must retain initialization checks.
@@ -2565,44 +2580,125 @@ let transfer_ownership x astate =
   {astate with post= PostDomain.update ~attrs astate.post}
 
 
-let overwrite_contents ?(havoc_filter = fun _ -> true) hist x astate =
-  let rec visit ((visited, old_values, astate) as acc) addr =
+let is_copied_somewhere_unseen addr astate =
+  SafeAttributes.find_opt `Post addr astate
+  |> Option.exists ~f:Attributes.is_copied_somewhere_unseen
+
+
+(** the type of what lies at [access] inside [typ], or [None] when [typ] does not account for that
+    access at all. A copy writes exactly one [typ]; the destination it is written over may be a
+    bigger object, so the heap below the destination reaches cells the copy never touched. *)
+let typ_under tenv typ (access : BaseMemory.Access.t) =
+  match (access, typ.Typ.desc) with
+  | FieldAccess field, Tstruct name ->
+      Tenv.lookup tenv name
+      |> Option.bind ~f:(fun {Struct.fields} ->
+          List.find_map fields ~f:(fun {Struct.name= f; typ= field_typ} ->
+              if Fieldname.equal f field then Some field_typ else None ) )
+  | ArrayAccess _, Tarray {elt} ->
+      Some elt
+  | _, _ ->
+      (* a field the copied type does not have, or an element of something it does not say is
+         an array: the destination is wider than the copy, so this is outside the write *)
+      None
+
+
+let overwrite_contents ?(havoc_filter = fun _ -> true) ?keep_allocations_within hist x astate =
+  (* [written] is the part of [old_values] the copy provably covered: a cell the copied type
+     accounts for. Everything else loses its allocation as it always did. *)
+  let rec visit ((visited, old_values, written, copied_away, astate) as acc) (addr, typ_opt) =
     if CanonValue.Set.mem addr visited then acc
     else
+      let copied_away = copied_away || is_copied_somewhere_unseen addr astate in
       let astate =
         SafeAttributes.map_post_attrs astate ~f:(fun attrs ->
             BaseAddressAttributes.add_one addr (ContentsOverwritten hist) attrs
             |> BaseAddressAttributes.initialize addr )
       in
       SafeMemory.fold_edges `Post addr astate
-        ~init:(CanonValue.Set.add addr visited, old_values, astate)
-        ~f:(fun ((visited, old_values, astate) as acc) (access, (dest, _)) ->
+        ~init:(CanonValue.Set.add addr visited, old_values, written, copied_away, astate)
+        ~f:(fun ((visited, old_values, written, copied_away, astate) as acc) (access, (dest, _)) ->
           match (access : BaseMemory.Access.t) with
           | Dereference ->
               if havoc_filter (downcast addr) then
+                let covered =
+                  match typ_opt with
+                  | Some {Typ.desc= Tint _ | Tfloat _ | Tptr _} ->
+                      true
+                  | Some _ | None ->
+                      false
+                in
                 ( visited
                 , CanonValue.Set.add dest old_values
+                , (if covered then CanonValue.Set.add dest written else written)
+                , copied_away
                 , SafeMemory.map_post_heap astate
                     ~f:(BaseMemory.add_edge addr access (AbstractValue.mk_fresh (), hist)) )
               else acc
           | FieldAccess _ | ArrayAccess _ ->
+              let typ_under_opt =
+                match (keep_allocations_within, typ_opt) with
+                | Some (tenv, _), Some typ ->
+                    typ_under tenv typ access
+                | _, _ ->
+                    None
+              in
+              visit acc (dest, typ_under_opt) )
+  in
+  let root_typ = Option.map keep_allocations_within ~f:snd in
+  let _, old_values, written, copied_away, astate =
+    visit
+      (CanonValue.Set.empty, CanonValue.Set.empty, CanonValue.Set.empty, false, astate)
+      (CanonValue.canon' astate x, root_typ)
+  in
+  (* the cells may be outside of the bytes actually written, eg after a header: like after
+     unknown calls, the memory that their old values own is not reported as leaked. A caller that
+     knows it writes a whole [typ] passes [keep_allocations_within], and then the cells that type
+     accounts for keep theirs -- but not if a copy took the object somewhere this analysis cannot
+     see, because then that copy may be what owns the memory. *)
+  let give_up =
+    if copied_away || Option.is_none keep_allocations_within then old_values
+    else CanonValue.Set.diff old_values written
+  in
+  if CanonValue.Set.is_empty give_up then astate
+  else
+    let post = (astate.post :> BaseDomain.t) in
+    let attrs =
+      GraphVisit.fold_from_addresses (CanonValue.Set.to_seq give_up) astate `Post ~init:post.attrs
+        ~already_visited:CanonValue.Set.empty
+        ~f:(fun attrs addr _ -> Continue (BaseAddressAttributes.remove_allocation_attr addr attrs))
+        ~finish:Fn.id
+      |> snd
+    in
+    {astate with post= PostDomain.update ~attrs astate.post}
+
+
+(** [x] is the address of an object a copy read out wholesale into a destination that got unknown
+    contents: nothing records that the copy holds what the object held. Marking the ADDRESS, not the
+    values in its cells, is what makes this survive a summary -- a copy helper never reads the
+    source's fields, so in its summary the source has no cells to mark, while its address is a value
+    the pre already mentions and the caller translates. Mark rather than drop the allocations: the
+    object may still be leaked through [x] itself, and dropping would lose that. *)
+let mark_copied_unseen x astate =
+  (* the sub-objects that already exist have to be marked here and now: the lazy propagation in
+     [eval_edge] only fires when an edge is CREATED, so it covers the parts materialised after
+     this point -- including at a caller applying a copy helper's summary, where the source has
+     no parts yet -- but not the ones a field write already brought into being. *)
+  let rec visit (visited, astate) addr =
+    if CanonValue.Set.mem addr visited then (visited, astate)
+    else
+      let astate = SafeAttributes.add_one addr CopiedSomewhereUnseen astate in
+      SafeMemory.fold_edges `Post addr astate
+        ~init:(CanonValue.Set.add addr visited, astate)
+        ~f:(fun acc (access, (dest, _)) ->
+          match (access : BaseMemory.Access.t) with
+          | Dereference ->
+              (* the pointer was copied away, not what it points at *)
+              acc
+          | FieldAccess _ | ArrayAccess _ ->
               visit acc dest )
   in
-  let _, old_values, astate =
-    visit (CanonValue.Set.empty, CanonValue.Set.empty, astate) (CanonValue.canon' astate x)
-  in
-  (* the cells may be outside of the bytes actually written, eg after a header: like after unknown
-     calls, the memory that their old values own is not reported as leaked *)
-  let post = (astate.post :> BaseDomain.t) in
-  let attrs =
-    GraphVisit.fold_from_addresses
-      (CanonValue.Set.to_seq old_values)
-      astate `Post ~init:post.attrs ~already_visited:CanonValue.Set.empty
-      ~f:(fun attrs addr _ -> Continue (BaseAddressAttributes.remove_allocation_attr addr attrs))
-      ~finish:Fn.id
-    |> snd
-  in
-  {astate with post= PostDomain.update ~attrs astate.post}
+  snd (visit (CanonValue.Set.empty, astate) (CanonValue.canon' astate x))
 
 
 let add_need_dynamic_type_specialization receiver_addr astate =
