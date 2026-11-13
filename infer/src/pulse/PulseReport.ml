@@ -142,10 +142,35 @@ let dedup_key_of_leak ((issue_type, resource, {calls; allocation}) : leak_key) =
     F.fprintf fmt "%a:%d:%d" SourceFile.pp file line col
   in
   let location location = F.asprintf "%a" pp_location location in
+  (* A call is named by what kind of thing it is as well as by which one. Printing alone does not
+     tell the kinds apart: a model and a procedure taking its name both come out as "`x`
+     (modelled)", so a model named after something a procedure name spells would be the same call
+     here and two findings would become one. The name is the procedure's unique id rather than its
+     printed form, for the same reason. *)
+  let call_kind_and_name (call : CallEvent.t) =
+    match call with
+    | Call proc_name ->
+        ("call", Procname.to_unique_id proc_name)
+    | Model model ->
+        ("model", model)
+    | ModelName proc_name ->
+        ("model-name", Procname.to_unique_id proc_name)
+    | SkippedKnownCall (proc_name, NoSummary) ->
+        ("skipped-no-summary", Procname.to_unique_id proc_name)
+    | SkippedKnownCall (proc_name, ArityMismatch) ->
+        ("skipped-arity-mismatch", Procname.to_unique_id proc_name)
+    | SkippedKnownCall (proc_name, SummaryNotApplicable) ->
+        ("skipped-summary-not-applicable", Procname.to_unique_id proc_name)
+    | SkippedKnownCall (proc_name, ForceContinue) ->
+        ("skipped-force-continue", Procname.to_unique_id proc_name)
+    | SkippedUnknownCall call_exp ->
+        ("unknown", F.asprintf "%a" Exp.pp call_exp)
+  in
   issue_type.IssueType.unique_id
   :: F.asprintf "%a" pp_resource resource
-  :: List.concat_map calls ~f:(fun (f, call_location) ->
-      [F.asprintf "%a" CallEvent.pp f; location call_location] )
+  :: List.concat_map calls ~f:(fun (call, call_location) ->
+      let kind, name = call_kind_and_name call in
+      [kind; name; location call_location] )
   @ [location allocation]
 
 
