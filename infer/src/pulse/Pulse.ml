@@ -538,23 +538,52 @@ let report_unnecessary_copies ?(intermediates_only = false)
                PulseReport.report analysis_data ~is_suppressed ~latent:false diagnostic ) )
 
 
+(* A method that overrides a virtual one does not get to choose its parameter types: the
+   declaration it overrides fixes them, so passing a parameter by const reference instead would
+   mean changing the base and every other implementation and caller along with it. The advice
+   cannot be taken where it would be reported, so do not report it there. A virtual method that
+   overrides nothing keeps its report: whoever wrote that declaration owns its signature.
+
+   [override_exists] walks up to the supertypes and matches on the whole signature rather than on
+   the method name, so an ordinary overload that merely shares a name with an inherited method is
+   still reported. It can only see supertypes the type environment has: when a base class was not
+   captured this finds nothing and the report stays, which costs a false positive rather than a
+   true one. *)
+let overrides_a_virtual tenv proc_desc =
+  (* A static member function cannot override anything: clang rejects one that tries. Sharing a
+     name and parameter types with a base method only hides it, so such a declaration still owns
+     its signature and keeps its report. The cheap test goes first, as the other walks the
+     supertypes. *)
+  ClangMethodKind.equal (Procdesc.get_attributes proc_desc).ProcAttributes.clang_method_kind
+    ClangMethodKind.CPP_INSTANCE
+  && PatternMatch.override_exists ~check_current_type:false
+       (fun _ -> true)
+       tenv
+       (Procdesc.get_proc_name proc_desc)
+
+
 let report_unnecessary_parameter_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
     non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
   if is_not_implicit_or_copy_ctor_assignment pname then
-    PulseNonDisjunctiveDomain.get_const_refable_parameters non_disj_astate
-    |> List.iter ~f:(fun (param, typ, location) ->
-        if is_type_copiable tenv typ then
-          let diagnostic =
-            if Typ.is_shared_pointer typ then
-              if NonDisjDomain.is_lifetime_extended param non_disj_astate then None
-              else
-                let used_locations = NonDisjDomain.get_loaded_locations param non_disj_astate in
-                Some (Diagnostic.ReadonlySharedPtrParameter {param; typ; location; used_locations})
-            else Some (Diagnostic.ConstRefableParameter {param; typ; location})
-          in
-          Option.iter diagnostic ~f:(fun diagnostic ->
-              PulseReport.report analysis_data ~is_suppressed:false ~latent:false diagnostic ) )
+    let const_refable_parameters =
+      PulseNonDisjunctiveDomain.get_const_refable_parameters non_disj_astate
+    in
+    (* checked only once a parameter is eligible, since it walks the supertypes *)
+    if (not (List.is_empty const_refable_parameters)) && not (overrides_a_virtual tenv proc_desc)
+    then
+      List.iter const_refable_parameters ~f:(fun (param, typ, location) ->
+          if is_type_copiable tenv typ then
+            let diagnostic =
+              if Typ.is_shared_pointer typ then
+                if NonDisjDomain.is_lifetime_extended param non_disj_astate then None
+                else
+                  let used_locations = NonDisjDomain.get_loaded_locations param non_disj_astate in
+                  Some (Diagnostic.ReadonlySharedPtrParameter {param; typ; location; used_locations})
+              else Some (Diagnostic.ConstRefableParameter {param; typ; location})
+            in
+            Option.iter diagnostic ~f:(fun diagnostic ->
+                PulseReport.report analysis_data ~is_suppressed:false ~latent:false diagnostic ) )
 
 
 let heap_size () = (Gc.quick_stat ()).heap_words
