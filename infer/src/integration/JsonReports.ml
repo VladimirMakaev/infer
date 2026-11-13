@@ -557,25 +557,31 @@ let collapse_same_finding issues =
         , err_key.Errlog.issue_type.IssueType.unique_id
         , dedup_key ) )
   in
-  (* Earliest by file, then line, then column; then the trace; then the rest of what the entry
-     puts in the report. [Errlog.compare_err_data] is no use here: despite the [@@deriving
-     compare] in the interface it is written by hand and reads a flag, comparing only the
-     location by default, which this point has already found equal. The fields below are every
-     one [JsonIssuePrinter] reads out of an entry, so two entries this leaves equal are written
-     out the same and which of them survives cannot be observed. Nothing is left to the order
+  (* Earliest by file, then line, then column; then everything else that is written out about
+     the issue. [Errlog.compare_err_data] is no use here: despite the [@@deriving compare] in
+     the interface it is written by hand and reads a flag, comparing only the location by
+     default, which this point has already found equal.
+
+     What follows covers every argument [JsonIssuePrinter] is given -- the key, which is where
+     the message, the suggestion and the hash come from, the trace, and the rest of the entry --
+     bar the procedure, which these all share. Two entries left equal by it are written out
+     identically, so which of them survives cannot be observed, and nothing depends on the order
      the analyses of the procedure were merged in, which with several workers is whichever one
-     wrote first. *)
-  let printed_fields (issue : Issue.t) =
+     wrote first. The message is compared and not made part of the key: entries that describe
+     one leak at a different way out are exactly what this collapses, and they differ by it. *)
+  let printed_apart (issue : Issue.t) =
     let {Errlog.node_key; loc_in_ml_source; access; extras; autofix; _} = issue.err_data in
-    ( Option.map node_key ~f:Procdesc.NodeKey.to_string
+    ( issue.proc_location_opt
+    , Option.map node_key ~f:Procdesc.NodeKey.to_string
     , loc_in_ml_source
     , access
     , Option.map extras ~f:Jsonbug_j.string_of_extra
     , List.map autofix ~f:Jsonbug_j.string_of_autofix )
   in
-  let compare_printed_fields =
+  let compare_printed_apart =
     [%compare:
-      string option
+      Location.t option
+      * string option
       * (string * int * int * int) option
       * string option
       * string option
@@ -585,8 +591,11 @@ let collapse_same_finding issues =
     let c = Location.compare a.err_data.Errlog.loc b.err_data.Errlog.loc in
     if c <> 0 then c < 0
     else
-      let c = Errlog.compare_loc_trace a.err_data.Errlog.loc_trace b.err_data.Errlog.loc_trace in
-      if c <> 0 then c < 0 else compare_printed_fields (printed_fields a) (printed_fields b) <= 0
+      let c = Errlog.compare_err_key a.err_key b.err_key in
+      if c <> 0 then c < 0
+      else
+        let c = Errlog.compare_loc_trace a.err_data.Errlog.loc_trace b.err_data.Errlog.loc_trace in
+        if c <> 0 then c < 0 else compare_printed_apart (printed_apart a) (printed_apart b) <= 0
   in
   let best = ref SameFinding.empty in
   let keep_order = ref [] in
