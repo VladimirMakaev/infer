@@ -1102,15 +1102,23 @@ include struct
     @@> assign_ret (to_aval dest)
 
 
+  (* [size] names the type of the destination only when it is written as a [sizeof]. Through a
+     [void *] the size is usually a parameter instead, and then the bytes written are still
+     written: the destination gets unknown contents, as it does for [memcpy]. Leaving it alone
+     would keep it uninitialized, which it no longer is. *)
   let fill_object s size value : unit DSL.model_monad =
     check_valid ~must_be_valid_reason:CppStorageOnly s
-    @@> option_iter (single_object_type size) ~f:(fun typ ->
+    @@>
+    match single_object_type size with
+    | None ->
+        overwrite_object ~must_be_valid_reason:CppStorageOnly s None
+    | Some typ ->
         let* {path; analysis_data= {tenv}; location} = get_data in
         exec_command
           (AbductiveDomain.fold_pointer_targets tenv path
              (`Malloc (to_aval s))
              typ location
-             ~f:(fun cell -> AbductiveDomain.Memory.add_edge path cell Dereference value location) ) )
+             ~f:(fun cell -> AbductiveDomain.Memory.add_edge path cell Dereference value location) )
 
 
   let memset s value size : model =
