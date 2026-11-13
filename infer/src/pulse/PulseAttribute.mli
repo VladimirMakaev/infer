@@ -251,6 +251,15 @@ type t =
   | AddressOfAllocatedBlock
       (** A cell address computed within a genuine C allocation, never a stored pointer value.
           Post-only and non-owning. Appended to preserve existing ranks. *)
+  | CopiedSomewhereUnseen
+      (** the object AT this address was read out wholesale by a copy that could not record where it
+          went: a whole-object copy gives its destination unknown contents, so nothing says that
+          copy holds what the object held. A later write over the object may therefore not conclude
+          the memory it owned is leaked, because the copy may be what owns it. On the address rather
+          than on the values in it, so that it survives a summary: a copy helper never reads the
+          source's fields, so there the source has no cells to mark, while its address is a value
+          the pre already mentions. Carries no payload: it only ever suppresses a report, so it
+          never appears in a trace. Appended to preserve existing ranks. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -282,6 +291,8 @@ module Attributes : sig
   val get_allocation : t -> (allocator * Trace.t) option
 
   val is_address_of_allocated_block : t -> bool
+
+  val is_copied_somewhere_unseen : t -> bool
 
   val remove_allocation : t -> t
 
