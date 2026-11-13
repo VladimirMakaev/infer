@@ -247,6 +247,14 @@ the oracle, not a reason to swap the mutants, so the rule that an escaping excep
 violation was added and all three were restored. They are in `mutants.txt` and die on counted
 violations.
 
+## The unbounded half
+
+`lean/` restates one branch of the module in Lean and proves it for all integers and all bounds,
+infinities included, with an axiom whitelist rather than a green build as the acceptance
+criterion. It is a model rather than the code, so its README carries the correspondence table
+and says what the two halves each cover. `./verification/citv/lean/run.sh` runs it; it needs the
+Lean toolchain pinned there and nothing else, and Infer's build does not depend on Lean.
+
 ## What the oracle guarantees, and what it does not
 
 It is worth being exact about where the line falls, because five rounds of review were spent
@@ -296,7 +304,8 @@ done here.
 ## What this does not establish
 
 The window is finite, so a clean run is evidence over the stated bounds and not a proof. The
-companion Lean development carries the unbounded statement for the ordered-comparison fragment.
+Lean development above carries the unbounded statement for the ordered-comparison fragment, but
+only for that fragment, and about a model of the module rather than the module itself.
 
 The oracle covers the **signed, non-pointer** fragment. The real `IntLit` carries a signedness
 tag and a pointerness tag, and its comparison orders a negative signed value and the same bit
