@@ -1,0 +1,42 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# Every mutant that was tried against this oracle and is not in mutants.txt, with the exact text
+# that was applied and the outcome it produced. A mutant that survives, swapped for one that
+# dies, can hide a hole in the oracle; keeping the retired text here means a reader can replay
+# each one byte for byte instead of taking the account in README.md on trust.
+#
+#   ./run.sh --retired
+#
+# applies each line below and requires it to reproduce the recorded outcome, so the record is
+# checked rather than asserted. The fields are tab-separated: name, outcome, the exact source
+# text to find once, and what it was replaced with. A newline inside a field is written \n.
+#
+# The outcomes are:
+#   survived    the oracle found no violation. The entry says why in README.md: every one of
+#               these turned out to be a widening or a genuine improvement, not an oracle gap.
+#   no-compile  the edit does not build, so the oracle never judged it. Not a kill.
+#   killed      a real defect, used for a while as a stand-in and then withdrawn because the
+#               mutant it had replaced was restored.
+#
+# intersection/return-the-left-operand is recorded here as no-compile, which is a correction:
+# the first account of it said it survived. Replaying it showed that `Some a1` leaves both of
+# the names bound by the branch unused, so the edit never builds. Its successor
+# ignore-the-right-operand, written to avoid exactly that, is the one that survived, and it is
+# the one that shows returning the left operand inside the satisfiable branch is sound.
+#
+# rem_by_literal/one-too-wide spent part of its life in mutants.txt under the name
+# rem_by_literal/one-too-narrow. The text, which is what a replay needs, is unchanged.
+#
+abduce_le/drop-the-upper-cut	survived	      let min_u1u2 = Bound.min upper1 upper2 in	      let min_u1u2 = upper1 in
+rem_by_literal/one-too-wide	survived	    let largest = IntLit.sub (if IntLit.gt k IntLit.zero then k else IntLit.neg k) IntLit.one in	    let largest = if IntLit.gt k IntLit.zero then k else IntLit.neg k in
+remove_element/cut-the-wrong-end	survived	      Some (between (Int (IntLit.(add one) l)) upper)	      Some (between (Int (IntLit.(add minus_one) l)) upper)
+intersection/return-the-left-operand	no-compile	      Option.first_some inter1_opt inter2_opt |> Option.value ~default:a1 |> Option.some	      Some a1
+intersection/ignore-the-right-operand	survived	      Option.first_some inter1_opt inter2_opt |> Option.value ~default:a1 |> Option.some	      ignore inter2_opt ; Option.value inter1_opt ~default:a1 |> Option.some
+div_by_literal/allow-the-overflowing-divisor	survived	  if IntLit.iszero k || IntLit.eq k IntLit.minus_one then None	  if IntLit.iszero k then None
+add/lose-the-lower-bound	no-compile	      Some (between (Bound.add lower1 lower2) (Bound.add upper1 upper2))	      Some (between lower1 (Bound.add upper1 upper2))
+remove_element/keep-only-the-upper-side	no-compile	      Some (not_equal_to e)	      Some (between (Int e) PlusInfinity)
+minus/off-by-one	killed	      Some (between (Bound.minus upper) (Bound.minus lower))	      Some (between (Bound.add_int (Bound.minus upper) IntLit.one) (Bound.add_int (Bound.minus lower) IntLit.one))
+add_int/shift-one-too-far	killed	      between (Bound.add_int lower i) (Bound.add_int upper i)	      between (Bound.add_int lower (IntLit.add i IntLit.one)) (Bound.add_int upper (IntLit.add i IntLit.one))

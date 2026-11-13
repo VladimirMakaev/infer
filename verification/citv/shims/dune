@@ -1,0 +1,8 @@
+; Stand-ins for the Infer modules PulseCItv names. Unwrapped so that the module under test
+; compiles unchanged, exactly as it does inside Pulselib.
+(library
+ (name infer_shims)
+ (wrapped false)
+ (libraries zarith yojson)
+ (preprocess
+  (pps ppx_compare ppx_enumerate)))

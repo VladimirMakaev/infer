@@ -1,0 +1,3 @@
+(executable
+ (name oracle)
+ (libraries citv citv_open infer_shims zarith))
