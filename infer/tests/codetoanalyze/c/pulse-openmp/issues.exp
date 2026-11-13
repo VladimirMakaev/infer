@@ -1,0 +1,4 @@
+codetoanalyze/c/pulse-openmp/openmp_clauses.c, c_region_null_deref_bad, 4, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]
+codetoanalyze/c/pulse-openmp/openmp_clauses.c, c_private_write_does_not_escape_bad, 4, PULSE_UNINITIALIZED_VALUE, no_bucket, ERROR, [variable `x` declared here,read to uninitialized value occurs here]
+codetoanalyze/c/pulse-openmp/openmp_clauses.c, c_private_pointer_leaks_bad, 3, MEMORY_LEAK_C, no_bucket, ERROR, [allocation part of the trace starts here,allocated by `malloc` here,memory becomes unreachable here]
+codetoanalyze/c/pulse-openmp/openmp_clauses.c, c_no_pragma_null_deref_bad, 2, NULLPTR_DEREFERENCE, no_bucket, ERROR, [is assigned to the null pointer,assigned,invalid access occurs here]

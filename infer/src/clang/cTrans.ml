@@ -2652,6 +2652,89 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     mk_trans_result (last_or_mk_fresh_void_exp_typ returns) compound_control
 
 
+  (** Translate the body of an OpenMP region where it is written. That models exactly one execution
+      of the region, which says nothing about races but is what the properties checked here are
+      about. The only child of a directive is the captured statement holding the body; the
+      stand-alone directives ([barrier], [flush], [taskwait], ...) have no child and stay no-ops.
+
+      [private] and [firstprivate] give the region its OWN copy of a variable, so a write inside
+      must not reach the original: the body is translated against a fresh local instead.
+      [firstprivate] copies the original into it first, which is also what keeps an assignment to
+      the original before the region live. [shared], [lastprivate] and [reduction] all act on the
+      original variable, which is what translating the body in place already does. *)
+  and ompExecutableDirective_trans trans_state stmt_info stmts omp_info =
+    let {Clang_ast_t.omp_private_vars; omp_firstprivate_vars} = omp_info in
+    let context = trans_state.context in
+    let procdesc = context.CContext.procdesc in
+    let procname = Procdesc.get_proc_name procdesc in
+    let sil_loc =
+      CLocation.location_of_stmt_info context.CContext.translation_unit_context.source_file
+        stmt_info
+    in
+    let region_copy ~copy_in (decl_ref : Clang_ast_t.decl_ref) =
+      match decl_ref.Clang_ast_t.dr_qual_type with
+      | None ->
+          None
+      | Some qual_type ->
+          let typ = CType_decl.qual_type_to_sil_type context.CContext.tenv qual_type in
+          let name =
+            match decl_ref.Clang_ast_t.dr_name with
+            | Some {Clang_ast_t.ni_name} ->
+                ni_name
+            | None ->
+                "var"
+          in
+          (* the original is resolved before the copies are installed, so it is the enclosing
+             variable even when an outer region already privatised the same name *)
+          let original =
+            CVar_decl.sil_var_of_decl_ref context stmt_info.Clang_ast_t.si_source_range decl_ref
+              procname
+          in
+          let copy = CVar_decl.mk_temp_sil_var procdesc ~name:("omp_" ^ name ^ "_") in
+          Procdesc.append_locals procdesc [ProcAttributes.default_var_data copy typ] ;
+          let instrs =
+            if copy_in then
+              let id = Ident.create_fresh Ident.knormal in
+              [ Sil.Load {id; e= Exp.Lvar original; typ; loc= sil_loc}
+              ; Sil.Store {e1= Exp.Lvar copy; e2= Exp.Var id; typ; loc= sil_loc} ]
+            else []
+          in
+          Some (decl_ref.Clang_ast_t.dr_decl_pointer, copy, instrs)
+    in
+    let copies =
+      List.filter_map omp_private_vars ~f:(region_copy ~copy_in:false)
+      @ List.filter_map omp_firstprivate_vars ~f:(region_copy ~copy_in:true)
+    in
+    if List.is_empty copies then compoundStmt_trans trans_state stmts
+    else
+      let saved = context.CContext.omp_private_copies in
+      let with_copies =
+        List.fold copies ~init:saved ~f:(fun acc (pointer, copy, _) ->
+            IInt.Map.add pointer copy acc )
+      in
+      context.CContext.omp_private_copies <- with_copies ;
+      let res_body =
+        Exn.protect
+          ~f:(fun () -> compoundStmt_trans trans_state stmts)
+          ~finally:(fun () -> context.CContext.omp_private_copies <- saved)
+      in
+      let copy_in_instrs = List.concat_map copies ~f:(fun (_, _, instrs) -> instrs) in
+      if List.is_empty copy_in_instrs then res_body
+      else if List.is_empty res_body.control.root_nodes then
+        (* the body made no node of its own, so its instructions are still pending and the
+           copy-in simply goes in front of them *)
+        { res_body with
+          control= {res_body.control with instrs= copy_in_instrs @ res_body.control.instrs} }
+      else
+        (* the copy-in has to run before the body, so it gets a node of its own in front of it *)
+        let copy_in_node =
+          Procdesc.create_node procdesc sil_loc (Procdesc.Node.Stmt_node Procdesc.Node.CompoundStmt)
+            copy_in_instrs
+        in
+        Procdesc.node_set_succs procdesc copy_in_node ~normal:res_body.control.root_nodes ~exn:[] ;
+        {res_body with control= {res_body.control with root_nodes= [copy_in_node]}}
+
+
   (** Translate a sub-statement whose parent only links its root nodes, e.g. a branch of an [if]:
       like a statement of a compound statement, the instructions it leaves pending get a node of
       their own, and when it has no node it continues to [trans_state.succ_nodes]. *)
@@ -6539,11 +6622,99 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `CoawaitExpr (stmt_info, operand :: _, expr_info)
     | `CoyieldExpr (stmt_info, operand :: _, expr_info) ->
         coroutineSuspendExpr_trans trans_state stmt_info expr_info operand
+    | `CapturedStmt (_, _, {csi_body}) -> (
+      (* the children of a captured statement are its capture initialisers, which are not
+         evaluated here: inside the body a captured variable is still a reference to the
+         enclosing function's own declaration, so translating the body in place is enough *)
+      match csi_body with
+      | Some body ->
+          instruction trans_state body
+      | None ->
+          no_op_trans trans_state.succ_nodes )
+    | `OMPCanonicalLoop (_, stmts) ->
+        (* not a directive: the loop that a loop-transforming directive is applied to *)
+        compoundStmt_trans trans_state stmts
+    | `OMPAssumeDirective (stmt_info, stmts, omp_info)
+    | `OMPAtomicDirective (stmt_info, stmts, omp_info)
+    | `OMPBarrierDirective (stmt_info, stmts, omp_info)
+    | `OMPCancelDirective (stmt_info, stmts, omp_info)
+    | `OMPCancellationPointDirective (stmt_info, stmts, omp_info)
+    | `OMPCriticalDirective (stmt_info, stmts, omp_info)
+    | `OMPDepobjDirective (stmt_info, stmts, omp_info)
+    | `OMPDispatchDirective (stmt_info, stmts, omp_info)
+    | `OMPDistributeDirective (stmt_info, stmts, omp_info)
+    | `OMPDistributeParallelForDirective (stmt_info, stmts, omp_info)
+    | `OMPDistributeParallelForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPDistributeSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPErrorDirective (stmt_info, stmts, omp_info)
+    | `OMPFlushDirective (stmt_info, stmts, omp_info)
+    | `OMPForDirective (stmt_info, stmts, omp_info)
+    | `OMPForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPGenericLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPInterchangeDirective (stmt_info, stmts, omp_info)
+    | `OMPInteropDirective (stmt_info, stmts, omp_info)
+    | `OMPMaskedDirective (stmt_info, stmts, omp_info)
+    | `OMPMaskedTaskLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPMaskedTaskLoopSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPMasterDirective (stmt_info, stmts, omp_info)
+    | `OMPMasterTaskLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPMasterTaskLoopSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPMetaDirective (stmt_info, stmts, omp_info)
+    | `OMPOrderedDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelForDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelGenericLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMaskedDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMaskedTaskLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMaskedTaskLoopSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMasterDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMasterTaskLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelMasterTaskLoopSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPParallelSectionsDirective (stmt_info, stmts, omp_info)
+    | `OMPReverseDirective (stmt_info, stmts, omp_info)
+    | `OMPScanDirective (stmt_info, stmts, omp_info)
+    | `OMPScopeDirective (stmt_info, stmts, omp_info)
+    | `OMPSectionDirective (stmt_info, stmts, omp_info)
+    | `OMPSectionsDirective (stmt_info, stmts, omp_info)
+    | `OMPSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPSingleDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetDataDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetEnterDataDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetExitDataDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetParallelDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetParallelForDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetParallelForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetParallelGenericLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsDistributeDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsDistributeParallelForDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsDistributeParallelForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsDistributeSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetTeamsGenericLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPTargetUpdateDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskgroupDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskLoopSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskwaitDirective (stmt_info, stmts, omp_info)
+    | `OMPTaskyieldDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsDistributeDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsDistributeParallelForDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsDistributeParallelForSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsDistributeSimdDirective (stmt_info, stmts, omp_info)
+    | `OMPTeamsGenericLoopDirective (stmt_info, stmts, omp_info)
+    | `OMPTileDirective (stmt_info, stmts, omp_info)
+    | `OMPUnrollDirective (stmt_info, stmts, omp_info)
+    | `OMPStripeDirective (stmt_info, stmts, omp_info) ->
+        ompExecutableDirective_trans trans_state stmt_info stmts omp_info
     | `AddrLabelExpr _
     | `ArraySectionExpr _
     | `ArrayTypeTraitExpr _
     | `AsTypeExpr _
-    | `CapturedStmt _
     | `ChooseExpr _
     | `CoawaitExpr (_, [], _)
     | `ConceptSpecializationExpr _
@@ -6574,84 +6745,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | `ObjCIsaExpr _
     | `ObjCSubscriptRefExpr _
     | `OMPArrayShapingExpr _
-    | `OMPAssumeDirective _
-    | `OMPAtomicDirective _
-    | `OMPBarrierDirective _
-    | `OMPCancelDirective _
-    | `OMPCancellationPointDirective _
-    | `OMPCanonicalLoop _
-    | `OMPCriticalDirective _
-    | `OMPDepobjDirective _
-    | `OMPDispatchDirective _
-    | `OMPDistributeDirective _
-    | `OMPDistributeParallelForDirective _
-    | `OMPDistributeParallelForSimdDirective _
-    | `OMPDistributeSimdDirective _
-    | `OMPErrorDirective _
-    | `OMPFlushDirective _
-    | `OMPForDirective _
-    | `OMPForSimdDirective _
-    | `OMPGenericLoopDirective _
-    | `OMPInterchangeDirective _
-    | `OMPInteropDirective _
     | `OMPIteratorExpr _
-    | `OMPMaskedDirective _
-    | `OMPMaskedTaskLoopDirective _
-    | `OMPMaskedTaskLoopSimdDirective _
-    | `OMPMasterDirective _
-    | `OMPMasterTaskLoopDirective _
-    | `OMPMasterTaskLoopSimdDirective _
-    | `OMPMetaDirective _
-    | `OMPOrderedDirective _
-    | `OMPParallelDirective _
-    | `OMPParallelForDirective _
-    | `OMPParallelForSimdDirective _
-    | `OMPParallelGenericLoopDirective _
-    | `OMPParallelMaskedDirective _
-    | `OMPParallelMaskedTaskLoopDirective _
-    | `OMPParallelMaskedTaskLoopSimdDirective _
-    | `OMPParallelMasterDirective _
-    | `OMPParallelMasterTaskLoopDirective _
-    | `OMPParallelMasterTaskLoopSimdDirective _
-    | `OMPParallelSectionsDirective _
-    | `OMPReverseDirective _
-    | `OMPScanDirective _
-    | `OMPScopeDirective _
-    | `OMPSectionDirective _
-    | `OMPSectionsDirective _
-    | `OMPSimdDirective _
-    | `OMPSingleDirective _
-    | `OMPTargetDataDirective _
-    | `OMPTargetDirective _
-    | `OMPTargetEnterDataDirective _
-    | `OMPTargetExitDataDirective _
-    | `OMPTargetParallelDirective _
-    | `OMPTargetParallelForDirective _
-    | `OMPTargetParallelForSimdDirective _
-    | `OMPTargetParallelGenericLoopDirective _
-    | `OMPTargetSimdDirective _
-    | `OMPTargetTeamsDirective _
-    | `OMPTargetTeamsDistributeDirective _
-    | `OMPTargetTeamsDistributeParallelForDirective _
-    | `OMPTargetTeamsDistributeParallelForSimdDirective _
-    | `OMPTargetTeamsDistributeSimdDirective _
-    | `OMPTargetTeamsGenericLoopDirective _
-    | `OMPTargetUpdateDirective _
-    | `OMPTaskDirective _
-    | `OMPTaskgroupDirective _
-    | `OMPTaskLoopDirective _
-    | `OMPTaskLoopSimdDirective _
-    | `OMPTaskwaitDirective _
-    | `OMPTaskyieldDirective _
-    | `OMPTeamsDirective _
-    | `OMPTeamsDistributeDirective _
-    | `OMPTeamsDistributeParallelForDirective _
-    | `OMPTeamsDistributeParallelForSimdDirective _
-    | `OMPTeamsDistributeSimdDirective _
-    | `OMPTeamsGenericLoopDirective _
-    | `OMPTileDirective _
-    | `OMPUnrollDirective _
-    | `OMPStripeDirective _
     | `OpenACCAsteriskSizeExpr _
     | `OpenACCAtomicConstruct _
     | `OpenACCCacheConstruct _

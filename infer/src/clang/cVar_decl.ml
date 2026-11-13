@@ -205,7 +205,7 @@ let binding_expr_of_decl_ref context decl_ref =
       None
 
 
-let sil_var_of_decl_ref context source_range decl_ref procname =
+let sil_var_of_decl_ref_ignoring_omp context source_range decl_ref procname =
   let name =
     match decl_ref.Clang_ast_t.dr_name with Some name_info -> name_info | None -> assert false
   in
@@ -237,6 +237,18 @@ let sil_var_of_decl_ref context source_range decl_ref procname =
               "pointer '%d' for var decl not found. The var decl was: %a" pointer
               (Pp.of_string ~f:Clang_ast_j.string_of_decl_ref)
               decl_ref )
+
+
+let sil_var_of_decl_ref context source_range decl_ref procname =
+  match
+    IInt.Map.find_opt decl_ref.Clang_ast_t.dr_decl_pointer context.CContext.omp_private_copies
+  with
+  | Some copy ->
+      (* inside an OpenMP region, a variable named by a [private] or [firstprivate] clause stands
+         for the region's own copy, so a write to it must not reach the original *)
+      copy
+  | None ->
+      sil_var_of_decl_ref_ignoring_omp context source_range decl_ref procname
 
 
 let has_block_attribute decl_info =
