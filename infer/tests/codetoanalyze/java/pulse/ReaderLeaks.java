@@ -237,12 +237,17 @@ public class ReaderLeaks {
     }
   }
 
-  // Two readers opened by one call, each closed on one branch only, so both leak. Where both
-  // become unreachable at once the two reports read the same -- same constructor, same call, same
-  // last access -- and the error log, which keys an entry on its message, folds them into one.
-  // The reader whose report merged away is reported again where it is last touched, reading
-  // differently, and that is the second of the two entries expected below. Counting the merged
-  // report as one already made would suppress that one too, and the leak would go unreported.
+  // Two readers opened by one call, each closed on one branch only, so both leak. Each is
+  // reported at its earliest way out, which is the branch that closes the other reader, so the
+  // two entries expected below name different last accesses and the error log, which keys an
+  // entry on its message, keeps them apart.
+  //
+  // Both readers also become unreachable together at the end of the method, and those two
+  // reports would read the same -- same constructor, same call, same last access -- so one of
+  // them would be folded into the other there. Neither entry below is reported from that point,
+  // but what this test pins is that such a fold is not counted as a report already made: were it
+  // counted, the reader it merged away would be suppressed everywhere and its leak would go
+  // unreported.
 
   static class TwoReaders {
     BufferedReader first;
