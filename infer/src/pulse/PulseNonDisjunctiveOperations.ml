@@ -889,6 +889,12 @@ let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~as
 let init_const_refable_parameters procdesc integer_type_widths tenv astates astate_n =
   if
     Option.exists (Procdesc.get_ret_param_type procdesc) ~f:Typ.is_folly_coro
+    (* A by-value parameter of a coroutine is copied into the coroutine frame, and that copy is
+       what keeps the argument alive across a suspension: binding a reference instead would read
+       the caller's object, which may be gone by the time the coroutine resumes. The return-type
+       test above only recognises one library's coroutines, and recognises an ordinary function
+       that merely returns one of its types. *)
+    || (Procdesc.get_attributes procdesc).ProcAttributes.is_cpp_coroutine
     || Procname.is_lambda_or_block (Procdesc.get_proc_name procdesc)
   then astate_n
   else

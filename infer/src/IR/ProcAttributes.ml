@@ -104,6 +104,7 @@ type t =
   ; is_cpp_const_member_fun: bool  (** true if the procedure is a const function *)
   ; is_cpp_copy_assignment: bool  (** true if the procedure is a copy assignment *)
   ; is_cpp_copy_ctor: bool  (** true if the procedure is a copy constructor *)
+  ; is_cpp_coroutine: bool  (** true if the procedure is a C++ coroutine *)
   ; is_cpp_move_ctor: bool  (** true if the procedure is a move constructor *)
   ; is_static_ctor: bool  (** true if the procedure has the constructor attribute *)
   ; is_cpp_deleted: bool  (** true if the procedure is deleted *)
@@ -203,6 +204,7 @@ let default translation_unit proc_name =
   ; is_cpp_const_member_fun= false
   ; is_cpp_copy_assignment= false
   ; is_cpp_copy_ctor= false
+  ; is_cpp_coroutine= false
   ; is_cpp_move_ctor= false
   ; is_static_ctor= false
   ; is_cpp_deleted= false
@@ -261,6 +263,7 @@ let pp f
      ; is_cpp_const_member_fun
      ; is_cpp_copy_assignment
      ; is_cpp_copy_ctor
+     ; is_cpp_coroutine
      ; is_cpp_move_ctor
      ; is_static_ctor
      ; is_cpp_deleted
@@ -334,6 +337,7 @@ let pp f
   pp_bool_default ~default:default.is_cpp_copy_assignment "is_cpp_copy_assignment"
     is_cpp_copy_assignment f () ;
   pp_bool_default ~default:default.is_cpp_copy_ctor "is_cpp_copy_ctor" is_cpp_copy_ctor f () ;
+  pp_bool_default ~default:default.is_cpp_coroutine "is_cpp_coroutine" is_cpp_coroutine f () ;
   pp_bool_default ~default:default.is_cpp_move_ctor "is_cpp_move_ctor" is_cpp_move_ctor f () ;
   pp_bool_default ~default:default.is_static_ctor "is_static_ctor" is_static_ctor f () ;
   pp_bool_default ~default:default.is_cpp_deleted "is_deleted" is_cpp_deleted f () ;

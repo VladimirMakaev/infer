@@ -27,6 +27,8 @@ val is_cpp_const_member_fun : Clang_ast_t.decl -> bool
 
 val is_cpp_virtual : Clang_ast_t.decl -> bool
 
+val is_cpp_coroutine : Clang_ast_t.decl -> bool
+
 val is_cpp_copy_assignment : Clang_ast_t.decl -> bool
 
 val is_cpp_implicit_union_assignment : Clang_ast_t.decl -> bool
