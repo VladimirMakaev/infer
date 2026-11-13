@@ -557,7 +557,14 @@ let overrides_a_virtual tenv proc_desc =
   ClangMethodKind.equal (Procdesc.get_attributes proc_desc).ProcAttributes.clang_method_kind
     ClangMethodKind.CPP_INSTANCE
   && PatternMatch.override_exists ~check_current_type:false
-       (fun _ -> true)
+       (fun overridden ->
+         (* The question is whether the method found in a supertype is virtual, not whether
+            this one is. A method may be declared virtual and still override nothing, when the
+            base method it shares a signature with is not virtual: it starts a new hierarchy
+            and owns its parameters. An unknown supertype method counts as non-virtual, which
+            keeps the report, as an uncaptured base class already does. *)
+         Option.exists (IRAttributes.load overridden) ~f:(fun attrs ->
+             attrs.ProcAttributes.is_cpp_virtual ) )
        tenv
        (Procdesc.get_proc_name proc_desc)
 
