@@ -215,9 +215,24 @@ let issue_in_report_block_list_specs ~file ~issue ~proc =
 
 
 (** The file an issue is attributed to: the procedure's file when we know where the procedure is,
-    otherwise the file the issue itself points at. *)
-let source_file_of_issue ~proc_location_opt ~(err_data : Errlog.err_data) =
-  match proc_location_opt with Some {Location.file} -> file | None -> err_data.loc.Location.file
+    otherwise the file the issue itself points at.
+
+    An [Invalid] file means something went wrong before reporting, and this is where we say which
+    issue it was. The check lives here, with the lookup, rather than next to the code that formats
+    the issue: anything that inspects the path dies on [Invalid] anyway -- the report filters reach
+    [SourceFile.is_matching], which resolves the path before it so much as looks at its pattern list
+    -- and those deaths name only the OCaml call site that tripped over it. Naming the issue and its
+    trace instead is the whole point of this message. *)
+let source_file_of_issue ~proc_location_opt ~(err_key : Errlog.err_key) ~(err_data : Errlog.err_data)
+    =
+  let source_file =
+    match proc_location_opt with Some {Location.file} -> file | None -> err_data.loc.Location.file
+  in
+  if SourceFile.is_invalid source_file then
+    L.(die InternalError)
+      "Invalid source file for %a %a@.Trace: %a@." IssueType.pp err_key.issue_type
+      Localise.pp_error_desc err_key.err_desc Errlog.pp_loc_trace err_data.loc_trace ;
+  source_file
 
 
 (** Whether an issue passes the per-issue report filters. Apply this before de-duplicating issues:
@@ -226,7 +241,7 @@ let source_file_of_issue ~proc_location_opt ~(err_data : Errlog.err_data) =
     another procedure reports at the same place. *)
 let is_reportable ~error_filter ~proc_name ~proc_location_opt ~(err_key : Errlog.err_key) ~err_data
     =
-  let source_file = source_file_of_issue ~proc_location_opt ~err_data in
+  let source_file = source_file_of_issue ~proc_location_opt ~err_key ~err_data in
   error_filter source_file err_key.issue_type
   && (not (is_in_clang_header source_file))
   && not
@@ -339,14 +354,10 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
 
 
   let to_string ({error_filter; proc_name; proc_location_opt; err_key; err_data} : elt) =
-    let source_file = source_file_of_issue ~proc_location_opt ~err_data in
+    let source_file = source_file_of_issue ~proc_location_opt ~err_key ~err_data in
     let procedure_start_line =
       match proc_location_opt with Some proc_loc -> proc_loc.Location.line | None -> 0
     in
-    if SourceFile.is_invalid source_file then
-      L.(die InternalError)
-        "Invalid source file for %a %a@.Trace: %a@." IssueType.pp err_key.issue_type
-        Localise.pp_error_desc err_key.err_desc Errlog.pp_loc_trace err_data.loc_trace ;
     if is_reportable ~error_filter ~proc_name ~proc_location_opt ~err_key ~err_data then
       let severity = IssueType.string_of_severity err_key.severity in
       let category =
