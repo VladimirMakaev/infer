@@ -62,7 +62,11 @@ type t =
   ; globals: GlobalSet.t
   ; vars_in_discarded_branches: Mangled.Set.t ref
   ; has_unmodeled_init_list: bool ref
-  ; has_atomic_expression: bool ref }
+  ; has_atomic_expression: bool ref
+  ; mutable omp_private_copies: Pvar.t IInt.Map.t
+        (** inside an OpenMP region, the region-local copy standing in for a variable named by a
+            [private] or [firstprivate] clause, keyed on the clang pointer of its original
+            declaration *) }
 
 let create_context translation_unit_context tenv cfg procdesc immediate_curr_class return_param_typ
     outer_context =
@@ -81,7 +85,8 @@ let create_context translation_unit_context tenv cfg procdesc immediate_curr_cla
   ; globals= GlobalSet.create 0
   ; vars_in_discarded_branches= ref Mangled.Set.empty
   ; has_unmodeled_init_list= ref false
-  ; has_atomic_expression= ref false }
+  ; has_atomic_expression= ref false
+  ; omp_private_copies= IInt.Map.empty }
 
 
 let rec is_objc_method context =

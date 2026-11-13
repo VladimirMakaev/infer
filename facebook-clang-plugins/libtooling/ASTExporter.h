@@ -43,7 +43,9 @@
 #include <clang/AST/DeclObjC.h>
 #include <clang/AST/DeclVisitor.h>
 #include <clang/AST/Mangle.h>
+#include <clang/AST/OpenMPClause.h>
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/AST/StmtOpenMP.h>
 #include <clang/AST/StmtVisitor.h>
 #include <clang/AST/TypeVisitor.h>
 #include <clang/Basic/Module.h>
@@ -479,6 +481,8 @@ class ASTExporter : public ConstDeclVisitor<ASTExporter<ATDWriter>>,
   // Stmts
   DECLARE_VISITOR(Stmt)
   DECLARE_VISITOR(AttributedStmt)
+  DECLARE_VISITOR(CapturedStmt)
+  DECLARE_VISITOR(OMPExecutableDirective)
   DECLARE_VISITOR(CoreturnStmt)
   DECLARE_VISITOR(CoroutineBodyStmt)
   DECLARE_VISITOR(CXXCatchStmt)
@@ -3564,6 +3568,80 @@ void ASTExporter<ATDWriter>::VisitAttributedStmt(const AttributedStmt *Node) {
   ArrayScope Scope(OF, Node->getAttrs().size()); // not covered by tests
   for (auto A : Node->getAttrs()) {
     dumpAttr(A);
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::OMPExecutableDirectiveTupleSize() {
+  return StmtTupleSize() + 1;
+}
+//@atd #define omp_executable_directive_tuple stmt_tuple * omp_executable_directive_info
+//@atd type omp_executable_directive_info = {
+//@atd   ~private_vars : decl_ref list;
+//@atd   ~firstprivate_vars : decl_ref list;
+//@atd } <ocaml field_prefix="omp_">
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitOMPExecutableDirective(
+    const OMPExecutableDirective *Node) {
+  VisitStmt(Node);
+  // A directive's clauses are not among its children, so without this the body would be
+  // translated as though the pragma carried no clauses and a write to a region-local copy
+  // would escape. Only the two clauses that give the region its OWN copy are named here:
+  // shared, lastprivate and reduction all act on the original variable, which is already what
+  // translating the body in place does.
+  std::vector<const Decl *> Privates, FirstPrivates;
+  auto collect = [](std::vector<const Decl *> &Out, const Expr *E) {
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts())) {
+      Out.push_back(DRE->getDecl());
+    }
+  };
+  for (const OMPClause *C : Node->clauses()) {
+    if (const auto *P = dyn_cast<OMPPrivateClause>(C)) {
+      for (const Expr *E : P->varlist()) {
+        collect(Privates, E);
+      }
+    } else if (const auto *F = dyn_cast<OMPFirstprivateClause>(C)) {
+      for (const Expr *E : F->varlist()) {
+        collect(FirstPrivates, E);
+      }
+    }
+  }
+  ObjectScope Scope(OF, (int)!Privates.empty() + (int)!FirstPrivates.empty());
+  if (!Privates.empty()) {
+    OF.emitTag("private_vars");
+    ArrayScope aScope(OF, Privates.size());
+    for (const Decl *D : Privates) {
+      dumpDeclRef(*D);
+    }
+  }
+  if (!FirstPrivates.empty()) {
+    OF.emitTag("firstprivate_vars");
+    ArrayScope aScope(OF, FirstPrivates.size());
+    for (const Decl *D : FirstPrivates) {
+      dumpDeclRef(*D);
+    }
+  }
+}
+
+template <class ATDWriter>
+int ASTExporter<ATDWriter>::CapturedStmtTupleSize() {
+  return StmtTupleSize() + 1;
+}
+//@atd #define captured_stmt_tuple stmt_tuple * captured_stmt_info
+//@atd type captured_stmt_info = {
+//@atd   ?body : stmt option;
+//@atd } <ocaml field_prefix="csi_">
+template <class ATDWriter>
+void ASTExporter<ATDWriter>::VisitCapturedStmt(const CapturedStmt *Node) {
+  VisitStmt(Node);
+  // The children of a CapturedStmt are only the capture initialisers: the captured statement
+  // itself hangs off getCapturedStmt() and would otherwise never be exported, which hides
+  // everything written inside an OpenMP region from every analysis.
+  const Stmt *Body = Node->getCapturedStmt();
+  ObjectScope Scope(OF, (bool)Body);
+  if (Body) {
+    OF.emitTag("body");
+    dumpStmt(Body);
   }
 }
 
