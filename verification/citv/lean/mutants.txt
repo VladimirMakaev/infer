@@ -1,0 +1,25 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# Deliberate defects in Citv/Comparison.lean. A proof development that cannot be broken is not
+# saying anything, so each line below is an edit that must be refused, and run.sh fails if one
+# is accepted. The fields are tab-separated: a name, the outcome required, the exact text to
+# find once, and what to put there instead. A newline inside a field is written \n.
+#
+# The outcomes are:
+#   no-build      the edit makes a proof stop checking, so `lake build` fails.
+#   axiom-reject  the edit builds, and the axiom whitelist is what catches it. A proof finished
+#                 with `sorry` is exactly this case, which is why a green build is not the
+#                 acceptance criterion on its own.
+#
+# The first four are the same defects as the OCaml mutants of the same name one directory up,
+# where they are caught by a bounded run instead. Here they are caught for all integers.
+#
+abduceLe/declare-unsat-too-eagerly	no-build	  if Bound.lt (Bound.min hi1 hi2) lo1 || Bound.lt hi2 (Bound.max lo1 lo2) then .unsat\n  else .sat lo1 (Bound.min hi1 hi2) (Bound.max lo1 lo2) hi2\n\n/-! ### Soundness of the impossibility decision -/	  if Bound.le (Bound.min hi1 hi2) lo1 || Bound.lt hi2 (Bound.max lo1 lo2) then .unsat\n  else .sat lo1 (Bound.min hi1 hi2) (Bound.max lo1 lo2) hi2\n\n/-! ### Soundness of the impossibility decision -/
+abduceLe/narrow-the-left-refinement	no-build	  else .sat lo1 (Bound.min hi1 hi2) (Bound.max lo1 lo2) hi2\n\n/-! ### Soundness of the impossibility decision -/	  else .sat (Bound.addInt lo1 1) (Bound.min hi1 hi2) (Bound.max lo1 lo2) hi2\n\n/-! ### Soundness of the impossibility decision -/
+abduceLt/shift-by-two	no-build	  (abduceLe (Bound.addInt lo1 1) (Bound.addInt hi1 1) lo2 hi2).shiftLeftBack	  (abduceLe (Bound.addInt lo1 2) (Bound.addInt hi1 2) lo2 hi2).shiftLeftBack
+Bound.lt/finite-is-below-minus-infinity	no-build	def lt : Bound → Bound → Bool\n  | minusInfinity, _ => true\n  | _, plusInfinity => true\n  | int _, minusInfinity => false	def lt : Bound → Bound → Bool\n  | minusInfinity, _ => true\n  | _, plusInfinity => true\n  | int _, minusInfinity => true
+memBetween_succ/finish-with-sorry	axiom-reject	  unfold memBetween\n  rw [Bound.allowsBelow_succ, Bound.allowsAbove_succ]	  sorry
+abduceCmp/forget-to-flip-the-pair-back	no-build	  | .ge => (abduceLe lo2 hi2 lo1 hi1).flip\n  | .gt => (abduceLt lo2 hi2 lo1 hi1).flip	  | .ge => abduceLe lo2 hi2 lo1 hi1\n  | .gt => abduceLt lo2 hi2 lo1 hi1
