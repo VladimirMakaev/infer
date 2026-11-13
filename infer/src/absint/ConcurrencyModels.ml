@@ -596,19 +596,44 @@ end = struct
     ; "java.util.concurrent.locks.ReentrantReadWriteLock$WriteLock" ]
 
 
+  (* Kotlin's coroutine mutex. [withLock] is an inline extension function, so what reaches Infer
+     is the body it expands to: [lock(owner, continuation)], the guarded code, and [unlock(owner)]
+     in a finally. [lock] is a suspend fun, hence the trailing continuation argument and the
+     Object return; [tryLock(owner)] returns a boolean. Named separately from [std_locks] because
+     this interface is neither a java.util.concurrent lock nor does it carry that package's
+     [lockInterruptibly]. *)
+  let coroutine_mutex = "kotlinx.coroutines.sync.Mutex"
+
+  (* Every one of these takes [owner] with a default of null, and omitting it at a Kotlin call
+     site does not call the method: kotlinc emits a static synthetic bridge on the interface,
+     [unlock$default(Mutex, Object, int, Object)], which fills the defaults in and calls it. The
+     receiver is that bridge's FIRST argument, so [fst_arg] is still the mutex and only the name
+     differs. [withLock] passes [owner] explicitly from its inlined body and so reaches [lock]
+     directly -- which is why matching the declared names alone covers [withLock { }] and misses
+     every plain [mutex.unlock()]. *)
+  let coroutine_mutex_method classname methodname name =
+    String.equal classname coroutine_mutex
+    && String.equal
+         (String.chop_suffix methodname ~suffix:"$default" |> Option.value ~default:methodname)
+         name
+
+
   let is_lock classname methodname =
     List.mem std_locks classname ~equal:String.equal
     && List.mem ["lock"; "lockInterruptibly"] methodname ~equal:String.equal
+    || coroutine_mutex_method classname methodname "lock"
     || String.equal classname "com.facebook.buck.util.concurrent.AutoCloseableReadWriteUpdateLock"
        && List.mem ["readLock"; "updateLock"; "writeLock"] methodname ~equal:String.equal
 
 
   let is_unlock classname methodname =
-    String.equal methodname "unlock" && List.mem std_locks classname ~equal:String.equal
+    (String.equal methodname "unlock" && List.mem std_locks classname ~equal:String.equal)
+    || coroutine_mutex_method classname methodname "unlock"
 
 
   let is_trylock classname methodname =
-    String.equal methodname "tryLock" && List.mem std_locks classname ~equal:String.equal
+    (String.equal methodname "tryLock" && List.mem std_locks classname ~equal:String.equal)
+    || coroutine_mutex_method classname methodname "tryLock"
 
 
   let get_lock_effect pname java_pname actuals =
