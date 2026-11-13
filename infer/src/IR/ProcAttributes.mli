@@ -58,6 +58,7 @@ type t =
   ; is_cpp_copy_assignment: bool  (** true if the procedure is a copy assignment *)
   ; is_cpp_copy_ctor: bool  (** true if the procedure is a copy constructor *)
   ; is_cpp_coroutine: bool  (** true if the procedure is a C++ coroutine *)
+  ; is_cpp_virtual: bool  (** true if the procedure is a virtual C++ method *)
   ; is_cpp_move_ctor: bool  (** true if the procedure is a move constructor *)
   ; is_static_ctor: bool  (** true if the procedure has the constructor attribute *)
   ; is_cpp_deleted: bool  (** true if the procedure is deleted *)

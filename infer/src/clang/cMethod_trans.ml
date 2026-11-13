@@ -226,6 +226,7 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
   ; is_cpp_const_member_fun= ms.CMethodSignature.is_cpp_const_member_fun
   ; is_cpp_copy_ctor= ms.CMethodSignature.is_cpp_copy_ctor
   ; is_cpp_coroutine= ms.CMethodSignature.is_cpp_coroutine
+  ; is_cpp_virtual= ms.CMethodSignature.is_cpp_virtual
   ; cpp_constructor_is_nothrow= ms.CMethodSignature.cpp_constructor_is_nothrow
   ; is_cpp_move_ctor= ms.CMethodSignature.is_cpp_move_ctor
   ; is_static_ctor= ms.CMethodSignature.is_static_ctor
