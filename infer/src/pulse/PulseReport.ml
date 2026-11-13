@@ -40,6 +40,53 @@ let is_nullptr_dereference_in_nullsafe_class tenv ~is_nullptr_dereference jn =
   && match NullsafeMode.of_java_procname tenv jn with Default -> false | Local | Strict -> true
 
 
+(* Which allocation a leak is about: the chain of calls that leads to it, down to the location
+   that allocates. The outer location alone is not enough -- two different allocations inside one
+   helper share the call that reaches them, and keying on it merges two findings into one.
+
+   The chain is kept as the calls themselves rather than as a copy of the trace. A trace is a nest
+   of records, so copying one costs an allocation and a stack frame per level of the call chain,
+   and comparing two of them walks both nests.
+
+   The histories are left out because they describe how a value was reached rather than which
+   allocation it came from, and the several reports of one allocation must still collapse into
+   one. No test here needs them: the allocating [Immediate] is built with an empty history, and
+   the [ViaCall] history is the caller's history for the value at the call, the same on every path
+   that reports the leak. They are left out so that an identity test cannot come to depend on
+   them. *)
+type allocation_site = {calls: (CallEvent.t * Location.t) list; allocation: Location.t}
+
+(* The allocating location first: it tells most pairs of allocations apart in one comparison, so
+   the chains are walked only for the ones it does not. The walk is tail-recursive, [&&] running
+   its right-hand side in tail position, so a deep chain costs no stack. *)
+let equal_allocation_site {calls; allocation} {calls= calls'; allocation= allocation'} =
+  let rec equal_calls calls calls' =
+    match (calls, calls') with
+    | [], [] ->
+        true
+    | (f, location) :: calls, (f', location') :: calls' ->
+        CallEvent.equal f f' && Location.equal location location' && equal_calls calls calls'
+    | [], _ :: _ | _ :: _, [] ->
+        false
+  in
+  Location.equal allocation allocation' && equal_calls calls calls'
+
+
+(* Tail-recursive, so that how deep a trace may be is bounded by memory and not by the stack. The
+   calls come out outermost first, the order they are made in, which is only so that the key reads
+   like the trace it comes from: equality does not depend on that order, only on it being the same
+   on both sides. *)
+let allocation_site_of_trace (trace : Trace.t) : allocation_site =
+  let rec walk calls (trace : Trace.t) =
+    match trace with
+    | Immediate {location} ->
+        {calls= List.rev calls; allocation= location}
+    | ViaCall {f; location; in_call} ->
+        walk ((f, location) :: calls) in_call
+  in
+  walk [] trace
+
+
 (* A leaked allocation is one bug however many ways the procedure leaves it behind: the same
    allocation becomes unreachable once per path out of the procedure, and each of those used to
    be logged separately, so a resource used before it is dropped was reported both where it was
@@ -47,23 +94,9 @@ let is_nullptr_dereference_in_nullsafe_class tenv ~is_nullptr_dereference jn =
    the procedure being analysed and log only the first. This affects logging alone: the state
    [report_summary_error] derives from the diagnostic is computed as before, so no path and no
    other issue changes. *)
-let reported_leak_allocations = AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
-
-(* Which allocation a leak is about: the whole chain of calls that leads to it, down to the
-   location that allocates. The outer location alone is not enough -- two different allocations
-   inside one helper share the call that reaches them, and keying on it merges two findings into
-   one. The histories are dropped because they describe how a value was reached rather than which
-   allocation it came from, and the several reports of one allocation must still collapse into
-   one. No test here needs that: the allocating [Immediate] is built with an empty history, and
-   the [ViaCall] history is the caller's history for the value at the call, the same on every
-   path that reports the leak. It is dropped so that an identity test cannot come to depend on
-   it. *)
-let rec allocation_site_of_trace (trace : Trace.t) : Trace.t =
-  match trace with
-  | Immediate {location} ->
-      Immediate {location; history= ValueHistory.epoch}
-  | ViaCall {f; location; in_call} ->
-      ViaCall {f; location; history= ValueHistory.epoch; in_call= allocation_site_of_trace in_call}
+let reported_leak_allocations :
+    (IssueType.t * Diagnostic.resource * allocation_site) list ref DLS.key =
+  AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
 
 
 let leak_allocation ~latent (diagnostic : Diagnostic.t) =
@@ -82,7 +115,7 @@ let is_already_reported_leak (issue_type, resource, allocation_site) =
   |> List.exists ~f:(fun (issue_type', resource', allocation_site') ->
       IssueType.equal issue_type issue_type'
       && Diagnostic.equal_resource resource resource'
-      && Trace.equal allocation_site allocation_site' )
+      && equal_allocation_site allocation_site allocation_site' )
 
 
 (* Only an allocation whose report really reached the error log counts as reported. The log keys
@@ -98,8 +131,12 @@ let remember_reported_leak leak =
 let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~latent
     ?location_override ?extra_trace ?reachable_from (diagnostic : Diagnostic.t) =
   let open Diagnostic in
-  let leak = leak_allocation ~latent diagnostic in
-  if is_suppressed && not Config.pulse_report_issues_for_tests then ()
+  let is_hidden = is_suppressed && not Config.pulse_report_issues_for_tests in
+  (* Which allocation a leak is about is asked only where the answer can be used: a hidden
+     diagnostic is dropped on the next line, and reading its chain of calls would be work done
+     for nobody. *)
+  let leak = if is_hidden then None else leak_allocation ~latent diagnostic in
+  if is_hidden then ()
   else if Option.exists leak ~f:is_already_reported_leak then
     L.d_printfln "Not reporting this leak again: its allocation is already reported here"
   else
