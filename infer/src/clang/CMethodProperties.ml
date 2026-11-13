@@ -143,6 +143,23 @@ let is_cpp_virtual method_decl =
       false
 
 
+(* A coroutine is told apart by its body: clang replaces the written body with a
+   [CoroutineBodyStmt] holding the promise object, the initial and final suspensions and the
+   return object. Nothing downstream records it -- by the time a procedure reaches the analysis a
+   coroutine looks like an ordinary function returning whatever its promise produced. *)
+let is_cpp_coroutine method_decl =
+  let open Clang_ast_t in
+  match method_decl with
+  | FunctionDecl (_, _, _, function_decl_info)
+  | CXXMethodDecl (_, _, _, function_decl_info, _)
+  | CXXConstructorDecl (_, _, _, function_decl_info, _)
+  | CXXConversionDecl (_, _, _, function_decl_info, _)
+  | CXXDestructorDecl (_, _, _, function_decl_info, _) -> (
+    match function_decl_info.fdi_body with Some (`CoroutineBodyStmt _) -> true | _ -> false )
+  | _ ->
+      false
+
+
 let is_cpp_copy_assignment method_decl =
   let open Clang_ast_t in
   match method_decl with

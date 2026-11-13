@@ -35,6 +35,7 @@ type t =
   ; is_cpp_virtual: bool
   ; is_cpp_copy_assignment: bool
   ; is_cpp_copy_ctor: bool
+  ; is_cpp_coroutine: bool
   ; cpp_constructor_is_nothrow: bool option
   ; is_cpp_move_ctor: bool
   ; is_static_ctor: bool
@@ -67,6 +68,7 @@ val mk :
   -> ?is_cpp_virtual:bool
   -> ?is_cpp_copy_assignment:bool
   -> ?is_cpp_copy_ctor:bool
+  -> ?is_cpp_coroutine:bool
   -> ?cpp_constructor_is_nothrow:bool option
   -> ?is_cpp_move_ctor:bool
   -> ?is_static_ctor:bool
