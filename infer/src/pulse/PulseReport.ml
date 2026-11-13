@@ -105,6 +105,41 @@ let equal_leak_key (issue_type, resource, allocation_site) (issue_type', resourc
    the procedure being analysed and log only the first. This affects logging alone: the state
    [report_summary_error] derives from the diagnostic is computed as before, so no path and no
    other issue changes. *)
+(* The identity of a leaked allocation, written out, so that the report writer can tell two
+   entries that are one finding from two that are not.
+
+   It is needed because de-duplication inside the analysis cannot see far enough. One procedure is
+   analysed once per specialization, each analysis starting with its own empty memory, so the same
+   leak can be described by several of them -- at a different way out each time, because each sees
+   a different set of paths. Those descriptions reach the error log as separate entries, and the
+   log keys an entry on its message, so it cannot tell they are the same finding. The key travels
+   with the entry and lets the report writer collapse them.
+
+   It says exactly what [equal_leak_key] compares and no less: anything coarser would merge two
+   findings into one. The constructors are matched by hand rather than printed through some
+   generic printer so that adding one is a type error here rather than a silent merge. *)
+let dedup_key_of_leak ((issue_type, resource, {calls; allocation}) : leak_key) =
+  let pp_resource fmt (resource : Diagnostic.resource) =
+    match resource with
+    | CSharpClass name ->
+        F.fprintf fmt "csharp:%a" CSharpClassName.pp name
+    | JavaClass name ->
+        F.fprintf fmt "java:%a" JavaClassName.pp name
+    | Awaitable ->
+        F.pp_print_string fmt "awaitable"
+    | HackBuilderResource name ->
+        F.fprintf fmt "hack:%a" HackClassName.pp name
+    | Memory allocator ->
+        F.fprintf fmt "memory:%a" Attribute.pp_allocator allocator
+  in
+  let pp_location fmt ({file; line; col} : Location.t) =
+    F.fprintf fmt "%a:%d:%d" SourceFile.pp file line col
+  in
+  let pp_call fmt (f, location) = F.fprintf fmt "%a at %a" CallEvent.pp f pp_location location in
+  F.asprintf "%s|%a|%a|%a" issue_type.IssueType.unique_id pp_resource resource
+    (Pp.seq ~sep:"," pp_call) calls pp_location allocation
+
+
 let reported_leak_allocations : leak_key list ref DLS.key =
   AnalysisGlobalState.make_dls ~init:(fun () -> ref [])
 
@@ -420,10 +455,11 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
             ~pp_immediate:(fun fmt -> F.fprintf fmt "original issue trace starts here")
             extra_trace ltr )
     in
+    let dedup_key = Option.map leak ~f:dedup_key_of_leak in
     let emit () =
       L.d_printfln ~color:Red "Reporting issue: %a: %s" IssueType.pp issue_type message ;
       Reporting.log_issue_recorded proc_desc err_log ~loc ?loc_instantiated ~ltr ~extras ~autofix
-        ?suggestion Pulse issue_type message
+        ?suggestion ?dedup_key Pulse issue_type message
     in
     match leak with
     | Some leak ->
