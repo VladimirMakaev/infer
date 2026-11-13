@@ -345,7 +345,8 @@ void captured_move_ok(std::vector<int> vec) {
 // reference would mean changing the base and every other implementation and
 // caller too. The copy is real but the advice cannot be taken here, so these are
 // not reported. A virtual method that overrides nothing still is: whoever wrote
-// that declaration owns its signature.
+// that declaration owns its signature. Only a genuine override is suppressed --
+// hiding a non-virtual base method is not overriding, and neither is a static.
 namespace virtual_override {
 
 void read_int(int);
@@ -390,29 +391,31 @@ struct Overload : Interface {
   void record(std::shared_ptr<int> q, int extra) { read_int(*q + extra); }
 };
 
-// Known limitation. A derived class may declare an INSTANCE method with the
-// same name and the same parameter types as a NON-virtual base method. That
-// hides the base method instead of overriding it, so this declaration does own
-// its signature and the advice is actionable here. The check cannot tell the
-// two apart: it asks whether a supertype declares the same signature, and
-// nothing records whether a method is virtual -- the clang frontend reads it
-// but drops it before the IR -- so the report is lost here too. A
-// virtuality-aware check would restore the Hider, DeepHider and CrtpDerived
-// rows below. The limitation stops at instance methods: a static one is
-// recognised, since a static can never override.
+// Hiding is not overriding. A derived class may declare a method with the same
+// name and the same parameter types as a NON-virtual base method; that hides
+// the base method rather than overriding it, so the declaration owns its
+// signature and the advice is actionable. The check asks whether the method it
+// found in a supertype is virtual, so all of these stay reported.
 struct NonVirtualBase {
   void hides_record_bad(std::shared_ptr<int> p) { read_int(*p); }
 };
 
 struct Hider : NonVirtualBase {
-  // Same name and signature as the base, which is not virtual, so this hides it
-  // rather than overriding it. Not reported, and it should be.
   void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 1); }
 };
 
-// Hiding a hider is still hiding, and is lost the same way.
+// Hiding a hider is still hiding.
 struct DeepHider : Hider {
   void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 2); }
+};
+
+// The case that separates the two questions one could ask. This method IS
+// declared virtual, but the base method it shares a signature with is not, so
+// it overrides nothing: it starts a new hierarchy and chooses its own
+// parameters. Asking "is this method virtual" would wrongly suppress it;
+// asking "is the method it overrides virtual" reports it.
+struct VirtualHider : NonVirtualBase {
+  virtual void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 4); }
 };
 
 // A STATIC member function cannot override anything: clang rejects a static
@@ -428,8 +431,8 @@ struct StaticHider : NonVirtualBase {
 
 // The curiously recurring template pattern reaches the derived class without
 // virtual functions, so the derived declaration owns its signature too, and is
-// lost to the same limitation as Hider. The base is reported; the explicit
-// instantiation below is what makes its body exist to be analysed.
+// reported along with the base. The explicit instantiation below is what makes
+// the base's body exist to be analysed.
 template <class Derived>
 struct CrtpBase {
   void crtp_record_bad(std::shared_ptr<int> p) { read_int(*p); }
