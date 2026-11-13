@@ -1,0 +1,8 @@
+; The module under test, with its own interface. PulseCItv.ml and PulseCItv.mli are not kept
+; here: run.sh copies them from infer/src/pulse/ and prints their checksums, so this directory
+; can never hold a stale fork of them.
+(library
+ (name citv)
+ (libraries zarith yojson infer_shims)
+ (preprocess
+  (pps ppx_compare ppx_yojson_conv)))

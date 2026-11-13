@@ -1,0 +1,8 @@
+; The same implementation with no interface, so the oracle can build interval values directly
+; and read their constructors. run.sh copies infer/src/pulse/PulseCItv.ml here at run time; the
+; bytes are identical to the copy in module/ and the checksum is reported.
+(library
+ (name citv_open)
+ (libraries zarith yojson infer_shims)
+ (preprocess
+  (pps ppx_compare ppx_yojson_conv)))
