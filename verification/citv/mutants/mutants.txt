@@ -1,0 +1,65 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# One deliberate defect per helper of infer/src/pulse/PulseCItv.ml. Each line is three
+# tab-separated fields: a name, the exact source text to find once, and what to put there
+# instead. A newline inside a field is written \n. run.sh applies one mutant at a time to a
+# throwaway copy of the module, runs the oracle, and requires the oracle to reject it.
+#
+# A mutant that survives is a gap in the oracle rather than a defect in Pulse, so run.sh fails
+# on a survivor. If an anchor stops matching after a legitimate change to the module, run.sh
+# names it and the mutant has to be rewritten against the new code.
+#
+abduce_eq/widen-the-meet	      let lower = Bound.max lower1 lower2 in\n      let upper = Bound.min upper1 upper2 in	      let lower = Bound.min lower1 lower2 in\n      let upper = Bound.max upper1 upper2 in
+abduce_le/declare-unsat-too-eagerly	      if Bound.lt min_u1u2 lower1 || Bound.lt upper2 max_l1l2 then	      if Bound.le min_u1u2 lower1 || Bound.lt upper2 max_l1l2 then
+abduce_lt/off-by-one	  match abduce_le (add_int a1 IntLit.one) a2 with	  match abduce_le (add_int a1 IntLit.(add one one)) a2 with
+abduce_ne/compare-a1-with-itself	    match (to_singleton a1, to_singleton a2) with	    match (to_singleton a1, to_singleton a1) with
+intersection/claim-disjoint-when-untightened	let intersection a1 a2 =\n  match abduce_eq a1 a2 with\n  | Unsatisfiable ->\n      None	let intersection a1 a2 =\n  match abduce_eq a1 a2 with\n  | Satisfiable (None, None) ->\n      None\n  | Unsatisfiable ->\n      None
+add/upper-one-too-small	      Some (between (Bound.add lower1 lower2) (Bound.add upper1 upper2))	      Some (between (Bound.add lower1 lower2) (Bound.add_int (Bound.add upper1 upper2) IntLit.minus_one))
+minus/forget-to-swap	      Some (between (Bound.minus upper) (Bound.minus lower))	      Some (between (Bound.minus lower) (Bound.minus upper))
+add_int/shift-one-side-only	      between (Bound.add_int lower i) (Bound.add_int upper i)	      between lower (Bound.add_int upper i)
+div_by_literal/shift-the-image	              Int (IntLit.div i k)	              Int (IntLit.add (IntLit.div i k) IntLit.one)
+remove_element/remove-two-instead-of-one	      Some (between (Int (IntLit.(add one) l)) upper)	      Some (between (Int (IntLit.(add one) (IntLit.(add one) l))) upper)
+to_singleton/accept-a-range	let to_singleton = function Between (Int l1, Int l2) when IntLit.eq l1 l2 -> Some l1 | _ -> None	let to_singleton = function Between (Int l1, Int _) -> Some l1 | _ -> None
+literal_of/accept-a-range	  | Between (Bound.Int l, Bound.Int u) when IntLit.eq l u ->\n      Some l	  | Between (Bound.Int l, Bound.Int _) ->\n      Some l
+is_equal_to_zero/ignore-the-upper-bound	  | Between (Int l, Int u) when IntLit.iszero l && IntLit.iszero u ->	  | Between (Int l, Int _) when IntLit.iszero l ->
+is_not_equal_to_zero/accept-any-hole	  | Outside (l, u) ->\n      IntLit.iszero l && IntLit.iszero u	  | Outside (_, _) ->\n      true
+is_non_pointer/accept-the-unbounded	let is_non_pointer = function Between (Int _, Int _) -> true | _ -> false	let is_non_pointer = function Between _ -> true | _ -> false
+equal_to/off-by-one	  let equal_to i =\n    let b = Bound.Int i in\n    Between (b, b)	  let equal_to i =\n    Between (Bound.Int i, Bound.Int (IntLit.add i IntLit.one))
+nonnegative/include-minus-one	let nonnegative = between (Int IntLit.zero) PlusInfinity	let nonnegative = between (Int IntLit.minus_one) PlusInfinity
+
+rem_by_literal/forget-negative-remainders	              Int (IntLit.max (IntLit.neg largest) i)	              Int (IntLit.max IntLit.zero i)
+
+# Mutants for the operators the module currently declines. Each one gives the operator
+# its own arm so that no sub-pattern is left unused, and answers something the concrete
+# semantics contradicts.
+binop_Mult/answer-zero	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | Mult _ ->\n      Some (equal_to IntLit.zero)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr
+binop_comparisons/answer-zero	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne ->\n      Some (equal_to IntLit.zero)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | BAnd\n  | BXor\n  | BOr
+binop_shifts/answer-the-left-operand	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | Shiftlt\n  | Shiftrt ->\n      Some a_lhs\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr
+binop_bitwise/answer-the-left-operand	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | BAnd\n  | BXor\n  | BOr ->\n      Some a_lhs\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne
+binop_pointer_and_float/answer-anyway	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | Mult _\n  | DivF\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI\n  | MinusPI\n  | MinusPP\n  | DivF ->\n      Some a_lhs\n  | Mult _\n  | Shiftlt\n  | Shiftrt\n  | Lt\n  | Gt\n  | Le\n  | Ge\n  | Eq\n  | Ne\n  | BAnd\n  | BXor\n  | BOr
+binop_logical/answer-zero	  | BOr\n  | LAnd\n  | LOr ->\n      None	  | LAnd\n  | LOr ->\n      Some (equal_to IntLit.zero)\n  | BOr ->\n      None
+unop_BNot/negate-instead	let unop (unop : Unop.t) a = match unop with Neg -> minus a | BNot | LNot -> None	let unop (unop : Unop.t) a = match unop with Neg | BNot -> minus a | LNot -> None
+unop_LNot/pass-the-operand-through	let unop (unop : Unop.t) a = match unop with Neg -> minus a | BNot | LNot -> None	let unop (unop : Unop.t) a = match unop with Neg -> minus a | BNot -> None | LNot -> Some a
+
+# Planted exceptions on the two paths that used to escape the guards.
+equal_to/raise-on-zero	  let equal_to i =\n    let b = Bound.Int i in\n    Between (b, b)	  let equal_to i =\n    assert (not (IntLit.iszero i)) ;\n    let b = Bound.Int i in\n    Between (b, b)
+
+pp/raise-on-the-unbounded-interval	let pp fmt = function\n  | Between (MinusInfinity, PlusInfinity) ->\n      F.fprintf fmt "∈ℕ"	let pp fmt = function\n  | Between (MinusInfinity, PlusInfinity) ->\n      assert false
+
+# Returning the left operand is sound inside the satisfiable branch, where abduce_eq has
+# already shown the two overlap, and the retired mutants show the oracle cannot catch it
+# there. Unconditionally it is a different statement: has_empty_intersection then never
+# holds, and abduce_ne takes the wrong branch. This pins that difference.
+intersection/always-the-left-operand	let intersection a1 a2 =\n  match abduce_eq a1 a2 with\n  | Unsatisfiable ->\n      None\n  | Satisfiable (inter1_opt, inter2_opt) ->\n      Option.first_some inter1_opt inter2_opt |> Option.value ~default:a1 |> Option.some	let intersection a1 a2 =\n  ignore (abduce_eq a1 a2) ;\n  Some a1
+
+# The three operators that carry an integer-kind payload answer from their own branch, so a
+# defect confined to the Some shape is invisible unless the driver visits it. The fourth
+# line is the same class one level up: abduce_binop_is_true takes every operator, not only
+# the comparisons, and its dispatch ends in a catch-all.
+binop_PlusA/wrong-for-a-known-kind	  | PlusA _ ->\n      add a_lhs a_rhs	  | PlusA None ->\n      add a_lhs a_rhs\n  | PlusA (Some _) ->\n      Some (equal_to IntLit.zero)
+binop_MinusA/wrong-for-a-known-kind	  | MinusA _ ->\n      minus a_rhs >>= add a_lhs	  | MinusA None ->\n      minus a_rhs >>= add a_lhs\n  | MinusA (Some _) ->\n      Some (equal_to IntLit.zero)
+binop_Mult/wrong-for-a-known-kind	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | PlusPI	  | Mod ->\n      literal_of a_rhs |> Option.bind ~f:(rem_by_literal a_lhs)\n  | Mult (Some _) ->\n      Some (equal_to IntLit.zero)\n  | PlusPI
+abduce_binop_constraints/unsat-on-an-arithmetic-condition	  | Gt, false | Le, true ->\n      abduce_lt a2 a1 |> flip_abduced\n  | _ ->\n      Satisfiable (None, None)	  | Gt, false | Le, true ->\n      abduce_lt a2 a1 |> flip_abduced\n  | (PlusA _ | Mult _ | BAnd), _ ->\n      Unsatisfiable\n  | _ ->\n      Satisfiable (None, None)
