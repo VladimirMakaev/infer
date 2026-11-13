@@ -117,7 +117,13 @@ let equal_leak_key (issue_type, resource, allocation_site) (issue_type', resourc
 
    It says exactly what [equal_leak_key] compares and no less: anything coarser would merge two
    findings into one. The constructors are matched by hand rather than printed through some
-   generic printer so that adding one is a type error here rather than a silent merge. *)
+   generic printer so that adding one is a type error here rather than a silent merge.
+
+   The parts are kept apart as a list, never joined into one string. A java call event prints its
+   argument types separated by commas, so a key built by joining the chain of calls on some
+   separator could be spelled by a different chain that happens to contain it, and two findings
+   would become one. A list has nowhere for that to happen: the parts are compared one against
+   one, and two chains of different length differ in length. *)
 let dedup_key_of_leak ((issue_type, resource, {calls; allocation}) : leak_key) =
   let pp_resource fmt (resource : Diagnostic.resource) =
     match resource with
@@ -135,9 +141,12 @@ let dedup_key_of_leak ((issue_type, resource, {calls; allocation}) : leak_key) =
   let pp_location fmt ({file; line; col} : Location.t) =
     F.fprintf fmt "%a:%d:%d" SourceFile.pp file line col
   in
-  let pp_call fmt (f, location) = F.fprintf fmt "%a at %a" CallEvent.pp f pp_location location in
-  F.asprintf "%s|%a|%a|%a" issue_type.IssueType.unique_id pp_resource resource
-    (Pp.seq ~sep:"," pp_call) calls pp_location allocation
+  let location location = F.asprintf "%a" pp_location location in
+  issue_type.IssueType.unique_id
+  :: F.asprintf "%a" pp_resource resource
+  :: List.concat_map calls ~f:(fun (f, call_location) ->
+      [F.asprintf "%a" CallEvent.pp f; location call_location] )
+  @ [location allocation]
 
 
 let reported_leak_allocations : leak_key list ref DLS.key =

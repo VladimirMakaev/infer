@@ -15,7 +15,7 @@ type 'a log_result =
   -> ?extras:Jsonbug_t.extra
   -> ?autofix:Jsonbug_t.autofix list
   -> ?suggestion:string
-  -> ?dedup_key:string
+  -> ?dedup_key:string list
   -> Checker.t
   -> IssueType.t
   -> string

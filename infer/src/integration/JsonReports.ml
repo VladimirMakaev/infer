@@ -542,6 +542,13 @@ let collect_issues proc_name proc_location_opt err_log issues_acc =
    the warning lands follows the source rather than the order the analyses happened to run in.
    The tie-break is the entry's own trace, which is stable across runs, so that two entries at one
    location still resolve the same way every time. *)
+module SameFinding = Stdlib.Map.Make (struct
+  (* The procedure, the severity, the issue type, and which finding inside the procedure. Kept as
+     a value rather than printed into one string: a procedure name or a part of the key can
+     contain whatever character a join would use, and two findings sharing a key become one. *)
+  type t = string * string * string * string list [@@deriving compare]
+end)
+
 let collapse_same_finding issues =
   let key_of ({proc_name; err_key; err_data} : Issue.t) =
     Option.map err_data.Errlog.dedup_key ~f:(fun dedup_key ->
@@ -550,38 +557,58 @@ let collapse_same_finding issues =
         , err_key.Errlog.issue_type.IssueType.unique_id
         , dedup_key ) )
   in
-  (* Earliest by file, then line, then column, and on a tie [Errlog.compare_err_data]. That is
-     not a comparison of the whole entry: despite the [@@deriving compare] in the interface it
-     is written by hand and reads a flag, comparing locations by default and traces under
-     [--deduplicate-by trace]. Using it is the point. It is the comparison the error log itself
-     orders an entry's data by, so two entries that a log kept apart are apart under it too,
-     whichever way the flag is set, and nothing is left to the order the analyses of the
-     procedure were merged in -- which, with several workers, is whichever one wrote first.
-     Under the default the tie is in fact unreachable: entries here already agree on the
-     allocation, so two of them at one location also carry one message and one key, and a log
-     holds at most one entry per location for a key. *)
+  (* Earliest by file, then line, then column; then the trace; then the rest of what the entry
+     puts in the report. [Errlog.compare_err_data] is no use here: despite the [@@deriving
+     compare] in the interface it is written by hand and reads a flag, comparing only the
+     location by default, which this point has already found equal. The fields below are every
+     one [JsonIssuePrinter] reads out of an entry, so two entries this leaves equal are written
+     out the same and which of them survives cannot be observed. Nothing is left to the order
+     the analyses of the procedure were merged in, which with several workers is whichever one
+     wrote first. *)
+  let printed_fields (issue : Issue.t) =
+    let {Errlog.node_key; loc_in_ml_source; access; extras; autofix; _} = issue.err_data in
+    ( Option.map node_key ~f:Procdesc.NodeKey.to_string
+    , loc_in_ml_source
+    , access
+    , Option.map extras ~f:Jsonbug_j.string_of_extra
+    , List.map autofix ~f:Jsonbug_j.string_of_autofix )
+  in
+  let compare_printed_fields =
+    [%compare:
+      string option
+      * (string * int * int * int) option
+      * string option
+      * string option
+      * string list]
+  in
   let earlier (a : Issue.t) (b : Issue.t) =
     let c = Location.compare a.err_data.Errlog.loc b.err_data.Errlog.loc in
-    if c <> 0 then c < 0 else Errlog.compare_err_data a.err_data b.err_data <= 0
+    if c <> 0 then c < 0
+    else
+      let c = Errlog.compare_loc_trace a.err_data.Errlog.loc_trace b.err_data.Errlog.loc_trace in
+      if c <> 0 then c < 0 else compare_printed_fields (printed_fields a) (printed_fields b) <= 0
   in
-  let best = ref String.Map.empty in
+  let best = ref SameFinding.empty in
   let keep_order = ref [] in
   List.iter issues ~f:(fun issue ->
       match key_of issue with
       | None ->
           keep_order := `Kept issue :: !keep_order
-      | Some (proc, severity, issue_type, dedup_key) -> (
-          let k = Printf.sprintf "%s\000%s\000%s\000%s" proc severity issue_type dedup_key in
-          match Map.find !best k with
-          | Some previous when not (earlier issue previous) ->
-              ()
-          | Some _ ->
-              best := Map.set !best ~key:k ~data:issue
-          | None ->
-              best := Map.set !best ~key:k ~data:issue ;
-              keep_order := `Merged k :: !keep_order ) ) ;
+      | Some k -> (
+        match SameFinding.find_opt k !best with
+        | Some previous when not (earlier issue previous) ->
+            ()
+        | Some _ ->
+            best := SameFinding.add k issue !best
+        | None ->
+            best := SameFinding.add k issue !best ;
+            keep_order := `Merged k :: !keep_order ) ) ;
   List.rev !keep_order
-  |> List.filter_map ~f:(function `Kept issue -> Some issue | `Merged k -> Map.find !best k)
+  |> List.filter_map ~f:(function
+    | `Kept issue ->
+        Some issue
+    | `Merged k ->
+        SameFinding.find_opt k !best )
 
 
 let write_costs =
