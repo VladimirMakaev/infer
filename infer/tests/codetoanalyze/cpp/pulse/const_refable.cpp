@@ -339,4 +339,107 @@ void captured_move_ok(std::vector<int> vec) {
   auto f = [vec = std::move(vec)]() {};
   unknown_lambda_call(std::move(f));
 }
+
+// A method that overrides a virtual one cannot change its parameter types: the
+// declaration it overrides fixes them, and taking the parameter by const
+// reference would mean changing the base and every other implementation and
+// caller too. The copy is real but the advice cannot be taken here, so these are
+// not reported. A virtual method that overrides nothing still is: whoever wrote
+// that declaration owns its signature.
+namespace virtual_override {
+
+void read_int(int);
+void read_size(unsigned long);
+
+struct Interface {
+  virtual ~Interface() = default;
+  virtual void record(std::shared_ptr<int> p) = 0;
+  virtual void tally(std::vector<int> v) = 0;
+};
+
+struct Impl : Interface {
+  void record(std::shared_ptr<int> p) override { read_int(*p); }
+  void tally(std::vector<int> v) override { read_size(v.size()); }
+};
+
+// Overriding an override is still overriding.
+struct Deeper : Impl {
+  void record(std::shared_ptr<int> p) override { read_int(*p + 1); }
+};
+
+struct Root {
+  virtual ~Root() = default;
+  // Virtual, but overrides nothing, so the signature is this declaration's to
+  // change.
+  virtual void root_record_bad(std::shared_ptr<int> p) { read_int(*p); }
+};
+
+struct Plain {
+  void plain_record_bad(std::shared_ptr<int> p) { read_int(*p); }
+};
+
+struct Overload : Interface {
+  void record(std::shared_ptr<int> p) override { read_int(*p); }
+  void tally(std::vector<int> v) override { read_size(v.size()); }
+  // Reported: it only shares a name with the method it inherits, and an
+  // overload chooses its own parameters. Deliberately not named with a _bad
+  // suffix -- the name has to be the inherited one for this to be a control
+  // that tells matching on the signature apart from matching on the name. The
+  // parameter is called `q` so that the expected output names which of the two
+  // `record` methods is the one still reported; both render the same otherwise.
+  void record(std::shared_ptr<int> q, int extra) { read_int(*q + extra); }
+};
+
+// Known limitation. A derived class may declare an INSTANCE method with the
+// same name and the same parameter types as a NON-virtual base method. That
+// hides the base method instead of overriding it, so this declaration does own
+// its signature and the advice is actionable here. The check cannot tell the
+// two apart: it asks whether a supertype declares the same signature, and
+// nothing records whether a method is virtual -- the clang frontend reads it
+// but drops it before the IR -- so the report is lost here too. A
+// virtuality-aware check would restore the Hider, DeepHider and CrtpDerived
+// rows below. The limitation stops at instance methods: a static one is
+// recognised, since a static can never override.
+struct NonVirtualBase {
+  void hides_record_bad(std::shared_ptr<int> p) { read_int(*p); }
+};
+
+struct Hider : NonVirtualBase {
+  // Same name and signature as the base, which is not virtual, so this hides it
+  // rather than overriding it. Not reported, and it should be.
+  void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 1); }
+};
+
+// Hiding a hider is still hiding, and is lost the same way.
+struct DeepHider : Hider {
+  void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 2); }
+};
+
+// A STATIC member function cannot override anything: clang rejects a static
+// that tries to. It must carry the INHERITED name to be a test at all, since
+// the check matches a name together with exact parameter types; spelled any
+// other way it hides nothing, the check never looks at it, and the row would be
+// reported whether or not a static is excluded. With the name it does hide the
+// base method, so this declaration owns its signature and is reported, and the
+// row disappears if the static exclusion is reverted.
+struct StaticHider : NonVirtualBase {
+  static void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 3); }
+};
+
+// The curiously recurring template pattern reaches the derived class without
+// virtual functions, so the derived declaration owns its signature too, and is
+// lost to the same limitation as Hider. The base is reported; the explicit
+// instantiation below is what makes its body exist to be analysed.
+template <class Derived>
+struct CrtpBase {
+  void crtp_record_bad(std::shared_ptr<int> p) { read_int(*p); }
+};
+
+struct CrtpDerived : CrtpBase<CrtpDerived> {
+  void crtp_record_bad(std::shared_ptr<int> p) { read_int(*p + 1); }
+};
+
+template struct CrtpBase<CrtpDerived>;
+
+} // namespace virtual_override
 } // namespace const_refable
