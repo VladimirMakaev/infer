@@ -288,6 +288,17 @@ module AtomicInteger = struct
     PulseOperations.write_id ret_id (old_int, Hist.add_event event old_hist) astate
 end
 
+(* Model bookkeeping must not look like a write by the program: [Memory.add_edge] marks its
+   source as written, which makes a read-only character access appear to modify a copied string. *)
+let set_buffer_edge (buffer, _) access value astate =
+  let edges =
+    Memory.fold_edges buffer astate ~init:UnsafeMemory.Edges.empty ~f:(fun edges (access, value) ->
+        UnsafeMemory.Edges.add access value edges )
+    |> UnsafeMemory.Edges.add access value
+  in
+  AbductiveDomain.set_post_edges buffer edges astate
+
+
 (** the address of the element at [index] of the buffer [data], kept reachable from [data] so that
     invalidating the buffer invalidates the derived pointers too *)
 let buffer_offset ~desc data index : PulseModelsDSL.aval PulseModelsDSL.model_monad =
@@ -308,11 +319,29 @@ let buffer_offset ~desc data index : PulseModelsDSL.aval PulseModelsDSL.model_mo
         |> Option.value_map ~default:astate ~f:(fun (cause, trace) ->
             AddressAttributes.add_one address (Invalid (cause, trace)) astate )
       in
-      ( Memory.add_edge path data (ArrayAccess (StdTyp.void, fst index)) element location astate
-      , element ) )
+      (set_buffer_edge data (ArrayAccess (StdTyp.void, fst index)) element astate, element) )
 
 
 module BasicString = struct
+  let store_contents_uncertainty this unknown : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    exec_command (fun astate ->
+        (* A scalar marker shared with another object's marker must not make the objects
+           alias. Ownership checks stop at dereferences, so give each string its own cell. *)
+        let cell =
+          Memory.find_edge_opt (fst this) (FieldAccess ModeledField.string_contents_unknown) astate
+          |> Option.value ~default:(AbstractValue.mk_fresh (), snd this)
+        in
+        let astate = set_buffer_edge cell Dereference unknown astate in
+        set_buffer_edge this (FieldAccess ModeledField.string_contents_unknown) cell astate )
+
+
+  let unknown_contents this : unit PulseModelsDSL.model_monad =
+    let open PulseModelsDSL.Syntax in
+    let* unknown = int 1 in
+    store_contents_uncertainty this unknown
+
+
   (* Derived data pointers stay reachable from the buffer cell, without sharing the character
      contents of independently owned strings. *)
   let invalidate_offsets path location cause buffer astate =
@@ -336,7 +365,8 @@ module BasicString = struct
 
   let offset data index = buffer_offset ~desc:"string buffer offset" data index
 
-  let constructor_from_constant_dsl (this, this_hist) init_hist : unit PulseModelsDSL.model_monad =
+  let constructor_from_constant_dsl ?(immutable = false) (this, this_hist) init_hist :
+      unit PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
     let* this_hist' = add_model_call this_hist in
     store_field ~ref:(this, this_hist') ModeledField.internal_string init_hist
@@ -354,12 +384,44 @@ module BasicString = struct
               (AbstractValue.mk_fresh_restricted (), astate) )
     in
     write_field ~ref:(this, this_hist') ModeledField.string_length (len, snd init_hist)
+    @@> let* unknown = int (if immutable then 0 else 1) in
+        store_contents_uncertainty (this, this_hist') unknown
 
 
   (** constructor from constant string *)
-  let constructor_from_constant ~desc this_hist init_hist : model =
+  let constructor_from_constant ~desc this_hist (init : _ FuncArg.t) : model =
     let open PulseModelsDSL.Syntax in
-    start_named_model desc @@ fun () -> constructor_from_constant_dsl this_hist init_hist
+    let rec immutable = function
+      | Exp.Cast (_, exp) ->
+          immutable exp
+      | Exp.Const (Cstr _) ->
+          true
+      | _ ->
+          false
+    in
+    start_named_model desc
+    @@ fun () ->
+    let* {callee_procname} = get_data in
+    let full_string =
+      match IRAttributes.load_formal_types callee_procname with
+      | [_; _] ->
+          true
+      | [_; _; alloc] -> (
+          let open ProcnameDispatcher.TypName in
+          let allocator = make_dispatcher [-"std" &:: "allocator" &::.*--> ()] in
+          let alloc = match alloc.Typ.desc with Tptr (typ, _) -> typ | _ -> alloc in
+          match Typ.name alloc with
+          | Some name ->
+              Option.is_some (allocator () name)
+          | None ->
+              false )
+      | _ ->
+          false
+    in
+    (* Count and iterator-range overloads do not denote the whole literal. *)
+    constructor_from_constant_dsl
+      ~immutable:(full_string && immutable init.FuncArg.exp)
+      this_hist init.FuncArg.arg_payload
 
 
   let default_constructor ~desc this_hist : model =
@@ -367,7 +429,7 @@ module BasicString = struct
     start_named_model desc
     @@ fun () ->
     let* init_hist = string "" in
-    constructor_from_constant_dsl this_hist init_hist
+    constructor_from_constant_dsl ~immutable:true this_hist init_hist
 
 
   let fill_constructor ~desc this_hist length : model =
@@ -377,6 +439,8 @@ module BasicString = struct
     let* contents = fresh () in
     store_field ~ref:this_hist ModeledField.internal_string contents
     @@> write_field ~ref:this_hist ModeledField.string_length length
+    @@> let* unknown = int 0 in
+        store_contents_uncertainty this_hist unknown
 
 
   let copy_constructor_dsl (this, hist) src_hist : unit PulseModelsDSL.model_monad =
@@ -384,13 +448,33 @@ module BasicString = struct
     let* this_hist = add_model_call hist in
     let* src_string = load_access src_hist (FieldAccess ModeledField.internal_string) in
     let* src_length = access Read src_hist (FieldAccess ModeledField.string_length) in
+    let* unknown =
+      load_access ~no_access:true src_hist (FieldAccess ModeledField.string_contents_unknown)
+    in
     store_field ~ref:(this, this_hist) ModeledField.internal_string src_string
     @@> write_field ~ref:(this, this_hist) ModeledField.string_length src_length
+    @@> store_contents_uncertainty (this, this_hist) unknown
 
 
   let copy_constructor ~desc this_hist src_hist : model =
     let open PulseModelsDSL.Syntax in
-    start_named_model desc @@ fun () -> copy_constructor_dsl this_hist src_hist
+    start_named_model desc
+    @@ fun () ->
+    let* {callee_procname} = get_data in
+    let exact_copy_or_move =
+      Option.exists (IRAttributes.load callee_procname) ~f:(fun (attrs : ProcAttributes.t) ->
+          attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor )
+    in
+    let may_move =
+      match IRAttributes.load_formal_types callee_procname with
+      | _ :: source :: _ ->
+          Typ.is_rvalue_reference source && not (Typ.is_pointer_to_const source)
+      | _ ->
+          true
+    in
+    copy_constructor_dsl this_hist src_hist
+    @@> (if exact_copy_or_move then ret () else unknown_contents this_hist)
+    @@> if may_move then unknown_contents src_hist else ret ()
 
 
   let data ((this, hist) as this_hist) ~desc : model =
@@ -400,6 +484,7 @@ module BasicString = struct
     let* this_string, this_string_hist =
       access Read this_hist (FieldAccess ModeledField.internal_string)
     in
+    let* () = unknown_contents this_hist in
     let* ret_hist = add_model_call this_string_hist in
     exec_command
       (AbductiveDomain.AddressAttributes.add_one this_string
@@ -410,6 +495,7 @@ module BasicString = struct
   let iterator_common ((this, hist) as this_hist) ((iter, _) as iter_hist) :
       (PulseModelsDSL.aval * PulseModelsDSL.aval) PulseModelsDSL.model_monad =
     let open PulseModelsDSL.Syntax in
+    let* () = unknown_contents this_hist in
     let* backing_ptr = access Read iter_hist (FieldAccess GenericArrayBackedCollection.field) in
     let* internal_string =
       load_access ~deref:false this_hist (FieldAccess ModeledField.internal_string)
@@ -550,18 +636,47 @@ module BasicString = struct
     else lift_model (Basic.nondet ~desc:"std::basic_string::size") model_data astate non_disj
 
 
-  let address ~desc ptr_hist (idx, _) : model_no_non_disj =
-   fun ({ret= ret_id, _} as model_env) astate ->
-    let astate_zero_idx =
-      let++ astate = PulseArithmetic.prune_eq_zero idx astate in
-      PulseOperations.write_id ret_id ptr_hist astate |> Basic.continue
-    in
-    let astate_non_zero_idx =
-      let<**> astate = PulseArithmetic.prune_ne_zero idx astate in
-      Basic.nondet ~desc model_env astate
-    in
-    SatUnsat.to_list astate_zero_idx @ astate_non_zero_idx
+  let address ~desc this index : model =
+    let open PulseModelsDSL.Syntax in
+    start_named_model desc
+    @@ fun () ->
+    let* buffer = access Read this (FieldAccess ModeledField.internal_string) in
+    (* A character reference may subsequently be written, including through a cast. The
+       buffer remains the same, but its old content token cannot prove later equality. *)
+    unknown_contents this
+    @@> let* element = offset buffer index in
+        assign_ret element
 end
+
+let string_equal lhs rhs : model =
+  let open PulseModelsDSL.Syntax in
+  start_named_model "std::basic_string equality"
+  @@ fun () ->
+  let* left = load_access lhs (FieldAccess ModeledField.internal_string) in
+  let* right = load_access rhs (FieldAccess ModeledField.internal_string) in
+  let* left_length = access Read lhs (FieldAccess ModeledField.string_length) in
+  let* right_length = access Read rhs (FieldAccess ModeledField.string_length) in
+  let* left_unknown =
+    load_access ~no_access:true lhs (FieldAccess ModeledField.string_contents_unknown)
+  in
+  let* right_unknown =
+    load_access ~no_access:true rhs (FieldAccess ModeledField.string_contents_unknown)
+  in
+  let* same = binop Eq left right in
+  let* same_length = binop Eq left_length right_length in
+  let* left_stable = binop_int Eq left_unknown IntLit.zero in
+  let* right_stable = binop_int Eq right_unknown IntLit.zero in
+  let* proof = binop LAnd same same_length in
+  let* proof = binop LAnd proof left_stable in
+  let* proof = binop LAnd proof right_stable in
+  let* opaque_effects = exec_operation (fun astate -> (astate.unknown_values, astate)) in
+  let* proof = if opaque_effects then int 0 else ret proof in
+  (* Identical content tokens and lengths prove equality. Distinct tokens can still denote
+     equal strings, so equality remains possible in that case. *)
+  disj
+    [ prune_eq left_length right_length @@> int 1 >>= assign_ret
+    ; prune_eq_zero proof @@> int 0 >>= assign_ret ]
+
 
 (** A [std::basic_string_view] keeps the string value and length of what it views like [BasicString]
     does, and in [data_field] the pointer returned by [data()]: the viewed [char*] or the buffer of
@@ -652,7 +767,8 @@ module BasicStringView = struct
     let open PulseModelsDSL.Syntax in
     start_named_model desc
     @@ fun () ->
-    BasicString.copy_constructor_dsl this_hist string_hist
+    BasicString.unknown_contents string_hist
+    @@> BasicString.copy_constructor_dsl this_hist string_hist
     @@> let* buffer =
           load_access ~deref:false string_hist (FieldAccess ModeledField.internal_string)
         in
@@ -1513,6 +1629,19 @@ let has_destructor_effects tenv class_name =
 
 
 module Vector = struct
+  let has_standard_allocator callee =
+    let open ProcnameDispatcher.TypName in
+    let vector = make_dispatcher [-"std" &:: "vector" &::.*--> ()] in
+    let allocator = make_dispatcher [-"std" &:: "allocator" &::.*--> ()] in
+    match Procname.get_class_type_name callee with
+    | Some
+        ( CppClass {template_spec_info= Template {args= TType _ :: TType {desc= Tstruct alloc} :: _}}
+          as name ) ->
+        Option.is_some (vector () name) && Option.is_some (allocator () alloc)
+    | _ ->
+        false
+
+
   (* This is a lower bound, not an exact capacity. Only concrete bounds are retained: symbolic
      growth keeps the existing reserved-vector approximation without adding summary preconditions. *)
   let capacity_lower_bound vector astate =
@@ -1616,8 +1745,28 @@ module Vector = struct
     fun name -> Option.is_some (dispatch () name)
 
 
-  (* [std::shared_ptr] specifically, not [is_smart_pointer]: only the shared pointer has a
-     reference count to keep, and [std::unique_ptr]'s copy constructor is deleted. *)
+  let has_pointer_members tenv class_name =
+    let rec visit visited name =
+      if is_smart_pointer name then true
+      else if Typ.Name.Set.mem name visited || String.is_prefix (Typ.Name.name name) ~prefix:"std::"
+      then false
+      else
+        let visited = Typ.Name.Set.add name visited in
+        Option.exists (Tenv.lookup tenv name) ~f:(fun ({fields} : Struct.t) ->
+            List.exists fields ~f:(fun ({typ} : Struct.field) ->
+                match typ.Typ.desc with
+                | Tptr _ ->
+                    true
+                | Tstruct name ->
+                    visit visited name
+                | _ ->
+                    false ) )
+    in
+    visit Typ.Name.Set.empty class_name
+
+
+  (* Only [std::shared_ptr] has a reference count to keep; [std::unique_ptr]'s copy constructor
+     is deleted. *)
   let is_shared_ptr =
     let open ProcnameDispatcher.TypName in
     let dispatch = make_dispatcher [-"std" &:: "shared_ptr" &::.*--> ()] in
@@ -1649,26 +1798,6 @@ module Vector = struct
         not (Typ.is_const pointee.Typ.quals)
     | _ ->
         false
-
-
-  let has_pointer_members tenv class_name =
-    let rec visit visited name =
-      if is_smart_pointer name then true
-      else if Typ.Name.Set.mem name visited || String.is_prefix (Typ.Name.name name) ~prefix:"std::"
-      then false
-      else
-        let visited = Typ.Name.Set.add name visited in
-        Option.exists (Tenv.lookup tenv name) ~f:(fun ({fields} : Struct.t) ->
-            List.exists fields ~f:(fun ({typ} : Struct.field) ->
-                match typ.Typ.desc with
-                | Tptr _ ->
-                    true
-                | Tstruct name ->
-                    visit visited name
-                | _ ->
-                    false ) )
-    in
-    visit Typ.Name.Set.empty class_name
 
 
   let continue_with f (outcomes, non_disj) =
@@ -2139,19 +2268,24 @@ module Vector = struct
 
 
   let vector_begin ~desc vector iter : model_no_non_disj =
-   fun {path; location} astate ->
+   fun {path; location; callee_procname} astate ->
     let event = Hist.call_event path location desc in
     let index_zero = AbstractValue.mk_fresh () in
     let<**> astate = PulseArithmetic.and_eq_int index_zero IntLit.zero astate in
-    let<+> astate =
+    let<*> astate =
       GenericArrayBackedCollection.Iterator.point_into path location event ~collection:vector ~iter
         ~index:index_zero ~track_vector_index:(tracked_positions vector astate) astate
     in
-    astate
+    let astate =
+      if has_standard_allocator callee_procname then
+        GenericArrayBackedCollection.Iterator.record_search_index iter (index_zero, snd iter) astate
+      else GenericArrayBackedCollection.Iterator.forget_search_index iter astate
+    in
+    Basic.ok_continue astate
 
 
   let vector_end ~desc vector iter : model_no_non_disj =
-   fun {path; location} astate ->
+   fun {path; location; callee_procname} astate ->
     let event = Hist.call_event path location desc in
     let<*> astate, (arr_addr, _) =
       GenericArrayBackedCollection.eval path Read location vector astate
@@ -2168,6 +2302,20 @@ module Vector = struct
     let<*> astate =
       PulseOperations.write_field path location ~ref:iter
         GenericArrayBackedCollection.Iterator.internal_pointer ~obj:pointer_val astate
+    in
+    let<*> astate =
+      if has_standard_allocator callee_procname then
+        let* astate, search_size =
+          GenericArrayBackedCollection.to_internal_size_deref path Read location vector astate
+        in
+        let astate =
+          GenericArrayBackedCollection.Iterator.record_search_index iter search_size astate
+        in
+        let+ astate, _ =
+          PulseOperations.eval_access path NoAccess location pointer_val Dereference astate
+        in
+        astate
+      else Ok (GenericArrayBackedCollection.Iterator.forget_search_index iter astate)
     in
     match post_size GenericArrayBackedCollection.size_field vector astate with
     | None ->
@@ -2687,10 +2835,7 @@ module Vector = struct
       model =
    fun ({path; location; callee_procname; analysis_data= {tenv}} as model_data) astate non_disj ->
     match element_type callee_procname with
-    | Some ({desc= Tstruct class_name} as typ)
-      when (not (Tenv.is_trivially_copyable tenv typ))
-           && has_destructor_effects tenv class_name
-           && has_pointer_members tenv class_name ->
+    | Some ({desc= Tstruct class_name} as typ) when not (Tenv.is_trivially_copyable tenv typ) ->
         let pointer_typ = Typ.mk (Tptr (typ, Pk_pointer)) in
         (* the callee's own formals give the declared parameter types; fall back to the actuals'
            types when they do not line up *)
@@ -2730,14 +2875,73 @@ module Vector = struct
           , non_disj )
         in
         let constructor =
-          List.find_map Typ.overloading_resolution ~f:(fun compare ->
+          let exact_reference formal actual =
+            Typ.equal_ignore_quals formal actual
+            && List.exists Typ.overloading_resolution ~f:(fun matches -> matches formal actual)
+          in
+          (* A compatible const reference can bind an rvalue, but an exact rvalue-reference
+             overload wins. Do not let method order select an undeclared copy constructor. *)
+          let comparisons =
+            if has_standard_allocator callee_procname then
+              exact_reference :: Typ.overloading_resolution
+            else Typ.overloading_resolution
+          in
+          List.find_map comparisons ~f:(fun compare ->
               List.find (Tenv.find_cpp_constructor tenv class_name) ~f:(fun proc ->
                   (not
                      (Option.exists (IRAttributes.load proc) ~f:(fun (attrs : ProcAttributes.t) ->
                           attrs.is_cpp_deleted ) ) )
                   && List.equal compare (IRAttributes.load_formal_types proc) actuals ) )
         in
-        if Option.is_none constructor then
+        let legacy =
+          has_destructor_effects tenv class_name && has_pointer_members tenv class_name
+        in
+        let supported =
+          legacy
+          ||
+          (* Extend construction only to implicit copies/moves of string records. Arbitrary
+             user constructors, bases or members may run exception-handling code that the
+             existing scalar fallback deliberately does not execute. *)
+          has_standard_allocator callee_procname
+          &&
+          let standard_name expected name =
+            String.is_prefix (QualifiedCppName.to_qual_string name) ~prefix:"std::"
+            && Option.exists (QualifiedCppName.extract_last name) ~f:(fun (last, _) ->
+                String.equal
+                  (String.lsplit2 last ~on:'<' |> Option.value_map ~default:last ~f:fst)
+                  expected )
+          in
+          let char_template expected = function
+            | { Typ.desc=
+                  Tstruct (CppClass {name; template_spec_info= Template {args= [TType char]}}) } ->
+                Typ.equal char StdTyp.char && standard_name expected name
+            | _ ->
+                false
+          in
+          let supported_field ({Struct.typ} : Struct.field) =
+            match typ.Typ.desc with
+            | Tint _ | Tfloat _ ->
+                true
+            | Tstruct
+                (CppClass
+                   { name
+                   ; template_spec_info= Template {args= [TType char; TType traits; TType alloc]} }
+                  ) ->
+                standard_name "basic_string" name && Typ.equal char StdTyp.char
+                && char_template "char_traits" traits
+                && char_template "allocator" alloc
+            | _ ->
+                false
+          in
+          Option.exists constructor ~f:(fun constructor ->
+              Option.exists (IRAttributes.load constructor) ~f:(fun (attrs : ProcAttributes.t) ->
+                  attrs.is_defined && attrs.is_cpp_implicit
+                  && (attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor) ) )
+          && Option.exists (Tenv.lookup tenv class_name) ~f:(fun (info : Struct.t) ->
+              List.is_empty info.supers && List.for_all info.fields ~f:supported_field )
+        in
+        if not supported then fallback model_data astate non_disj
+        else if Option.is_none constructor then
           (* The element's class is not in the tenv. For libstdc++ that is the normal state of
              affairs rather than an anomaly: captures routinely skip its headers. Pulse does model
              these constructors, but the models are keyed on the PROCNAME while the lookup above
@@ -3189,10 +3393,321 @@ module Vector = struct
         astate
 end
 
+module Algorithm = struct
+  module Iterator = GenericArrayBackedCollection.Iterator
+
+  let stored field (value, _) astate =
+    Memory.find_edge_opt value (FieldAccess field) astate
+    |> Option.bind ~f:(fun (cell, _) -> Memory.find_edge_opt cell Dereference astate)
+
+
+  let position (iter, _) astate =
+    Memory.find_edge_opt iter (FieldAccess Iterator.internal_pointer) astate
+    |> Option.bind ~f:(fun (pointer, _) ->
+        Memory.find_edge_opt pointer Dereference astate
+        |> Option.map ~f:(fun position -> (pointer, position)) )
+
+
+  (* Only a complete, small vector range with proved logical positions is enumerated. No
+     presence fact is inferred from a nonempty range or from the spelling of the predicate. *)
+  let range first last astate =
+    let open IOption.Let_syntax in
+    let* first_array, _ = stored GenericArrayBackedCollection.field first astate in
+    let* last_array, _ = stored GenericArrayBackedCollection.field last astate in
+    let* _, (first_position, _) = position first astate in
+    let* last_pointer, (last_position, _) = position last astate in
+    let* first_index, _ = Iterator.search_index first astate in
+    let* last_index, _ = Iterator.search_index last astate in
+    let* indexed_position, _ =
+      Memory.find_edge_opt first_array (ArrayAccess (StdTyp.void, first_index)) astate
+    in
+    let* first_index = PulseArithmetic.as_constant_q astate first_index in
+    if
+      AbstractValue.equal first_array last_array
+      (* An offset or reassigned iterator can retain old bookkeeping. Its actual pointer must
+         still designate the indexed element before that index is used for a search. *)
+      && AbstractValue.equal first_position indexed_position
+      && AddressAttributes.is_end_of_collection last_pointer astate
+      && Z.equal (Q.den first_index) Z.one
+      && Q.compare first_index Q.zero >= 0
+      && Z.fits_int (Q.num first_index)
+    then Some (Z.to_int (Q.num first_index), last_index, last_position)
+    else None
+
+
+  let predicate tenv (pred : _ FuncArg.t) _astate =
+    let open IOption.Let_syntax in
+    let* name =
+      match pred.FuncArg.typ.Typ.desc with
+      | Tstruct name | Tptr ({desc= Tstruct name}, _) ->
+          Some name
+      | _ ->
+          None
+    in
+    let* {Struct.methods} = Tenv.lookup tenv name in
+    let call_operators =
+      List.filter_map methods ~f:(fun {Struct.name} ->
+          if
+            not
+              (String.equal
+                 ( Procname.get_method name |> String.lsplit2 ~on:'<'
+                 |> Option.value_map ~default:(Procname.get_method name) ~f:fst )
+                 "operator()" )
+          then None
+          else
+            let* attrs = IRAttributes.load name in
+            match IRAttributes.load_formal_types name with
+            | [this_typ; element_typ]
+              when attrs.ProcAttributes.is_defined
+                   && ( Typ.is_int element_typ
+                      ||
+                      match element_typ.Typ.desc with
+                      | Tptr (_, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
+                          true
+                      | _ ->
+                          false ) ->
+                Some (name, this_typ, element_typ)
+            | _ ->
+                None )
+    in
+    match call_operators with [callee] -> Some callee | _ -> None
+
+
+  let find_if (first : _ FuncArg.t) (last : _ FuncArg.t) (pred : _ FuncArg.t) result : model =
+   fun ({path; location; analysis_data= {tenv} as analysis_data} as model_data) astate non_disj ->
+    let desc = "std::find_if()" in
+    let fallback =
+      lift_model (Iterator.position_in_range ~desc first.arg_payload [result]) model_data
+    in
+    match (range first.arg_payload last.arg_payload astate, predicate tenv pred astate) with
+    | Some (start, last_index, end_position), Some (callee, this_typ, element_typ) -> (
+        let event = Hist.call_event path location desc in
+        let return_end astate non_disj =
+          lift_model
+            (fun _ astate ->
+              let<+> astate =
+                Iterator.construct path location event ~init:last.arg_payload ~ref:result astate
+              in
+              astate )
+            model_data astate non_disj
+        in
+        let return_found index astate non_disj =
+          lift_model
+            (fun _ astate ->
+              let astate, index = PulseArithmetic.absval_of_int astate (IntLit.of_int index) in
+              let<*> astate =
+                Iterator.point_into path location event ~collection:first.arg_payload ~iter:result
+                  ~index astate
+              in
+              let astate = Iterator.record_search_index result (index, snd result) astate in
+              match position result astate with
+              | Some (_, (found, _)) ->
+                  let<++> astate =
+                    PulseArithmetic.prune_binop ~negated:true Eq (AbstractValueOperand found)
+                      (AbstractValueOperand end_position) astate
+                  in
+                  astate
+              | None ->
+                  Basic.ok_continue astate )
+            model_data astate non_disj
+        in
+        let rec seek finish index astate non_disj =
+          if index >= finish then return_end astate non_disj
+          else
+            let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
+            let astate, index_value = PulseArithmetic.absval_of_int astate (IntLit.of_int index) in
+            let<*> astate, element =
+              GenericArrayBackedCollection.element path location first.arg_payload index_value
+                astate
+            in
+            let<*> astate, actual =
+              if Typ.is_int element_typ then
+                PulseOperations.eval_access path Read location element Dereference astate
+              else Ok (astate, element)
+            in
+            let predicate_ret = (Ident.create_fresh Ident.kprimed, Typ.mk (Tint IBool)) in
+            match
+              PulseCallOperations.call analysis_data path location callee ~ret:predicate_ret
+                ~actuals:[(pred.arg_payload, this_typ); (actual, element_typ)]
+                ~formals_opt:None ResolvedCall CallFlags.default astate non_disj
+            with
+            | results, non_disj, _, `KnownCall ->
+                let holds, fails, stopped =
+                  ConditionVariable.split_on_predicate (fst predicate_ret) results
+                in
+                let found, non_disj =
+                  NonDisjDomain.bind (holds, non_disj) ~f:(fun holds non_disj ->
+                      bind_sat_result non_disj (Sat holds) (fun astate ->
+                          return_found index astate non_disj ) )
+                in
+                let not_found, non_disj =
+                  NonDisjDomain.bind (fails, non_disj) ~f:(fun fails non_disj ->
+                      bind_sat_result non_disj (Sat fails) (fun astate ->
+                          seek finish (index + 1) astate non_disj ) )
+                in
+                (found @ not_found @ stopped, non_disj)
+            | _ ->
+                fallback astate non_disj
+        in
+        let prune_end ~negated finish astate =
+          PulseArithmetic.prune_binop ~negated Eq (AbstractValueOperand last_index)
+            (ConstOperand (Cint (IntLit.of_int finish)))
+            astate
+        in
+        let concrete_finish =
+          PulseArithmetic.as_constant_q astate last_index
+          |> Option.bind ~f:(fun finish ->
+              if Z.equal (Q.den finish) Z.one && Z.fits_int (Q.num finish) then
+                Some (Z.to_int (Q.num finish))
+              else None )
+        in
+        match concrete_finish with
+        | Some finish when finish >= start && finish - start <= 2 ->
+            seek finish start astate non_disj
+        | Some _ ->
+            fallback astate non_disj
+        | None ->
+            (* Callees see symbolic sizes. Keep the size condition in their precondition, so
+               the caller's pushed size selects the applicable search result. *)
+            let endings = [start + 1; start + 2] in
+            let results, non_disj =
+              List.fold endings ~init:([], non_disj) ~f:(fun (prior, non_disj) finish ->
+                  let results, non_disj =
+                    bind_sat_result non_disj (prune_end ~negated:false finish astate) (fun astate ->
+                        seek finish start astate non_disj )
+                  in
+                  (prior @ results, non_disj) )
+            in
+            let other, non_disj =
+              let ( let<**> ) x f = bind_sat_result non_disj x f in
+              let<**> astate = prune_end ~negated:true (start + 1) astate in
+              let<**> astate = prune_end ~negated:true (start + 2) astate in
+              fallback astate non_disj
+            in
+            (results @ other, non_disj) )
+    | _ ->
+        fallback astate non_disj
+end
+
 (** A [std::span] is a view of a contiguous sequence it does not own. It gets the representation of
     the array-backed collections, with [GenericArrayBackedCollection.field] holding the array it
     views and [size_field] its extent. That array is the array of the sequence's owner, so
     destroying the owner, or reallocating its storage, invalidates accesses through the span too. *)
+let preserves_string_proofs tenv callee =
+  let named expected name =
+    let open ProcnameDispatcher.TypName in
+    let dispatch = make_dispatcher [-"std" &:: expected &::.*--> ()] in
+    Option.is_some (dispatch () name)
+  in
+  let default_string = function
+    | Typ.CppClass
+        { template_spec_info=
+            Template {args= [TType char; TType {desc= Tstruct traits}; TType {desc= Tstruct alloc}]}
+        } as name ->
+        named "basic_string" name && Typ.equal char StdTyp.char && named "char_traits" traits
+        && named "allocator" alloc
+    | _ ->
+        false
+  in
+  let safe_type typ =
+    let typ = match typ.Typ.desc with Tptr (typ, _) -> typ | _ -> typ in
+    match typ.Typ.desc with
+    | Tint _ | Tfloat _ | Tvoid ->
+        true
+    | Tstruct name ->
+        default_string name || named "allocator" name
+    | _ ->
+        false
+  in
+  let method_name =
+    ( match callee with
+      | Procname.C {c_name} ->
+          QualifiedCppName.extract_last c_name
+          |> Option.value_map ~default:(Procname.get_method callee) ~f:fst
+      | _ ->
+          Procname.get_method callee )
+    |> String.lsplit2 ~on:'<'
+    |> Option.value_map ~default:(Procname.get_method callee) ~f:fst
+  in
+  if BuiltinDecl.is_declared callee || Procname.is_std_move callee then true
+  else
+    match Procname.get_class_type_name callee with
+    | Some name when default_string name ->
+        let formals = IRAttributes.load_formal_types callee in
+        (not (List.is_empty formals)) && List.for_all (List.drop formals 1) ~f:safe_type
+    | Some (CppClass {template_spec_info= Template {args= TType {desc= Tptr _} :: _}} as name)
+      when named "__wrap_iter" name ->
+        true
+    | Some name when named "allocator" name ->
+        true
+    | Some _ when Vector.has_standard_allocator callee -> (
+        let access_only =
+          List.mem
+            [ "begin"
+            ; "end"
+            ; "cbegin"
+            ; "cend"
+            ; "size"
+            ; "capacity"
+            ; "empty"
+            ; "data"
+            ; "at"
+            ; "front"
+            ; "back"
+            ; "operator[]" ]
+            method_name ~equal:String.equal
+        in
+        if access_only then true
+        else if
+          String.equal method_name "vector"
+          && Int.equal (List.length (IRAttributes.load_formal_types callee)) 1
+        then true
+        else
+          match Vector.element_type callee with
+          | Some typ when Tenv.is_trivially_copyable tenv typ ->
+              List.mem
+                ["push_back"; "reserve"; "~vector"; "clear"; "pop_back"; "shrink_to_fit"]
+                method_name ~equal:String.equal
+          | Some {desc= Tstruct name} ->
+              Option.exists (Tenv.lookup tenv name) ~f:(fun (info : Struct.t) ->
+                  List.is_empty info.supers
+                  && List.for_all info.fields ~f:(fun ({typ} : Struct.field) -> safe_type typ)
+                  && Option.exists (Tenv.find_cpp_destructor tenv name) ~f:(fun destructor ->
+                      Option.exists (IRAttributes.load destructor)
+                        ~f:(fun (attrs : ProcAttributes.t) -> attrs.is_cpp_implicit ) )
+                  && List.for_all (Tenv.find_cpp_constructor tenv name) ~f:(fun constructor ->
+                      Option.for_all (IRAttributes.load constructor)
+                        ~f:(fun (attrs : ProcAttributes.t) ->
+                          (not (attrs.is_cpp_copy_ctor || attrs.is_cpp_move_ctor))
+                          || attrs.is_cpp_implicit ) ) )
+              && List.mem ["push_back"; "reserve"] method_name ~equal:String.equal
+          | _ ->
+              false )
+    | _ -> (
+      match callee with
+      | Procname.C {c_name}
+        when String.is_prefix (QualifiedCppName.to_qual_string c_name) ~prefix:"std::" ->
+          String.equal method_name "find_if"
+          || String.equal method_name "operator=="
+             && List.for_all (IRAttributes.load_formal_types callee) ~f:safe_type
+      | _ ->
+          List.mem
+            [ "malloc"
+            ; "calloc"
+            ; "realloc"
+            ; "free"
+            ; "strlen"
+            ; "strcmp"
+            ; "strncmp"
+            ; "memcpy"
+            ; "memmove"
+            ; "memset"
+            ; "memcmp"
+            ; "strcpy"
+            ; "strncpy" ]
+            method_name ~equal:String.equal )
+
+
 module Span = struct
   let size_access = Access.FieldAccess GenericArrayBackedCollection.size_field
 
@@ -4559,7 +5074,7 @@ let map_matchers =
       &:: method_name
     in
     [ -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload
-      $+ capt_arg_payload_of_prim_typ char_ptr_typ
+      $+ capt_arg_of_prim_typ char_ptr_typ
       $+...$--> BasicString.constructor_from_constant ~desc:"std::basic_string::basic_string()"
     ; -"std" &:: "basic_string" &:: "basic_string" $ capt_arg_payload $+ capt_arg_payload
       $+ any_arg_of_prim_typ (Typ.mk (Tint IChar))
@@ -4610,8 +5125,12 @@ let map_matchers =
       $+ capt_arg_payload $--> BasicStringView.substr
     ; -"std" &:: "basic_string" &:: "begin" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.begin_ ~desc:"std::basic_string::begin()"
+    ; -"std" &:: "basic_string" &:: "cbegin" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> BasicString.begin_ ~desc:"std::basic_string::cbegin()"
     ; -"std" &:: "basic_string" &:: "end" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.end_ ~desc:"std::basic_string::end()"
+    ; -"std" &:: "basic_string" &:: "cend" <>$ capt_arg_payload $+ capt_arg_payload
+      $--> BasicString.end_ ~desc:"std::basic_string::cend()"
     ; -"std" &:: "basic_string" &:: "empty" <>$ capt_arg_payload $--> BasicString.empty
     ; -"std" &:: "basic_string" &:: "length" <>$ capt_arg_payload $--> BasicString.length
     ; -"std" &:: "basic_string" &:: "~basic_string" <>$ capt_arg_payload $--> BasicString.destructor
@@ -4834,6 +5353,42 @@ let log_message_fatal severity : model =
 
 let simple_matchers =
   let open ProcnameDispatcher.Call in
+  let is_std_string_equality (_tenv, procname) _ =
+    match procname with
+    | Procname.C
+        { c_name
+        ; c_template_args=
+            Template
+              { args=
+                  TType char
+                  :: TType {desc= Tstruct (CppClass {name})}
+                  :: TType {desc= Tstruct (CppClass {name= allocator_name})}
+                  :: _ } } -> (
+        Typ.equal char StdTyp.char
+        && String.is_prefix (QualifiedCppName.to_qual_string name) ~prefix:"std::"
+        && Option.exists (QualifiedCppName.extract_last name) ~f:(fun (last, _) ->
+            String.equal
+              (String.lsplit2 last ~on:'<' |> Option.value_map ~default:last ~f:fst)
+              "char_traits" )
+        (* Custom allocators can run user code, including mutating another string while
+           constructing this one. The stable-content proof assumes the standard allocator. *)
+        && String.is_prefix (QualifiedCppName.to_qual_string allocator_name) ~prefix:"std::"
+        && Option.exists (QualifiedCppName.extract_last allocator_name) ~f:(fun (last, _) ->
+            String.equal
+              (String.lsplit2 last ~on:'<' |> Option.value_map ~default:last ~f:fst)
+              "allocator" )
+        &&
+        match QualifiedCppName.to_rev_list c_name with
+        | fname :: (_ :: _ as namespaces) ->
+            String.equal
+              (String.lsplit2 fname ~on:'<' |> Option.value_map ~default:fname ~f:fst)
+              "operator=="
+            && String.equal (List.last_exn namespaces) "std"
+        | _ ->
+            false )
+    | _ ->
+        false
+  in
   let match_nullable_fn (_tenv, proc_name) _ =
     Option.exists Config.pulse_model_return_nullable ~f:(fun r ->
         let s = Procname.to_string proc_name in
@@ -4841,7 +5396,11 @@ let simple_matchers =
   in
   map_matchers @ thrift_matchers @ condition_variable_matchers @ AbortIfFieldEquals.matchers
   @ ReturnConstant.matchers
-  @ [ -"android" &:: "base" &:: "LogMessage" &:: "LogMessage" $ any_arg $+ any_arg $+ any_arg
+  @ [ +is_std_string_equality &:: "operator=="
+      $ capt_arg_payload_of_typ (-"std" &:: "basic_string")
+      $+ capt_arg_payload_of_typ (-"std" &:: "basic_string")
+      $--> string_equal
+    ; -"android" &:: "base" &:: "LogMessage" &:: "LogMessage" $ any_arg $+ any_arg $+ any_arg
       $+ capt_arg_payload $+...$--> log_message_fatal
     ; +BuiltinDecl.(match_builtin __builtin_add_overflow)
       <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload $--> add_overflow
@@ -4879,6 +5438,9 @@ let simple_matchers =
          a comparator is called once per step of every associative-container lookup, and under
          C++20 its body reaches the three-way comparison, whose result is not modelled, so each
          call multiplies the caller's disjuncts instead of contributing the two it is worth. *)
+    ; -"std" &:: "find_if"
+      $ capt_arg_of_typ_exists [-"std" &:: "__wrap_iter"; -"__gnu_cxx" &:: "__normal_iterator"]
+      $+ capt_arg $+ capt_arg $+ capt_arg_payload $--> Algorithm.find_if
     ; -"std" &:: "less" &:: "operator()"
       &--> Basic.nondet ~desc:"std::less::operator()"
       |> with_non_disj
@@ -4894,7 +5456,6 @@ let simple_matchers =
     ; -"std" &:: "basic_string" &:: "size" $ capt_arg_payload $--> BasicString.size
     ; -"std" &:: "basic_string" &:: "operator[]" <>$ capt_arg_payload $+ capt_arg_payload
       $--> BasicString.address ~desc:"std::basic_string::operator[]"
-      |> with_non_disj
     ; -"std" &:: "function" &:: "function" $ capt_arg_payload $+ capt_arg
       $--> Function.assign ~desc:"std::function::function"
       |> with_non_disj

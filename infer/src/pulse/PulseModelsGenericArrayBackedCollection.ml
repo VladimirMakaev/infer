@@ -127,6 +127,34 @@ module Iterator = struct
 
   let internal_pointer_access = Access.FieldAccess internal_pointer
 
+  let search_index_access = Access.FieldAccess PulseOperations.ModeledField.vector_search_index
+
+  let search_index (iter, _) astate =
+    Memory.find_edge_opt iter search_index_access astate
+    |> Option.bind ~f:(fun (cell, _) -> Memory.find_edge_opt cell Dereference astate)
+
+
+  let forget_search_index (iter, _) astate =
+    let edges =
+      Memory.fold_edges iter astate ~init:UnsafeMemory.Edges.empty ~f:(fun edges (access, value) ->
+          if Access.equal access search_index_access then edges
+          else UnsafeMemory.Edges.add access value edges )
+    in
+    AbductiveDomain.set_post_edges iter edges astate
+
+
+  let record_search_index (iter, hist) index astate =
+    let cell = AbstractValue.mk_fresh () in
+    let edges =
+      Memory.fold_edges iter astate ~init:UnsafeMemory.Edges.empty ~f:(fun edges (access, value) ->
+          UnsafeMemory.Edges.add access value edges )
+      |> UnsafeMemory.Edges.add search_index_access (cell, hist)
+    in
+    AbductiveDomain.set_post_edges iter edges astate
+    |> AbductiveDomain.set_post_edges cell
+         (UnsafeMemory.Edges.add Dereference index UnsafeMemory.Edges.empty)
+
+
   let to_internal_pointer path mode location iterator astate =
     PulseOperations.eval_access path mode location iterator internal_pointer_access astate
 
@@ -254,9 +282,16 @@ module Iterator = struct
         astate
     in
     let* astate, (p_addr, p_hist) = to_internal_pointer path Read location init astate in
-    PulseOperations.write_field path location ~ref internal_pointer
-      ~obj:(p_addr, Hist.add_event event p_hist)
-      astate
+    let* astate =
+      PulseOperations.write_field path location ~ref internal_pointer
+        ~obj:(p_addr, Hist.add_event event p_hist)
+        astate
+    in
+    match search_index init astate with
+    | None ->
+        Ok (forget_search_index ref astate)
+    | Some index ->
+        Ok (record_search_index ref index astate)
 
 
   let constructor ~desc this init : model_no_non_disj =
@@ -416,6 +451,8 @@ module Iterator = struct
      as in the model of [folly::F14FastMap::find] *)
   let position_in_range ~desc first args : model_no_non_disj =
    fun {path; location} astate ->
+    (* The legacy approximation does not execute a search predicate/comparator. *)
+    let astate = AbductiveDomain.declare_unknown_values astate in
     (* the returned iterator is passed as the last argument *)
     match List.last args with
     | None ->

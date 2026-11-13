@@ -163,10 +163,10 @@ int FP_state_not_read_by_predicate_ok(std::mutex& m,
   return job->id;
 }
 
-// the frontend translates the closure of a generic lambda without its
-// instantiated call operator, so the wait can neither call the predicate nor
-// havoc what it captures
-int FP_generic_lambda_predicate_ok(std::mutex& m,
+// The generic predicate carries its captured state into the call.
+// A successful wait establishes that job is non-null before the
+// dereference below.
+int generic_lambda_predicate_ok(std::mutex& m,
                                    std::condition_variable& cv,
                                    Job*& job) {
   std::unique_lock<std::mutex> lock(m);

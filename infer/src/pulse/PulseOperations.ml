@@ -233,6 +233,12 @@ module ModeledField = struct
 
   let internal_string = Fieldname.make pulse_model_type "__infer_model_backing_string"
 
+  let string_contents_unknown =
+    Fieldname.make pulse_model_type "__infer_model_string_contents_unknown"
+
+
+  let vector_search_index = Fieldname.make pulse_model_type "__infer_vector_search_index"
+
   let internal_ref_count = Fieldname.make pulse_model_type "__infer_model_reference_count"
 
   let delegated_release = Fieldname.make pulse_model_type "__infer_model_delegated_release"
@@ -272,6 +278,30 @@ module ModeledField = struct
 
   let weak_ptr_count = Fieldname.make pulse_model_type "__infer_weak_backing_count"
 end
+
+let invalidate_string_contents_proofs astate =
+  let heap = (astate.AbductiveDomain.post :> BaseDomain.t).heap in
+  let cells =
+    UnsafeMemory.fold
+      (fun _ edges cells ->
+        match
+          UnsafeMemory.Edges.find_opt (FieldAccess ModeledField.string_contents_unknown) edges
+        with
+        | None ->
+            cells
+        | Some cell ->
+            cell :: cells )
+      heap []
+  in
+  let astate, unknown = PulseArithmetic.absval_of_int astate IntLit.one in
+  List.fold cells ~init:astate ~f:(fun astate (cell, hist) ->
+      let edges =
+        Memory.fold_edges cell astate ~init:UnsafeMemory.Edges.empty
+          ~f:(fun edges (access, value) -> UnsafeMemory.Edges.add access value edges )
+        |> UnsafeMemory.Edges.add Dereference (unknown, hist)
+      in
+      AbductiveDomain.set_post_edges cell edges astate )
+
 
 let fold_reachable_from ~f args astate =
   let reachable_values =

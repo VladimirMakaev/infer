@@ -18,6 +18,8 @@ val has_destructor_effects : Tenv.t -> Typ.Name.t -> bool
 (** whether destroying a value of this class runs anything, so that something it owns is reclaimed
     with it *)
 
+val preserves_string_proofs : Tenv.t -> Procname.t -> bool
+
 module InitializerList : sig
   val is_type : Typ.t -> bool
 

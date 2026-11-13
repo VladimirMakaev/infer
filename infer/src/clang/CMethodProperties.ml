@@ -120,13 +120,18 @@ let get_point_of_instantiation method_decl =
 
 let is_cpp_lambda_call_operator meth_decl =
   let open Clang_ast_t in
-  match meth_decl with
-  | CXXMethodDecl (di, _, _, _, _) -> (
-    match CAst_utils.get_decl_opt di.di_parent_pointer with
-    | Some (Clang_ast_t.CXXRecordDecl (_, _, _, _, _, _, _, cxx_rdi)) ->
+  let rec lambda_parent parent =
+    match CAst_utils.get_decl_opt parent with
+    | Some (CXXRecordDecl (_, _, _, _, _, _, _, cxx_rdi)) ->
         Option.is_some cxx_rdi.xrdi_lambda_call_operator
+    | Some (FunctionTemplateDecl (di, _, _)) ->
+        lambda_parent di.di_parent_pointer
     | _ ->
-        false )
+        false
+  in
+  match meth_decl with
+  | CXXMethodDecl (di, _, _, _, _) ->
+      lambda_parent di.di_parent_pointer
   | _ ->
       false
 
