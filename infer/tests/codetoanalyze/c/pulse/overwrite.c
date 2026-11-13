@@ -288,3 +288,334 @@ int FN_memcpy_big_struct_copies_null_bad(const struct big* src) {
   memcpy(&c, &b, sizeof(struct big));
   return c.ops->v;
 }
+
+// A wholesale write whose destination type is KNOWN covers exactly one whole object, so a
+// pointer the object held is really gone and the memory it owned is leaked. Objects small
+// enough to have their cells written one by one already reported this; these have more
+// scalar cells than the model writes individually, so memcpy takes the coarse path, which
+// used to drop the allocation along with the pointer.
+struct big_holder {
+  void* p;
+  int pad0;
+  int pad1;
+  int pad2;
+  int pad3;
+  int pad4;
+  int pad5;
+  int pad6;
+  int pad7;
+  int pad8;
+  int pad9;
+  int pad10;
+  int pad11;
+  int pad12;
+  int pad13;
+  int pad14;
+  int pad15;
+  int pad16;
+  int pad17;
+  int pad18;
+  int pad19;
+  int pad20;
+  int pad21;
+  int pad22;
+  int pad23;
+  int pad24;
+  int pad25;
+  int pad26;
+  int pad27;
+  int pad28;
+  int pad29;
+  int pad30;
+  int pad31;
+  int pad32;
+  int pad33;
+  int pad34;
+  int pad35;
+  int pad36;
+  int pad37;
+  int pad38;
+  int pad39;
+  int pad40;
+  int pad41;
+  int pad42;
+  int pad43;
+  int pad44;
+  int pad45;
+  int pad46;
+  int pad47;
+  int pad48;
+  int pad49;
+  int pad50;
+  int pad51;
+  int pad52;
+  int pad53;
+  int pad54;
+  int pad55;
+  int pad56;
+  int pad57;
+  int pad58;
+  int pad59;
+  int pad60;
+  int pad61;
+  int pad62;
+  int pad63;
+  int pad64;
+  int pad65;
+  int pad66;
+  int pad67;
+  int pad68;
+  int pad69;
+  int pad70;
+  int pad71;
+  int pad72;
+  int pad73;
+  int pad74;
+  int pad75;
+  int pad76;
+  int pad77;
+  int pad78;
+  int pad79;
+};
+
+void big_memcpy_leaks_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&h, &zero, sizeof(h));
+}
+
+// Additional coverage, NOT a discriminator: memset goes through fill_object, which writes
+// the pointer cells of the known type directly and never took the coarse path, so this
+// already reported. It is here so that a future change to that path is noticed.
+void big_memset_leaks_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  memset(&h, 0, sizeof(h));
+}
+
+// the write covers the object but the memory was already handed back: nothing to report
+void big_memset_after_free_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  free(h.p);
+  memset(&h, 0, sizeof(h));
+}
+
+// the pointer survives the write, so there is nothing to report either
+void big_memset_pointer_kept_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  void* keep = h.p;
+  memset(&h, 0, sizeof(h));
+  free(keep);
+}
+
+void fill_through_unknown_callee(void* dest, size_t n);
+
+// FN: an unknown callee may write any part of the object, so the pointer it held may well
+// survive; keeping the allocation here would report leaks that are not leaks. The extent is
+// the missing information, not the type.
+void FN_unknown_callee_leaks_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  fill_through_unknown_callee(&h, sizeof(h));
+}
+
+// The two cases above that are silent go through memset, which fills the cells of the known
+// type directly and never took the coarse path. These two are the same controls ON the coarse
+// path, so they are the ones that constrain it.
+void big_memcpy_pointer_kept_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  void* keep = h.p;
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&h, &zero, sizeof(h));
+  free(keep);
+}
+
+void big_memcpy_after_free_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  free(h.p);
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&h, &zero, sizeof(h));
+}
+
+// Copying the object OUT takes the same coarse path, which gives the destination unknown
+// contents, so nothing would record that the copy holds the pointer. The copy says so instead,
+// and the write over the original then gives the memory up rather than calling it leaked.
+void big_memcpy_saved_copy_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder backup;
+  memcpy(&backup, &h, sizeof(h));
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&h, &zero, sizeof(h));
+  free(backup.p);
+}
+
+// The same copy with no write over the original afterwards: the object still holds the only
+// pointer when it goes out of scope, so this is a leak and saying the copy exists must not
+// hide it. This is what dropping the allocation at the copy instead would have silenced.
+void big_memcpy_copied_out_then_leaked_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder backup;
+  memcpy(&backup, &h, sizeof(h));
+}
+
+static void copy_big_holder(struct big_holder* dest, const struct big_holder* src) {
+  memcpy(dest, src, sizeof(*dest));
+}
+
+// The copy happens in a callee, which is how it is usually written. The callee never reads the
+// source's fields, so its summary has no cells there to speak about; what it carries is the
+// source's ADDRESS, which the caller knows as `h`.
+void big_memcpy_saved_by_callee_ok(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder backup;
+  copy_big_holder(&backup, &h);
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&h, &zero, sizeof(h));
+  free(backup.p);
+}
+
+struct holder_wrapper {
+  struct big_holder inner;
+};
+
+// A copy of the whole object copied every part of it, so a write over one part may not claim
+// that part's memory either -- even though the write starts below where the copy was made.
+void big_field_overwrite_after_whole_copy_ok(void) {
+  struct holder_wrapper w;
+  w.inner.p = malloc(8);
+  struct holder_wrapper backup;
+  memcpy(&backup, &w, sizeof(w));
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&w.inner, &zero, sizeof(w.inner));
+  free(backup.inner.p);
+}
+
+// and the control for it: no copy was made, so the same write does report
+void big_field_overwrite_no_copy_bad(void) {
+  struct holder_wrapper w;
+  w.inner.p = malloc(8);
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&w.inner, &zero, sizeof(w.inner));
+}
+
+// Only the object that was copied is spoken for: `g` was not, so overwriting it still reports.
+void big_other_object_still_leaks_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder g;
+  g.p = malloc(8);
+  struct big_holder backup;
+  memcpy(&backup, &h, sizeof(h));
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&g, &zero, sizeof(g));
+  free(h.p);
+  free(backup.p);
+}
+
+// FN: the copy is cleared before the original is, so by the end nobody holds the pointer and
+// it is leaked. Saying an object was copied away is never taken back, so the write over the
+// original still gives the memory up. Losing a leak is the safe direction here.
+void FN_big_copy_cleared_first_bad(void) {
+  struct big_holder h;
+  h.p = malloc(8);
+  struct big_holder backup;
+  memcpy(&backup, &h, sizeof(h));
+  struct big_holder zero;
+  memset(&zero, 0, sizeof(zero));
+  memcpy(&backup, &zero, sizeof(backup));
+  memcpy(&h, &zero, sizeof(h));
+}
+
+// Asking for the size of the object is not writing all of it: both of these may transfer
+// fewer bytes and leave the pointer where it was, so neither may claim the memory is gone.
+void big_read_short_ok(int fd) {
+  struct big_holder h;
+  h.p = malloc(8);
+  read(fd, &h, sizeof(h));
+}
+
+void big_fread_short_ok(FILE* f) {
+  struct big_holder h;
+  h.p = malloc(8);
+  fread(&h, sizeof(h), 1, f);
+}
+
+struct wide_holder {
+  struct big_holder head;
+  void* tail;
+};
+
+// Writing a whole object says nothing about the object it was written INTO. The copy covers
+// head, so tail still holds what it held and is freed through it.
+void wide_tail_outside_the_copy_ok(void) {
+  struct wide_holder w;
+  w.head.p = 0;
+  w.tail = malloc(8);
+  struct big_holder z;
+  memset(&z, 0, sizeof(z));
+  memcpy(&w, &z, sizeof(z));
+  free(w.tail);
+}
+
+// the twin that makes the silence above readable: the same object and the same copy, aimed at
+// what the copied type really covers, and the pointer there is gone
+void wide_head_inside_the_copy_bad(void) {
+  struct wide_holder w;
+  w.head.p = malloc(8);
+  w.tail = 0;
+  struct big_holder z;
+  memset(&z, 0, sizeof(z));
+  memcpy(&w.head, &z, sizeof(z));
+}
+
+// FN: the tail is leaked here, and it stays unreported for the same reason the case above
+// stays silent. The copy gives the whole destination unknown contents, including the bytes it
+// did not write, so after it nothing tells the two apart -- keeping the tail's memory to report
+// this would report the case above, where it is freed. Both are silent without the copy too.
+void FN_wide_tail_outside_the_copy_leaks_bad(void) {
+  struct wide_holder w;
+  w.head.p = 0;
+  w.tail = malloc(8);
+  struct big_holder z;
+  memset(&z, 0, sizeof(z));
+  memcpy(&w, &z, sizeof(z));
+}
+
+// An element is not the array: the copy covers the first one, so the second still owns its
+// memory. The destination decays to the element type here, which is why the copied type has to
+// be measured against the object written into rather than compared with it.
+void array_element_sibling_ok(void) {
+  struct big_holder arr[2];
+  arr[0].p = 0;
+  arr[1].p = malloc(8);
+  struct big_holder z;
+  memset(&z, 0, sizeof(z));
+  memcpy(arr, &z, sizeof(z));
+  free(arr[1].p);
+}
+
+// the twin for it: the copy is aimed at the element that holds the memory, which is gone
+void array_element_inside_the_copy_bad(void) {
+  struct big_holder arr[2];
+  arr[0].p = 0;
+  arr[1].p = malloc(8);
+  struct big_holder z;
+  memset(&z, 0, sizeof(z));
+  memcpy(&arr[1], &z, sizeof(z));
+}

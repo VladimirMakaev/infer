@@ -403,11 +403,26 @@ val transfer_ownership : AbstractValue.t -> t -> t
     without necessarily touching it: no havoc, no initialisation, no write *)
 
 val overwrite_contents :
-  ?havoc_filter:(AbstractValue.t -> bool) -> ValueHistory.t -> AbstractValue.t -> t -> t
+     ?havoc_filter:(AbstractValue.t -> bool)
+  -> ?keep_allocations_within:Tenv.t * Typ.t
+  -> ValueHistory.t
+  -> AbstractValue.t
+  -> t
+  -> t
 (** mark the address and the addresses reachable from it through field and array accesses with
     [ContentsOverwritten] and initialize them, and give fresh values to the cells at these addresses
     that pass [havoc_filter]; the addresses reachable from the old values of these cells lose their
-    allocation attributes *)
+    allocation attributes, except that [keep_allocations_within] names a type the caller writes
+    every byte of, and then the cells that type accounts for keep theirs -- the destination may be a
+    wider object than the copy, and what lies outside the type was not written. A field name carries
+    the struct that owns it, so a write aimed at the WIDER object rather than at the object of that
+    type fails to match at the root and keeps nothing at all, not even the part the copy covered. An
+    object marked by [mark_copied_unseen] keeps nothing. *)
+
+val mark_copied_unseen : AbstractValue.t -> t -> t
+(** record that the values in the cells reachable from this address were read out by a copy whose
+    destination got unknown contents, so nothing says where they went; a later [overwrite_contents]
+    with [keep_allocations_within] drops their allocations rather than keeping them *)
 
 val is_local : Var.t -> t -> bool
 

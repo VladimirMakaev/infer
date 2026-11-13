@@ -471,9 +471,10 @@ include struct
 
   (** the object at [dest] gets unknown contents: the cells of the object already in the heap get
       fresh values, and so do the other cells when they are read later or seen by callers *)
-  let overwrite_contents ?must_be_valid_reason dest : unit DSL.model_monad =
+  let overwrite_contents ?must_be_valid_reason ?keep_allocations_within dest : unit DSL.model_monad
+      =
     let* hist = add_model_call ValueHistory.epoch in
-    exec_command (AbductiveDomain.overwrite_contents hist (fst dest))
+    exec_command (AbductiveDomain.overwrite_contents ?keep_allocations_within hist (fst dest))
     @@> store ?must_be_valid_reason ~ref:dest
     @= fresh ()
 
@@ -618,8 +619,12 @@ include struct
 
 
   (** the object at [dest] is overwritten, with the contents of the object at [src] if given; when
-      the type of the object is known and it has few cells, they are written one by one *)
-  let overwrite_object ?must_be_valid_reason ?src dest typ_opt : unit DSL.model_monad =
+      the type of the object is known and it has few cells, they are written one by one. [total]
+      says the caller guarantees every byte of the object is written: only a caller knows that, eg
+      [read] asks for [sizeof (t)] bytes but may transfer fewer and leave the rest of the object,
+      and the pointers in it, untouched. *)
+  let overwrite_object ?must_be_valid_reason ?src ?(total = false) dest typ_opt :
+      unit DSL.model_monad =
     let* {analysis_data= {tenv}} = get_data in
     let dest = to_aval dest in
     match typ_opt with
@@ -627,8 +632,30 @@ include struct
         overwrite_cells ?must_be_valid_reason ~src:(Option.map src ~f:to_aval) dest typ
           Visited.empty
         |> ignore
-    | _ ->
-        overwrite_contents ?must_be_valid_reason dest
+    | Some _ | None -> (
+        (* the destination gets unknown contents, so nothing will record that it holds what the
+           source held: say so, or a later whole-object write over the source would report the
+           memory it owned as leaked when this copy is what owns it *)
+        let* () =
+          match src with
+          | Some src ->
+              exec_command (AbductiveDomain.mark_copied_unseen (fst (to_aval src)))
+          | None ->
+              ret ()
+        in
+        match (total, typ_opt) with
+        | true, Some typ ->
+            (* too many cells to write one by one, but the type is known and the caller writes
+               all of it: the pointers THAT TYPE accounts for are gone and the memory they owned
+               really is leaked, unless a copy took the object somewhere unseen first. The
+               destination can be a wider object than the copy -- a header written over the
+               front of a bigger struct, one element of an array -- so what the type does not
+               account for was not written and still gives its allocations up. Only the cost of
+               writing the cells one by one is avoided here, not the knowledge of what was
+               written. *)
+            overwrite_contents ?must_be_valid_reason ~keep_allocations_within:(tenv, typ) dest
+        | false, _ | _, None ->
+            overwrite_contents ?must_be_valid_reason dest )
 
 
   let overwrite_pointee {FuncArg.arg_payload= ptr; typ} =
@@ -1097,7 +1124,8 @@ include struct
     @@ fun () ->
     check_valid ~must_be_valid_reason:CppStorageOnly dest
     @@> check_valid src
-    @@> overwrite_object ~must_be_valid_reason:CppStorageOnly ~src dest (single_object_type size)
+    @@> overwrite_object ~must_be_valid_reason:CppStorageOnly ~src ~total:true dest
+          (single_object_type size)
     @@> data_dependency dest [src]
     @@> assign_ret (to_aval dest)
 

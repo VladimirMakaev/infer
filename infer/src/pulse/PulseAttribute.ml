@@ -350,6 +350,10 @@ module Attribute = struct
     | AddressOfAllocatedBlock
       (* A newly computed cell address within a genuine C allocation, never a value loaded
          from the cell. Non-owning and post-only; appended to preserve existing ranks. *)
+    | CopiedSomewhereUnseen
+      (* Read out of an object by a copy that gave its destination unknown contents, so
+         nothing records that the copy holds it. Post-only, payload-free; appended to
+         preserve existing ranks. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -465,6 +469,8 @@ module Attribute = struct
           trace
     | AddressOfAllocatedBlock ->
         F.pp_print_string f "AddressOfAllocatedBlock"
+    | CopiedSomewhereUnseen ->
+        F.pp_print_string f "CopiedSomewhereUnseen"
     | AbsentFromContainer ->
         F.pp_print_string f "AbsentFromContainer"
     | AlwaysReachable ->
@@ -604,6 +610,7 @@ module Attribute = struct
     | AbsentFromContainer
     | Allocated _
     | AddressOfAllocatedBlock
+    | CopiedSomewhereUnseen
     | AddressOfCppTemporary _
     | AddressOfStackVariable _
     | AlwaysReachable
@@ -664,6 +671,7 @@ module Attribute = struct
     | AddressOfStackVariable _
     | Allocated _
     | AddressOfAllocatedBlock
+    | CopiedSomewhereUnseen
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
@@ -719,6 +727,7 @@ module Attribute = struct
     | AddressOfStackVariable _
     | Allocated _
     | AddressOfAllocatedBlock
+    | CopiedSomewhereUnseen
     | AlwaysReachable
     | Closure _
     | ConfigUsage _
@@ -861,6 +870,7 @@ module Attribute = struct
     | UsedAsBranchCond (pname, location, trace) ->
         UsedAsBranchCond (pname, location, add_call_to_trace trace)
     | ( AddressOfAllocatedBlock
+      | CopiedSomewhereUnseen
       | AbsentFromContainer
       | AddressOfCppTemporary _
       | AddressOfStackVariable _
@@ -985,6 +995,7 @@ module Attribute = struct
       | AddressOfStackVariable _
       | Allocated _
       | AddressOfAllocatedBlock
+      | CopiedSomewhereUnseen
       | AlwaysReachable
       | Closure _
       | ConfigUsage (ConfigName _)
@@ -1349,6 +1360,10 @@ module Attributes = struct
 
   let is_address_of_allocated_block attrs =
     Option.is_some (Set.find_rank attrs Attribute.Variants.addressofallocatedblock.rank)
+
+
+  let is_copied_somewhere_unseen attrs =
+    Option.is_some (Set.find_rank attrs Attribute.Variants.copiedsomewhereunseen.rank)
 
 
   let get_allocation =
