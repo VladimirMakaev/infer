@@ -53,7 +53,9 @@ Task copy_of_borrowed_read_before_suspend_bad(const std::string& source) {
   co_await std::suspend_always{};
 }
 
-// A by-value parameter is owned by the frame, like the local above.
+// A by-value parameter is owned by the frame, like the local above, so the copy
+// into `snapshot` is reported. The parameter itself is not: holding it by value
+// is what keeps it alive while the coroutine is suspended.
 Task copy_of_by_value_param_across_suspend_bad(std::string owned) {
   const std::string snapshot = owned;
   co_await std::suspend_always{};
