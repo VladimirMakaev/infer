@@ -283,3 +283,68 @@ void memset_wrapper_value_bad(struct my_pair* pair) {
 }
 
 /** /testing passing structs by value */
+
+/** filling an object through a wrapper that takes a [void*] and a size */
+
+void bzero(void* s, size_t n);
+
+/* the size that reaches the model is a parameter, so it names no type */
+void fill_bytes(void* p, size_t n) { memset(p, '\0', n); }
+
+void zero_bytes(void* p, size_t n) { bzero(p, n); }
+
+int memset_void_wrapper_init_ok() {
+  struct my_pair pair;
+  fill_bytes(&pair, sizeof(struct my_pair));
+  return pair.x + pair.y;
+}
+
+int bzero_void_wrapper_init_ok() {
+  struct my_pair pair;
+  zero_bytes(&pair, sizeof(struct my_pair));
+  return pair.x + pair.y;
+}
+
+/* nothing fills it: still reported */
+int uninit_no_fill_bad() {
+  struct my_pair pair;
+  return pair.x + pair.y;
+}
+
+/* passing the address to a callee that writes nothing is not a fill: still reported */
+void take_address(void* p, size_t n) { (void)n; }
+
+int uninit_address_taken_bad() {
+  struct my_pair pair;
+  take_address(&pair, sizeof(struct my_pair));
+  return pair.x + pair.y;
+}
+
+/* a fill the model cannot measure covers the whole object: the field past the bytes actually
+   written is treated as written too. The same approximation is already made when the size is a
+   [sizeof] smaller than the object, below. */
+int FN_memset_void_wrapper_partial_bad() {
+  struct my_pair pair;
+  fill_bytes(&pair, sizeof(int));
+  return pair.y;
+}
+
+int FN_memset_partial_bad() {
+  struct my_pair pair;
+  memset(&pair, '\0', sizeof(int));
+  return pair.y;
+}
+
+/* A fill the model cannot measure gives the destination unknown contents, and the memory the
+   old contents owned is then not reported as leaked - the same trade [memcpy] already makes
+   through a wrapper, because the cells written may lie outside the bytes the call touched. */
+struct holder {
+  int* ptr;
+};
+
+int FN_memset_void_wrapper_leak_bad() {
+  struct holder h;
+  h.ptr = (int*)malloc(sizeof(int));
+  fill_bytes(&h, sizeof(struct holder));
+  return 0;
+}
