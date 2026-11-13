@@ -681,12 +681,20 @@ let should_flag_interface_call tenv exps call_flags pname =
     let tname = Procname.Java.get_class_type_name java_pname in
     PatternMatch.is_subtype_of_str tenv tname "android.os.IInterface"
     (* The Job API guarantees concurrent access to these library interfaces. Match their
-       declarations, rather than arbitrary user extensions with additional operations. *)
+       declarations, rather than arbitrary user extensions with additional operations.
+
+       Mutex is here for the same reason and needs it twice over: a mutual-exclusion primitive
+       that could not be called from two threads would be useless, and ConcurrencyModels now
+       reads its lock/unlock as acquire and release. Without this, code that correctly guards
+       its state with [withLock] still gets an unprotected-interface-call report at the
+       [lock] call site -- RacerDProcAnalysis records that access before it consults the lock
+       effect, and no lock is held at the instruction that takes one. *)
     || List.mem
          [ "kotlinx.coroutines.Job"
          ; "kotlinx.coroutines.CompletableJob"
          ; "kotlinx.coroutines.Deferred"
-         ; "kotlinx.coroutines.CompletableDeferred" ]
+         ; "kotlinx.coroutines.CompletableDeferred"
+         ; "kotlinx.coroutines.sync.Mutex" ]
          (Typ.Name.name tname) ~equal:String.equal
   in
   match pname with
