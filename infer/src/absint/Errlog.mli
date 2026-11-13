@@ -26,7 +26,7 @@ val make_trace_element : int -> Location.t -> string -> node_tag list -> loc_tra
 (** build a loc_trace_elem from its constituents (unambiguously identified by their types). *)
 
 (** Trace of locations *)
-type loc_trace = loc_trace_elem list
+type loc_trace = loc_trace_elem list [@@deriving compare]
 
 val concat_traces : (string * loc_trace) list -> loc_trace
 
@@ -51,10 +51,12 @@ type err_data = private
   ; access: string option
   ; extras: Jsonbug_t.extra option
   ; autofix: Jsonbug_t.autofix list
-  ; dedup_key: string option
+  ; dedup_key: string list option
         (** Which finding this entry is about, when several entries can be the same one: entries
-            carrying an equal key are collapsed into one when the report is written. Internal
-            bookkeeping, never written to report.json. *) }
+            carrying an equal key are collapsed into one when the report is written. The parts of
+            the key are kept apart as a list rather than joined into one string, so that no part can
+            spell out the join of two others. Internal bookkeeping, never written to report.json. *)
+  }
 [@@deriving compare]
 
 (** Type of the error log *)
@@ -95,7 +97,7 @@ val log_issue :
   -> access:string option
   -> extras:Jsonbug_t.extra option
   -> ?autofix:Jsonbug_j.autofix list
-  -> ?dedup_key:string
+  -> ?dedup_key:string list
   -> Checker.t
   -> IssueToReport.t
   -> bool
