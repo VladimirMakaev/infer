@@ -1397,6 +1397,41 @@ let apply_post analysis_data path call_state =
   r
 
 
+(** the callee cell whose dereference is [addr_pre], when there is exactly one
+
+    The decompiler holds one expression per abstract value, and in the caller every zero of a path
+    is one value: a [bool] member that happens to be false shares a null pointer's value and can
+    carry its name. The callee's pre does not have that problem, because there the pointer and the
+    zero are still different values, so the callee cell says which pointer the check is really on.
+    Several cells dereferencing to one value is genuine aliasing and is not resolved by picking one,
+    so that case gets no answer. *)
+let deref_source_in_callee_pre (pre : BaseDomain.t) addr_pre =
+  UnsafeMemory.fold
+    (fun src edges found ->
+      match UnsafeMemory.Edges.find_opt Dereference edges with
+      | Some (dest, _) when AbstractValue.equal dest addr_pre -> (
+        match found with `None -> `One src | `One _ | `Several -> `Several )
+      | _ ->
+          found )
+    pre.heap `None
+  |> function `One src -> Some src | `None | `Several -> None
+
+
+(** name the invalid address after the caller cell the callee's check is on, as a direct dereference
+    does through its [ValueOrigin]; [find_from_origin] falls back to [find] itself *)
+let decompile_invalid_address call_state astate ~addr_pre ~addr_caller ~hist_caller =
+  match
+    let open IOption.Let_syntax in
+    let* src_callee = deref_source_in_callee_pre call_state.callee_pre addr_pre in
+    let+ src_caller = to_caller_value call_state src_callee in
+    ValueOrigin.InMemory {src= src_caller; access= Dereference; dest= (addr_caller, hist_caller)}
+  with
+  | Some origin ->
+      Decompiler.find_from_origin origin astate
+  | None ->
+      Decompiler.find addr_caller astate
+
+
 let check_all_valid path call_state =
   (* collect all the checks to perform then do each check in timestamp order to make sure we report
      the first issue if any *)
@@ -1408,7 +1443,7 @@ let check_all_valid path call_state =
       (fun addr_pre addr_hist_caller to_check ->
         let to_check =
           if UnsafeAttributes.is_must_be_awaited addr_pre pre.BaseDomain.attrs then
-            (addr_hist_caller, `MustBeAwaited) :: to_check
+            (addr_pre, addr_hist_caller, `MustBeAwaited) :: to_check
           else to_check
         in
         let to_check =
@@ -1416,20 +1451,20 @@ let check_all_valid path call_state =
           | None ->
               to_check
           | Some must_be_valid_data ->
-              (addr_hist_caller, `MustBeValid must_be_valid_data) :: to_check
+              (addr_pre, addr_hist_caller, `MustBeValid must_be_valid_data) :: to_check
         in
         let to_check =
           match UnsafeAttributes.get_must_be_non_null addr_pre pre.BaseDomain.attrs with
           | None ->
               to_check
           | Some must_be_non_null_data ->
-              (addr_hist_caller, `MustBeNonNull must_be_non_null_data) :: to_check
+              (addr_pre, addr_hist_caller, `MustBeNonNull must_be_non_null_data) :: to_check
         in
         match UnsafeAttributes.get_must_be_initialized addr_pre pre.BaseDomain.attrs with
         | None ->
             to_check
         | Some must_be_init_data ->
-            (addr_hist_caller, `MustBeInitialized must_be_init_data) :: to_check )
+            (addr_pre, addr_hist_caller, `MustBeInitialized must_be_init_data) :: to_check )
       call_state.subst []
   in
   let timestamp_of_check = function
@@ -1440,10 +1475,11 @@ let check_all_valid path call_state =
     | `MustBeAwaited ->
         Timestamp.t0
   in
-  List.sort addresses_to_check ~compare:(fun (_, check1) (_, check2) ->
+  List.sort addresses_to_check ~compare:(fun (_, _, check1) (_, _, check2) ->
       (* smaller timestamp first *)
       Timestamp.compare (timestamp_of_check check1) (timestamp_of_check check2) )
-  |> List.fold_result ~init:call_state.astate ~f:(fun astate ((addr_caller, hist_caller), check) ->
+  |> List.fold_result ~init:call_state.astate ~f:(fun astate (addr_pre, addr_hist, check) ->
+      let addr_caller, hist_caller = addr_hist in
       let mk_access_trace callee_access_trace =
         Trace.ViaCall
           { in_call= callee_access_trace
@@ -1482,7 +1518,9 @@ let check_all_valid path call_state =
                 { diagnostic=
                     AccessToInvalidAddress
                       { calling_context= []
-                      ; invalid_address= Decompiler.find addr_caller astate
+                      ; invalid_address=
+                          decompile_invalid_address call_state astate ~addr_pre ~addr_caller
+                            ~hist_caller
                       ; invalidation
                       ; invalidation_trace
                       ; access_trace
