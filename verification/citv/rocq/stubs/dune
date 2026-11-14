@@ -1,0 +1,6 @@
+(library
+ (name citv)
+ (wrapped false)
+ (flags (:standard -w -a))
+ (preprocess (pps ppx_compare ppx_yojson_conv))
+ (libraries ppx_compare.runtime-lib ppx_yojson_conv_lib yojson))

@@ -1,0 +1,12 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *)
+
+(* Stand-in for Infer's Unop. *)
+
+open! IStd
+
+type t = Neg | BNot | LNot [@@deriving compare, equal, yojson_of]

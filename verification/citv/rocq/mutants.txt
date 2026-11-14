@@ -1,0 +1,17 @@
+# One unsound mutation per surviving theorem/arm.  Format: name | target | old ||| new
+# Each must (a) still COMPILE, so that a failure is the proof talking and not a broken
+# file, and (b) make the proofs be REJECTED.
+#
+# SIX mutants, and MIN_MUTANTS in mutate.sh is 6.  Four aim at abduce_le, whose four arms
+# are what is still proved; two aim at IntLit.v, which previously had no mutant at all.
+#
+# An earlier milestone also carried mutants for abduce_lt and flip_abduced.  Those are gone
+# because the theorems they attacked are WITHDRAWN, not because the floor was lowered to
+# make a run pass: see README, "What the tagged order cost".  The floor has only ever gone
+# up, 4 -> 6.
+abduce_le/weaken-the-unsat-guard | PulseCItv.v | if orb (Bound.lt min_u1u2 lower1) (Bound.lt upper2 max_l1l2) then ||| if orb (Bound.le min_u1u2 lower1) (Bound.lt upper2 max_l1l2) then
+abduce_le/over-tighten-the-lhs | PulseCItv.v | Satisfiable (Some (between lower1 min_u1u2)) ||| Satisfiable (Some (between (Bound.add_int lower1 IntLit.one) min_u1u2))
+abduce_le/over-tighten-the-rhs | PulseCItv.v | (Some (between max_l1l2 upper2)) ||| (Some (between (Bound.add_int max_l1l2 IntLit.one) upper2))
+abduce_le/over-tighten-the-between-outside-arm | PulseCItv.v | Bound.max (Bound.Int (IntLit.add IntLit.one u2)) lower1 ||| Bound.max (Bound.Int (IntLit.add IntLit.one (IntLit.add IntLit.one u2))) lower1
+IntLit/lift1-drops-the-tags | IntLit.v | t.with_i (f_value x_value.(t.i)) x_value. ||| t.Build Signed (f_value x_value.(t.i)) NotPointer.
+IntLit/equal-ignores-the-area | IntLit.v | Definition equal (i1 : t) (i2 : t) : bool := eq i1 i2. ||| Definition equal (i1 : t) (i2 : t) : bool := Z.eqb i1.(t.i) i2.(t.i).
