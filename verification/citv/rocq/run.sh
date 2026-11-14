@@ -1,5 +1,14 @@
 #!/bin/bash
-# Opt-in driver.  Not a standing check: it needs a second opam switch and a Rocq install.
+# Driver for the Rocq half.  It needs a second opam switch and a Rocq install, so it is
+# not part of Infer's build and `make` never reaches it.  The harness runs it, together
+# with the bounded oracle, on any change to infer/src/pulse/PulseCItv.ml.
+#
+# A WORD ON WHAT A PASS MEANS HERE.  The proofs are about ONE reviewed revision of that
+# module, pinned by sha256 in expected/source.sha256, so on a commit that edits it the
+# drift step refuses and this driver exits non-zero.  That is the intended outcome, not
+# a malfunction: regenerate with translate.sh, review the diff under v/, re-run the
+# proofs and update the pin in the same commit.  See drift.sh for why the check is on
+# the translation rather than on whether the proofs still compile.
 #
 #   ./run.sh            pins, proofs from clean, freshness attack, drift, mutants
 #   ./run.sh --proofs   stop after the axiom check

@@ -313,3 +313,24 @@ pattern read as unsigned differently; the stand-in here is a plain arbitrary-pre
 There is no machine width either, so a defect that only shows up when a value overflows one is
 invisible. Extending to the tagged, width-aware domain means modelling those orders too, and is
 separate work.
+
+## Run by the harness
+
+These two runners are not only manual. The pre-push checks run both of them on any change to
+`infer/src/pulse/PulseCItv.ml` or its interface, and report the verdict as `citv` on the
+`PREPUSH RESULT` line: `skip` when the module is untouched, `ok` when both pass, `warn` when
+either fails. A `warn` fails the final gate.
+
+Two consequences worth knowing before you edit the module:
+
+- The **oracle** re-runs in full against your edited module. It is the regression net, and a
+  soundness violation or a surviving mutant stops the push.
+- The **proofs** are pinned to one reviewed revision of the module. Editing it therefore makes
+  `drift.sh` refuse, by design -- a proof that still compiles after an unreviewed edit says
+  nothing about the edit, because a theorem that never mentions the changed function compiles
+  either way. Clear it by regenerating the translation, reviewing the diff under `rocq/v/`,
+  re-running the proofs and updating `rocq/expected/source.sha256` in the same commit.
+
+The harness needs `CITV_OPAMROOT` (both switches) and `CITV_TRANSLATOR` (`rocqOfOCaml.exe` at
+the pinned commit) to carry the check out. If either is missing the check reports that it could
+not run; it never reports a pass it did not establish.
