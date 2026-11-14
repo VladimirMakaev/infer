@@ -148,6 +148,34 @@ let is_cpp_virtual method_decl =
       false
 
 
+(* Does this method override one it inherits? Clang has already decided, and asking it is the
+   only way to get the answer right: the relation is not recoverable downstream, because it
+   depends on declarations a translation unit need not have translated.
+
+   For C++, [xmdi_overriden_methods] is the set of VIRTUAL methods this one overrides. A method
+   that merely HIDES a non-virtual base method has an empty list, which is the distinction the
+   suppression cares about and had to be reconstructed by hand before. It is also already
+   correct for the cases a signature comparison kept getting wrong -- aliases and typedefs,
+   class templates, default arguments, top-level cv-qualifiers, multiple inheritance -- because
+   clang resolves them before recording the edge.
+
+   For Objective-C, [omdi_is_overriding] is clang's own answer. Instance and class methods live
+   in different method tables, so it does not confuse a [+] with a [-] that share a selector,
+   and the selector is matched as a whole rather than by parameter types. *)
+let is_override method_decl =
+  let open Clang_ast_t in
+  match method_decl with
+  | CXXMethodDecl (_, _, _, _, mdi)
+  | CXXConstructorDecl (_, _, _, _, mdi)
+  | CXXConversionDecl (_, _, _, _, mdi)
+  | CXXDestructorDecl (_, _, _, _, mdi) ->
+      not (List.is_empty mdi.xmdi_overriden_methods)
+  | ObjCMethodDecl (_, _, omdi) ->
+      omdi.omdi_is_overriding
+  | _ ->
+      false
+
+
 (* A coroutine is told apart by its body: clang replaces the written body with a
    [CoroutineBodyStmt] holding the promise object, the initial and final suspensions and the
    return object. Nothing downstream records it -- by the time a procedure reaches the analysis a

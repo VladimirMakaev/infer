@@ -479,5 +479,233 @@ struct CrtpDerived : CrtpBase<CrtpDerived> {
 
 template struct CrtpBase<CrtpDerived>;
 
+// Sharing a name with a virtual base method is not overriding it either: the
+// parameter TYPES have to match. They are compared through the overridden
+// method's formals rather than through its procname, because
+// `Procname.Parameter.clang_parameter` records a name only for a pointer to a
+// struct and maps every other parameter to `None`. By that measure a by-value
+// parameter carries no type at all, and the test degenerates into the method
+// name and the parameter COUNT -- which silences an overload that merely
+// changed a by-value type, and silences it on nothing more than an arity
+// coincidence when the base parameter is not even a class type.
+//
+// Each derived method below deliberately keeps the inherited name, since the
+// search matches on the name first; spelled any other way the check would never
+// look at it and the row would be reported either way. Parameter names differ
+// from the base's so the expected output says which method each row is.
+namespace byvalue_signature {
+
+// A by-value parameter type that merely differs. None of these overrides
+// anything, so each owns its signature and is reported.
+struct ParamBase {
+  virtual ~ParamBase() = default;
+  // Pure virtual throughout: a declaration with no body adds no expected row
+  // while still carrying the formals the check reads.
+  virtual void record(std::shared_ptr<int> p) = 0;
+  virtual void tally(std::shared_ptr<int> p) = 0;
+  // The base parameter is not a class type at all. Nothing but the arity is
+  // shared, which is the weakest form of the coincidence.
+  virtual void count(int n) = 0;
+  virtual void measure(double d) = 0;
+};
+
+struct ParamDerived : ParamBase {
+  // `const` makes it a different type, so this overloads rather than overrides.
+  void record(std::shared_ptr<const int> q) { read_int(*q); }
+  // A different element type, likewise an overload.
+  void tally(std::shared_ptr<long> r) { read_int(static_cast<int>(*r)); }
+  // Matches `count` on arity alone.
+  void count(std::shared_ptr<int> s) { read_int(*s); }
+  // The same coincidence reaching PULSE_CONST_REFABLE rather than the
+  // shared_ptr flavour, so one fix is not mistaken for covering one checker.
+  void measure(std::string t) { read_size(t.size()); }
+};
+
+// REAL overrides from here down. Every one of them must stay suppressed: a
+// comparison that is too strict turns each into a false positive, which is
+// worse than the false negatives above. They cover the ways two spellings of
+// one parameter type can look different before the frontend is done with them,
+// and the ways a receiver can differ.
+
+// An alias in the base and the type spelled out in the derived, and the
+// reverse. The frontend desugars both, so the formals match.
+typedef std::shared_ptr<int> IntPtrTypedef;
+using IntPtrAlias = std::shared_ptr<int>;
+
+struct AliasBase {
+  virtual ~AliasBase() = default;
+  virtual void record(IntPtrAlias p) = 0;
+};
+
+struct AliasDerived : AliasBase {
+  void record(std::shared_ptr<int> p) override { read_int(*p); }
+};
+
+struct TypedefBase {
+  virtual ~TypedefBase() = default;
+  virtual void record(std::shared_ptr<int> p) = 0;
+};
+
+struct TypedefDerived : TypedefBase {
+  void record(IntPtrTypedef p) override { read_int(*p + 1); }
+};
+
+// A template base: the override lives in one instantiation, and the parameter
+// type is instantiated before it is recorded.
+template <class T>
+struct TemplateBase {
+  virtual ~TemplateBase() = default;
+  virtual void record(std::shared_ptr<T> p) = 0;
+};
+
+struct TemplateDerived : TemplateBase<int> {
+  void record(std::shared_ptr<int> p) override { read_int(*p + 2); }
+};
+
+// A default argument on the base only. Defaults are not part of the type, so
+// the two still match.
+struct DefaultArgBase {
+  virtual ~DefaultArgBase() = default;
+  virtual void record(std::shared_ptr<int> p, int n = 0) = 0;
+};
+
+struct DefaultArgDerived : DefaultArgBase {
+  void record(std::shared_ptr<int> p, int n) override { read_int(*p + n); }
+};
+
+// `const` member functions: the receiver differs in BOTH its class and its
+// constness. Dropping the leading formal is what keeps this pair matching.
+struct ConstMethodBase {
+  virtual ~ConstMethodBase() = default;
+  virtual void record(std::shared_ptr<int> p) const = 0;
+};
+
+struct ConstMethodDerived : ConstMethodBase {
+  void record(std::shared_ptr<int> p) const override { read_int(*p + 3); }
+};
+
+// Only the parameter NAMES differ. Formals carry names as well as types, so a
+// comparison that comes to include them would break here and nowhere else.
+struct RenameBase {
+  virtual ~RenameBase() = default;
+  virtual void record(std::shared_ptr<int> first) = 0;
+};
+
+struct RenameDerived : RenameBase {
+  void record(std::shared_ptr<int> second) override { read_int(*second + 4); }
+};
+
+// An override against a GRANDparent, with the class in between silent.
+struct GrandBase {
+  virtual ~GrandBase() = default;
+  virtual void record(std::shared_ptr<int> p) = 0;
+};
+
+struct GrandMiddle : GrandBase {};
+
+struct GrandDerived : GrandMiddle {
+  void record(std::shared_ptr<int> p) override { read_int(*p + 5); }
+};
+
+// An override against the SECOND base, so the search has to get past a base
+// that declares nothing of the kind.
+struct UnrelatedBase {
+  virtual ~UnrelatedBase() = default;
+  virtual void unrelated() = 0;
+};
+
+struct SecondBase {
+  virtual ~SecondBase() = default;
+  virtual void record(std::shared_ptr<int> p) = 0;
+};
+
+struct SecondDerived : UnrelatedBase, SecondBase {
+  void unrelated() override {}
+  void record(std::shared_ptr<int> p) override { read_int(*p + 6); }
+};
+
+// Controls, so a run that suppressed everything could not pass. Arity and a
+// pointer-to-struct parameter are the two things the procname comparison DID
+// get right, and they must keep working.
+struct ArityBase {
+  virtual ~ArityBase() = default;
+  virtual void record(std::shared_ptr<int> p) = 0;
+};
+
+struct ArityDerived : ArityBase {
+  // One parameter more than the base: already told apart before this change.
+  void record(std::shared_ptr<int> p, int extra_bad) { read_int(*p + extra_bad); }
+};
+
+struct Pointee {
+  int x;
+};
+
+struct PointerBase {
+  virtual ~PointerBase() = default;
+  // A pointer to a struct is the one parameter shape the procname DOES record,
+  // so this pair was never confused.
+  virtual void record(Pointee* p) = 0;
+};
+
+struct PointerDerived : PointerBase {
+  void record(std::shared_ptr<Pointee> u) { read_int(u->x); }
+};
+
+// A top-level cv-qualifier on a parameter is not part of a C++ function type: void f(const T)
+// and void f(T) declare the SAME function, and clang accepts an override that adds or drops
+// one. Every cell down to the pointee control is therefore a REAL override and must stay
+// silent -- comparing the types naively reports all of them, on nothing but a coding style.
+//
+// The frontend lowers a by-value class parameter to a reference, so `const Val p` arrives as
+// `Val const &`: the qualifier sits on the pointee of a reference the source never wrote.
+// That is why the base-side and derived-side cells below are not the same test as the scalar
+// one, and why both are needed.
+
+struct QualBase {
+  virtual ~QualBase() = default;
+  // const on the BASE side only
+  virtual void base_const(const std::shared_ptr<int> p) = 0;
+  // const on BOTH sides: agreed even before this, and here to keep the pair honest
+  virtual void both_const(const std::shared_ptr<int> p) = 0;
+  // a const SCALAR next to the reportable parameter: the qualifier is top-level on the formal
+  // itself rather than on a lowered reference, which is a different code path
+  virtual void scalar_const(const int n, std::shared_ptr<int> p) = 0;
+  // a const POINTER -- top-level again, but on the one parameter shape of_typ records
+  virtual void pointer_const(Pointee* const q, std::shared_ptr<int> p) = 0;
+};
+
+struct QualDerived : QualBase {
+  void base_const(std::shared_ptr<int> p) override { read_int(*p); }
+  void both_const(const std::shared_ptr<int> p) override { read_int(*p + 2); }
+  void scalar_const(int n, std::shared_ptr<int> p) override { read_int(n + *p); }
+  void pointer_const(Pointee* q, std::shared_ptr<int> p) override { read_int(q->x + *p); }
+};
+
+// The mirror of base_const: the qualifier on the DERIVED side instead.
+struct DerivedConstBase {
+  virtual ~DerivedConstBase() = default;
+  virtual void derived_const(std::shared_ptr<int> p) = 0;
+};
+
+struct DerivedConstDerived : DerivedConstBase {
+  void derived_const(const std::shared_ptr<int> p) override { read_int(*p + 3); }
+};
+
+// THE CONTROL that stops the rule from being applied too widely. Here the qualifier is on the
+// POINTEE of a real pointer, not of a lowered reference: `const Pointee*` and `Pointee*` are
+// different parameter types, clang rejects an override between them, and this declaration
+// owns its signature. It must keep reporting, which is what rules out comparing types with
+// Typ.equal_ignore_quals -- that recurses through pointers and would silence this.
+struct PointeeQualBase {
+  virtual ~PointeeQualBase() = default;
+  virtual void record(Pointee* q, std::shared_ptr<int> p) = 0;
+};
+
+struct PointeeQualDerived : PointeeQualBase {
+  void record(const Pointee* q, std::shared_ptr<int> w) { read_int(q->x + *w); }
+};
+
+} // namespace byvalue_signature
 } // namespace virtual_override
 } // namespace const_refable

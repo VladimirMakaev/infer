@@ -33,6 +33,7 @@ type t =
   ; method_kind: ClangMethodKind.t
   ; is_cpp_const_member_fun: bool
   ; is_cpp_virtual: bool
+  ; is_override: bool
   ; is_cpp_copy_assignment: bool
   ; is_cpp_copy_ctor: bool
   ; is_cpp_coroutine: bool
@@ -66,6 +67,7 @@ val mk :
   -> ClangMethodKind.t
   -> ?is_cpp_const_member_fun:bool
   -> ?is_cpp_virtual:bool
+  -> ?is_override:bool
   -> ?is_cpp_copy_assignment:bool
   -> ?is_cpp_copy_ctor:bool
   -> ?is_cpp_coroutine:bool

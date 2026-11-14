@@ -538,67 +538,29 @@ let report_unnecessary_copies ?(intermediates_only = false)
                PulseReport.report analysis_data ~is_suppressed ~latent:false diagnostic ) )
 
 
-(* A method that overrides a virtual one does not get to choose its parameter types: the
+(* A method that overrides one it inherits does not get to choose its parameter types: the
    declaration it overrides fixes them, so passing a parameter by const reference instead would
    mean changing the base and every other implementation and caller along with it. The advice
-   cannot be taken where it would be reported, so do not report it there. A virtual method that
-   overrides nothing keeps its report: whoever wrote that declaration owns its signature.
+   cannot be taken where it would be reported, so do not report it there. A method that overrides
+   nothing keeps its report: whoever wrote that declaration owns its signature.
 
-   [override_exists] walks up to the supertypes and matches on the whole signature rather than on
-   the method name, so an ordinary overload that merely shares a name with an inherited method is
-   still reported. It can only see supertypes the type environment has: when a base class was not
-   captured this finds nothing and the report stays, which costs a false positive rather than a
-   true one. *)
-let overrides_a_virtual tenv proc_desc =
-  (* A static member function cannot override anything: clang rejects one that tries. Sharing a
-     name and parameter types with a base method only hides it, so such a declaration still owns
-     its signature and keeps its report. An Objective-C method can override, whether it is an
-     instance or a class method: a class method is dispatched on the metaclass, so a subclass
-     redeclaring the selector overrides it just as an instance method does. The cheap test goes
-     first, as the other walks the supertypes. *)
-  let is_objc_method (kind : ClangMethodKind.t) =
-    match kind with
-    | OBJC_INSTANCE | OBJC_CLASS ->
-        true
-    | CPP_INSTANCE | CPP_CLASS | BLOCK | C_FUNCTION ->
-        false
-  in
-  let can_override (kind : ClangMethodKind.t) =
-    match kind with
-    | CPP_INSTANCE | OBJC_INSTANCE | OBJC_CLASS ->
-        true
-    | CPP_CLASS | BLOCK | C_FUNCTION ->
-        false
-  in
-  let this_kind = (Procdesc.get_attributes proc_desc).ProcAttributes.clang_method_kind in
-  can_override this_kind
-  && PatternMatch.override_exists ~check_current_type:false
-       (fun overridden ->
-         (* The question is whether the method found in a supertype is virtual, not whether
-            this one is. A method may be declared virtual and still override nothing, when the
-            base method it shares a signature with is not virtual: it starts a new hierarchy
-            and owns its parameters. An unknown supertype method counts as non-virtual, which
-            keeps the report, as an uncaptured base class already does.
+   The relation is clang's, recorded at capture time in [ProcAttributes.is_override]. It used to
+   be reconstructed here by walking the type environment's supertypes and comparing signatures,
+   and every step of that was a defect in its own right. The walk could only see supertypes the
+   type environment happened to hold, so a base class declared in a header and merely inherited
+   from was invisible and its real overrides were reported -- erratically, since whether the base
+   got translated depended on what ELSE the translation unit did with it. The signature
+   comparison could not see by-value parameter types at all, because [Procname.Parameter] keeps a
+   name only for a pointer to a struct, so overloads were silenced; comparing the full formals
+   instead then reported real overrides that differed only in a top-level [const], which is not
+   part of a C++ function type. Asking clang settles all of it at once: aliases, typedefs, class
+   templates, default arguments, cv-qualifiers and multiple inheritance are resolved before the
+   edge is recorded, and Objective-C gets class-versus-instance for free because the two live in
+   different method tables.
 
-            Objective-C has no such distinction to draw. Every method is dispatched through
-            objc_msgSend, so there is no analogue of hiding a non-virtual base method: finding
-            the selector on a supertype already means this method overrides it, and
-            [is_cpp_virtual] is false for every ObjCMethodDecl by construction.
-
-            The kinds must MATCH, though. [has_same_signature] compares only the method name
-            and the parameters, and for Objective-C the name is the selector; it never looks at
-            whether either side is an instance or a class method. A class method and an
-            instance method may share a selector on the same hierarchy -- clang accepts it
-            without a warning, since they live in different method tables -- and neither
-            overrides the other. Without this test the subclass declaration is taken for an
-            override and loses a report it owns. *)
-         Option.exists (IRAttributes.load overridden) ~f:(fun attrs ->
-             attrs.ProcAttributes.is_cpp_virtual
-             || is_objc_method attrs.ProcAttributes.clang_method_kind
-                && ClangMethodKind.equal attrs.ProcAttributes.clang_method_kind this_kind ) )
-       tenv
-       (Procdesc.get_proc_name proc_desc)
-
+   Hiding is still not overriding: a method that merely shares a signature with a NON-virtual
+   base method has no edge, and keeps its report. *)
+let overrides_a_method proc_desc = (Procdesc.get_attributes proc_desc).ProcAttributes.is_override
 
 let report_unnecessary_parameter_copies ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data)
     non_disj_astate =
@@ -607,9 +569,7 @@ let report_unnecessary_parameter_copies ({InterproceduralAnalysis.proc_desc; ten
     let const_refable_parameters =
       PulseNonDisjunctiveDomain.get_const_refable_parameters non_disj_astate
     in
-    (* checked only once a parameter is eligible, since it walks the supertypes *)
-    if (not (List.is_empty const_refable_parameters)) && not (overrides_a_virtual tenv proc_desc)
-    then
+    if (not (List.is_empty const_refable_parameters)) && not (overrides_a_method proc_desc) then
       List.iter const_refable_parameters ~f:(fun (param, typ, location) ->
           if is_type_copiable tenv typ then
             let diagnostic =

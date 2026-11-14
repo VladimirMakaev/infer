@@ -59,6 +59,11 @@ type t =
   ; is_cpp_copy_ctor: bool  (** true if the procedure is a copy constructor *)
   ; is_cpp_coroutine: bool  (** true if the procedure is a C++ coroutine *)
   ; is_cpp_virtual: bool  (** true if the procedure is a virtual C++ method *)
+  ; is_override: bool
+        (** clang says this method overrides one it inherits: a non-empty [xmdi_overriden_methods]
+            in C++, or [omdi_is_overriding] in Objective-C. Hiding a NON-virtual base method is not
+            overriding. Recorded here because the relation is not recoverable later -- it depends on
+            declarations the translation unit need not have translated. *)
   ; is_cpp_move_ctor: bool  (** true if the procedure is a move constructor *)
   ; is_static_ctor: bool  (** true if the procedure has the constructor attribute *)
   ; is_cpp_deleted: bool  (** true if the procedure is deleted *)
