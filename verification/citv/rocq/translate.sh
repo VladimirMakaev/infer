@@ -64,7 +64,11 @@ ERRS="$BUILD/errors.txt"; : > "$ERRS"
 if [ "$MODE" = --errors-only ]; then
   # 'merlin' headers are informational (one per typed node); the categories that mean the
   # translator could not render a construct are not_supported and side_effect.
-  grep -E ' (not_supported|side_effect)$' "$ERRS" | sort
+  # LC_ALL=C: the pin in expected/ is a byte-ordered list, and an unpinned sort collates
+  # case-insensitively under a UTF-8 locale, putting iStd before PulseCItv. The set is the
+  # same either way, so the only symptom is a drift refusal on a reordered list -- which
+  # made citv=ok unreachable once the harness started calling this with LC_ALL=C.
+  grep -E ' (not_supported|side_effect)$' "$ERRS" | LC_ALL=C sort
   exit 0
 fi
 
