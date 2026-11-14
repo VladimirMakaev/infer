@@ -267,6 +267,7 @@ module BuildMethodSignature = struct
     in
     let is_cpp_const_member_fun = CMethodProperties.is_cpp_const_member_fun method_decl in
     let is_cpp_virtual = CMethodProperties.is_cpp_virtual method_decl in
+    let is_override = CMethodProperties.is_override method_decl in
     let is_cpp_copy_assignment = CMethodProperties.is_cpp_copy_assignment method_decl in
     let is_cpp_copy_ctor = CMethodProperties.is_cpp_copy_ctor method_decl in
     let is_cpp_coroutine = CMethodProperties.is_cpp_coroutine method_decl in
@@ -299,6 +300,7 @@ module BuildMethodSignature = struct
     ; loc
     ; method_kind
     ; is_cpp_virtual
+    ; is_override
     ; block_as_arg_attributes
     ; is_no_return
     ; is_variadic

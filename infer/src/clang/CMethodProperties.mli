@@ -27,6 +27,11 @@ val is_cpp_const_member_fun : Clang_ast_t.decl -> bool
 
 val is_cpp_virtual : Clang_ast_t.decl -> bool
 
+val is_override : Clang_ast_t.decl -> bool
+(** clang's own answer: a C++ method with a non-empty [xmdi_overriden_methods], or an Objective-C
+    method with [omdi_is_overriding]. Hiding a non-virtual base method is not overriding and gives
+    [false]. *)
+
 val is_cpp_coroutine : Clang_ast_t.decl -> bool
 
 val is_cpp_copy_assignment : Clang_ast_t.decl -> bool

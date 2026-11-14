@@ -19,6 +19,10 @@ INFERPRINT_OPTIONS = \
 
 
 SOURCES = $(wildcard *.cpp taint/*.cpp)
+# clang.make makes the report depend on $(HEADERS), and this suite never set it, so editing a
+# header left the expectations stale. It matters now that override_header.h carries a base class
+# whose declaration decides what the override cells expect.
+HEADERS = $(wildcard *.h)
 
 include $(TESTS_DIR)/clang.make
 
