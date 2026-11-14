@@ -552,19 +552,50 @@ let report_unnecessary_copies ?(intermediates_only = false)
 let overrides_a_virtual tenv proc_desc =
   (* A static member function cannot override anything: clang rejects one that tries. Sharing a
      name and parameter types with a base method only hides it, so such a declaration still owns
-     its signature and keeps its report. The cheap test goes first, as the other walks the
-     supertypes. *)
-  ClangMethodKind.equal (Procdesc.get_attributes proc_desc).ProcAttributes.clang_method_kind
-    ClangMethodKind.CPP_INSTANCE
+     its signature and keeps its report. An Objective-C method can override, whether it is an
+     instance or a class method: a class method is dispatched on the metaclass, so a subclass
+     redeclaring the selector overrides it just as an instance method does. The cheap test goes
+     first, as the other walks the supertypes. *)
+  let is_objc_method (kind : ClangMethodKind.t) =
+    match kind with
+    | OBJC_INSTANCE | OBJC_CLASS ->
+        true
+    | CPP_INSTANCE | CPP_CLASS | BLOCK | C_FUNCTION ->
+        false
+  in
+  let can_override (kind : ClangMethodKind.t) =
+    match kind with
+    | CPP_INSTANCE | OBJC_INSTANCE | OBJC_CLASS ->
+        true
+    | CPP_CLASS | BLOCK | C_FUNCTION ->
+        false
+  in
+  let this_kind = (Procdesc.get_attributes proc_desc).ProcAttributes.clang_method_kind in
+  can_override this_kind
   && PatternMatch.override_exists ~check_current_type:false
        (fun overridden ->
          (* The question is whether the method found in a supertype is virtual, not whether
             this one is. A method may be declared virtual and still override nothing, when the
             base method it shares a signature with is not virtual: it starts a new hierarchy
             and owns its parameters. An unknown supertype method counts as non-virtual, which
-            keeps the report, as an uncaptured base class already does. *)
+            keeps the report, as an uncaptured base class already does.
+
+            Objective-C has no such distinction to draw. Every method is dispatched through
+            objc_msgSend, so there is no analogue of hiding a non-virtual base method: finding
+            the selector on a supertype already means this method overrides it, and
+            [is_cpp_virtual] is false for every ObjCMethodDecl by construction.
+
+            The kinds must MATCH, though. [has_same_signature] compares only the method name
+            and the parameters, and for Objective-C the name is the selector; it never looks at
+            whether either side is an instance or a class method. A class method and an
+            instance method may share a selector on the same hierarchy -- clang accepts it
+            without a warning, since they live in different method tables -- and neither
+            overrides the other. Without this test the subclass declaration is taken for an
+            override and loses a report it owns. *)
          Option.exists (IRAttributes.load overridden) ~f:(fun attrs ->
-             attrs.ProcAttributes.is_cpp_virtual ) )
+             attrs.ProcAttributes.is_cpp_virtual
+             || is_objc_method attrs.ProcAttributes.clang_method_kind
+                && ClangMethodKind.equal attrs.ProcAttributes.clang_method_kind this_kind ) )
        tenv
        (Procdesc.get_proc_name proc_desc)
 
