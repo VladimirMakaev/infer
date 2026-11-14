@@ -418,13 +418,48 @@ struct VirtualHider : NonVirtualBase {
   virtual void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 4); }
 };
 
+// A derived class can reach a same-signature method through SEVERAL bases, and
+// only one of them need be virtual for this to be a real override. The check
+// keeps looking after a base whose method is not virtual, so neither listing
+// order changes the answer: both of these override VirtualRecorder and both are
+// suppressed. They are here because a search that stopped at the first
+// same-signature base would still pass every single-base case above, and would
+// report whichever of the two listed the non-virtual base first.
+struct VirtualRecorder {
+  virtual ~VirtualRecorder() = default;
+  // Pure virtual on purpose: a declaration with no body is not analysed and so
+  // adds no expected row, while still carrying the virtuality the check reads.
+  virtual void hides_record_bad(std::shared_ptr<int> p) = 0;
+};
+
+struct MixedNonVirtFirst : NonVirtualBase, VirtualRecorder {
+  void hides_record_bad(std::shared_ptr<int> p) override { read_int(*p + 5); }
+};
+
+struct MixedVirtFirst : VirtualRecorder, NonVirtualBase {
+  void hides_record_bad(std::shared_ptr<int> p) override { read_int(*p + 6); }
+};
+
 // A STATIC member function cannot override anything: clang rejects a static
 // that tries to. It must carry the INHERITED name to be a test at all, since
 // the check matches a name together with exact parameter types; spelled any
 // other way it hides nothing, the check never looks at it, and the row would be
 // reported whether or not a static is excluded. With the name it does hide the
-// base method, so this declaration owns its signature and is reported, and the
-// row disappears if the static exclusion is reverted.
+// base method, so this declaration owns its signature and is reported.
+//
+// This row no longer pins the separate static exclusion in the check, and a
+// reader should not assume it does. Clang rejects a static that shares a
+// signature with a VIRTUAL base method outright, so any static that reaches the
+// override search has only non-virtual same-signature bases -- and those are
+// reported anyway, on the strength of the virtuality test. Removing the static
+// exclusion leaves this row, and every expectation in this suite, unchanged.
+//
+// That is measured rather than argued, and it is still not permission to drop
+// the exclusion. It is spelled as "the method kind is CPP_INSTANCE", which also
+// excludes Objective-C, whose methods are OBJC_INSTANCE or OBJC_CLASS. There is
+// no Objective-C case in this suite, so nothing here can observe that half of
+// it in either direction. A green run says the C++ side is unaffected; it says
+// nothing at all about the rest.
 struct StaticHider : NonVirtualBase {
   static void hides_record_bad(std::shared_ptr<int> p) { read_int(*p + 3); }
 };
