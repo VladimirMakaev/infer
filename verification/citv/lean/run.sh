@@ -15,6 +15,9 @@
 # no root.
 
 set -u -o pipefail
+# `... | grep -q` under pipefail reports failure on a SUCCESSFUL match once the output passes
+# the pipe buffer, because grep exits early and SIGPIPE kills the writer.  See the long note in
+# check-axioms.sh.  Here it would misfile a mutant that failed to build as an axiom rejection.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE=all
@@ -106,7 +109,7 @@ PY
   OUT="$("$HERE/check-axioms.sh" "$COPY" 2>&1)"
   if [ $? -eq 0 ]; then
     OUTCOME=accepted
-  elif printf '%s\n' "$OUT" | grep -q 'lake build did not succeed'; then
+  elif grep -q 'lake build did not succeed' <<<"$OUT"; then
     OUTCOME=no-build
   else
     OUTCOME=axiom-reject
