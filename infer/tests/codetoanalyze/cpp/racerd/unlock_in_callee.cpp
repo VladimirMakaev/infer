@@ -434,7 +434,7 @@ class WriteAfterUniqueLockGuardScope {
   int x_;
 };
 
-// a class that uses locks only through callees is not considered concurrent
+// Lock use through the guard establishes concurrency, including after its destructor returns.
 class GuardOnly {
  public:
   void set(int v) {
@@ -442,7 +442,7 @@ class GuardOnly {
     x_ = v;
   }
 
-  int FN_get_after_guard_scope_bad() {
+  int get_after_guard_scope_bad() {
     {
       Guard g(mu_);
     }

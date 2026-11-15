@@ -35,14 +35,14 @@ public class Inference {
     return ret;
   }
 
-  // TODO: handle these casely separately, since assuming that any method whose (transitive) callee
-  // uses a lock can run on multiple threads may cause a lot of false positives
+  // Known limitation: transitive Java lock use does not establish caller concurrency.
+  // The scoped-guard rule does not provide thread evidence through this helper.
   int mField3;
 
   // empty call that uses a lock
   private synchronized void useLock() {}
 
-  int useLockInCalleeThenReadBad() {
+  int FN_useLockInCalleeThenReadBad() {
     useLock();
     return mField3;
   }
