@@ -320,7 +320,7 @@ Definition abduce_le (a1 : t) (a2 : t) : abduction_result :=
       Satisfiable None (Some (between lower Bound.PlusInfinity))
   | (Unsafe.Outside l1 u1, Unsafe.Between _lower2 upper2) =>
     if Bound.ge (Bound.Int u1) upper2 then
-      let upper := Bound.min (Bound.Int (IntLit.add IntLit.one l1)) upper2 in
+      let upper := Bound.min (Bound.Int l1) upper2 in
       Satisfiable (Some (between Bound.MinusInfinity upper)) None
     else
       Satisfiable None None
