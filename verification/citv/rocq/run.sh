@@ -12,7 +12,12 @@
 #
 #   ./run.sh            pins, proofs from clean, freshness attack, drift, mutants
 #   ./run.sh --proofs   stop after the axiom check
-set -u
+# pipefail so a failing producer fails its pipeline instead of being masked by a consumer that
+# succeeds.  It was absent here, and that absence was the only thing keeping the `grep -q`
+# conditions below correct -- see the note in ../run.sh.  The two are changed together on
+# purpose: adding pipefail alone would INVERT those conditions, and converting them alone would
+# leave every future pipeline in this file still masking its producer.
+set -u -o pipefail
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
@@ -52,12 +57,12 @@ echo; echo "=== the translator guard must refuse a directory, as a toolchain pro
 # distinguishes this from an ordinary failure: exit 2, AND a 'REFUSED: toolchain' line with
 # no DRIFT line anywhere.  The directory used is this one, which certainly exists.
 dir_out=$(CITV_TRANSLATOR="$PWD" ./drift.sh 2>&1); dir_rc=$?
-if [ $dir_rc -eq 2 ] && printf '%s\n' "$dir_out" | grep -q '^REFUSED: toolchain' &&
-   ! printf '%s\n' "$dir_out" | grep -q '^DRIFT:'; then
-  echo "ok: refused, '$(printf '%s\n' "$dir_out" | grep -m1 '^REFUSED: toolchain' | cut -c1-90)'"
+if [ $dir_rc -eq 2 ] && grep -q '^REFUSED: toolchain' <<<"$dir_out" &&
+   ! grep -q '^DRIFT:' <<<"$dir_out"; then
+  echo "ok: refused, '$(grep -m1 '^REFUSED: toolchain' <<<"$dir_out" | cut -c1-90)'"
 else
   echo "REFUSED: a directory as CITV_TRANSLATOR gave exit $dir_rc, not a toolchain refusal:"
-  printf '%s\n' "$dir_out" | head -5
+  head -5 <<<"$dir_out"
   exit 1
 fi
 
