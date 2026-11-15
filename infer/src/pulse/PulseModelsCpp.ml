@@ -883,6 +883,39 @@ module BasicStringView = struct
       else ret ()
 end
 
+(* A constructor model that represents the object by something other than its own members leaves
+   those members with no value at all. That is invisible while every method that reads one is
+   modelled too, and becomes a false positive as soon as a read escapes the models: a body Pulse
+   does run, or the frontend's field-by-field copy of a [?:] branch temporary.
+   Record that the constructor initialised the object's own storage. The walk is the same one that
+   marked it uninitialized ([set_uninitialized] -> [fold_pointer_targets] over the declared type),
+   so it reaches the same nested cells; an edge walk does not, because the cells need not be
+   linked from [this] yet. No value is invented: writing 0 would be wrong for the copy and
+   initializer-list constructors, which do not produce an empty buffer, and would invent
+   null-dereference paths through the real body.
+   NOT AN EXACT INVERSE, and the difference is in the suppressing direction. [set_uninitialized]
+   narrows the walk with [filter_name] (skipping unions and [UninitBlocklist] structs) and
+   [filter_struct] (skipping single-scalar-field wrappers); this passes neither, so it reaches
+   strictly more cells than were ever marked locally. [AddressAttributes.initialize] removes
+   [Uninitialized] rather than only adding [Initialized], and that attribute also arrives from a
+   callee's summary, so the extra reach can in principle clear a mark this walk did not make. It
+   is bounded -- only a union, blocklisted or wrapper member of a modelled class -- and nothing in
+   the suite exercises it; folly::Function's [Data data_] is the one such member here, a
+   single-scalar-field wrapper [set_uninitialized] stops at. Passing the two filters was measured
+   to change nothing (PASS 3/3), so tighten this if the gap ever acquires a reader. *)
+let initialize_declared_fields (this, hist) callee_procname {path; location; analysis_data} astate =
+  match Procname.get_class_type_name callee_procname with
+  | Some class_name ->
+      let typ = Typ.mk (Tstruct class_name) in
+      AbductiveDomain.fold_pointer_targets analysis_data.InterproceduralAnalysis.tenv path
+        (`Malloc (this, hist))
+        typ location
+        ~f:(fun (addr, _) astate -> AbductiveDomain.AddressAttributes.initialize addr astate)
+        astate
+  | None ->
+      astate
+
+
 module Function = struct
   let call_operator_of_closure tenv lambda astate =
     match PulseArithmetic.get_dynamic_type lambda astate with
@@ -996,9 +1029,15 @@ module Function = struct
           ) )
 
 
+  (* [std::function] and [folly::Function] are represented by the callable stored at [*this], so
+     the object's own members -- [call_], [exec_], [data_] -- are never written. Record that the
+     constructor initialised them: a [?:] branch temporary is copied field by field by the
+     frontend, and that read is outside every model. *)
   let assign dest FuncArg.{arg_payload= src; typ= src_typ} ~desc : model_no_non_disj =
-   fun {path; location; ret= ret_id, _} astate ->
+   fun ({path; location; callee_procname} as model_data) astate ->
+    let ret_id = fst model_data.ret in
     let event = Hist.call_event path location desc in
+    let astate = initialize_declared_fields dest callee_procname model_data astate in
     let write_target astate target =
       let<+> astate = PulseOperations.write_deref path location ~ref:dest ~obj:target astate in
       PulseOperations.havoc_id ret_id (Hist.single_event event) astate
@@ -1674,30 +1713,11 @@ module Vector = struct
 
   (* The container models keep folly's own storage -- [impl_.b_], [impl_.e_], [impl_.z_] --
      entirely out of the abstract state, representing the vector by [__infer_backing_array] and
-     [__infer_size] instead. A constructor model therefore leaves that storage with no value at
-     all. While every member is modelled that is invisible, because no real body ever reads it;
-     [reserve] is not modelled, so folly's body runs and Pulse reports [impl_.z_] as read
-     without initialization.
-     Record that the constructor initialised the object's own storage. The walk is the exact
-     inverse of the one that marked it uninitialized in the first place
-     ([set_uninitialized] -> [fold_pointer_targets] over the declared type), so it reaches the
-     same nested cells; an edge walk does not, because the cells need not be linked from [this]
-     yet. No value is invented: writing 0 would be wrong for the copy and initializer-list
-     constructors, which do not produce an empty buffer, and would invent null-dereference
-     paths through the real body. *)
-  let initialize_backing_storage (this, hist) callee_procname {path; location; analysis_data} astate
-      =
-    match Procname.get_class_type_name callee_procname with
-    | Some class_name ->
-        let typ = Typ.mk (Tstruct class_name) in
-        AbductiveDomain.fold_pointer_targets analysis_data.InterproceduralAnalysis.tenv path
-          (`Malloc (this, hist))
-          typ location
-          ~f:(fun (addr, _) astate -> AbductiveDomain.AddressAttributes.initialize addr astate)
-          astate
-    | None ->
-        astate
-
+     [__infer_size] instead. While every member is modelled that is invisible, because no real
+     body ever reads it; [reserve] is not modelled, so folly's body runs and Pulse reports
+     [impl_.z_] as read without initialization. [initialize_declared_fields] is the general form
+     of that: see its comment. *)
+  let initialize_backing_storage = initialize_declared_fields
 
   let default_constructor vector ~desc : model_no_non_disj =
    fun ({path; location; callee_procname} as model_data) astate ->

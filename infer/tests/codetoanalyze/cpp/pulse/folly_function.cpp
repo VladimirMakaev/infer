@@ -81,6 +81,10 @@ class Function<ReturnType(Args...)>
     exec(0, &data_, nullptr);
   }
 
+  // Public only so a test can read one of these the way the frontend's
+  // field-by-field copy of a `?:` temporary already does. Pulse does not model
+  // access control, so this changes nothing about the analysis.
+ public:
   ReturnType (*call_)(Data&, Args&&...){nullptr};
   Exec exec_{nullptr};
   Data data_{};
@@ -136,4 +140,44 @@ void folly_function_operator_bool_ok() {
   if (entry.job) {
     entry.job();
   }
+}
+
+// Reproduces the FPs from a diff-time report on three more shapes: an
+// aggregate with Function members moved into a `?:` temporary, a Function
+// built from a lambda in one `?:` branch, and a direct field read after the
+// converting constructor. The model for the folly::Function
+// constructor and operator= writes the Function as one opaque value and never
+// writes call_/exec_/data_, so anything that reads a field from outside a
+// modelled method sees it as uninitialized. The existing cases above do not
+// catch this because every method that reads a field -- operator bool,
+// operator= -- is itself modelled.
+
+struct TwoFunctions {
+  folly::Function<int()> first{};
+  folly::Function<int()> second{};
+};
+
+void sinkTwoFunctions(TwoFunctions t);
+void sinkFunction(folly::Function<int()> f);
+folly::Function<int()> functionFromLambda() {
+  return [] { return 42; };
+}
+
+// A `?:` whose branches are aggregates with Function members: the implicit
+// move constructor of the aggregate moves each member, and the frontend copies
+// the branch temporary into SIL_temp_conditional field by field.
+void folly_function_cond_aggregate_move_ok(bool c, TwoFunctions* p) {
+  sinkTwoFunctions(c ? TwoFunctions{} : static_cast<TwoFunctions&&>(*p));
+}
+
+// A `?:` with a Function built from a lambda in one branch.
+void folly_function_cond_from_lambda_ok(bool c, folly::Function<int()> r) {
+  sinkFunction(c ? static_cast<folly::Function<int()>&&>(r)
+                 : functionFromLambda());
+}
+
+// No `?:` at all: read a field directly after the converting constructor.
+bool folly_function_field_after_converting_ctor_ok() {
+  folly::Function<int()> f = functionFromLambda();
+  return f.exec_ != nullptr;
 }
