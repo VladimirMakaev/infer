@@ -16,9 +16,24 @@ it. The three are complementary. None of them alone says the OCaml is sound.
 ## Running it
 
 ```
-./run.sh            # pins, proofs from clean, freshness attack, drift, mutants
-./run.sh --proofs   # stop after the axiom check
+./run.sh                   # pins, proofs from clean, freshness attack, drift, mutants
+./run.sh --proofs          # stop after the axiom check
+./concurrency-test.sh      # this checkout and a peer copy, at the same time, both green
 ```
+
+Every script here keeps its scratch in a per-run `mktemp -d` with a cleanup trap, so a run in
+one checkout cannot disturb a run in another. It used to keep it at fixed paths —
+`/tmp/citv-expected.txt`, `/tmp/citv-axioms.log`, a whole mutant tree at `/tmp/citv-mut` — and
+a reviewer running the proofs while the standing check fired had both runs writing the same
+files. One run would delete and repopulate the mutant tree while the other was compiling
+inside it, and the second run then reported *the mutant does not compile*: a statement about
+interference, printed as a statement about the mutant. `CITV_KEEP_TMP=1` keeps the directory
+when you need to look inside it.
+
+Two runs in the **same** directory are still unsafe, and no temp path can change that: the
+proofs are compiled in `v/`, which `check-axioms.sh` cleans first, so one checkout cannot host
+two runs. `concurrency-test.sh` therefore pits this directory against an independent copy,
+which is the case that actually arose.
 
 Opt-in, not standing: it needs a second opam switch and a Rocq install, and is not wired into
 any build. Infer does not depend on Rocq and never asks for it. This directory is outside the

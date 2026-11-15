@@ -21,6 +21,13 @@
 set -u
 cd "$(dirname "$0")" || exit 2
 
+# PER-RUN SCRATCH, not a fixed /tmp path.  Two of these running at once -- a reviewer's copy
+# while the standing check fires -- wrote the SAME files and silently corrupted each other's
+# results, which is the worst shape a check can fail in: both runs look like they completed.
+# CITV_KEEP_TMP=1 keeps the directory for debugging; failures already tail their own logs.
+CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-axioms.XXXXXXXX") || exit 2
+trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
+
 FAIL=0
 say() { printf '%s\n' "$*"; }
 bad() { printf 'REFUSED: %s\n' "$*"; FAIL=1; }
@@ -48,8 +55,8 @@ leftover=$(ls ./*.vo 2>/dev/null | wc -l)
 
 # ---------------------------------------------------------------------------- build
 for f in IStd IntLit Binop Unop PulseCItv Soundness; do
-  $ROCQ_RUN rocq compile -Q . "" $f.v > /tmp/citv-rocq-$f.log 2>&1 || {
-    bad "$f.v did not compile"; tail -20 /tmp/citv-rocq-$f.log; say "FAILED (build)"; exit 1; }
+  $ROCQ_RUN rocq compile -Q . "" $f.v > "$CITV_TMP/rocq-$f.log" 2>&1 || {
+    bad "$f.v did not compile"; tail -20 "$CITV_TMP/rocq-$f.log"; say "FAILED (build)"; exit 1; }
 done
 [ -f Soundness.vo ] || { bad "Soundness.vo was not produced"; say "FAILED (build)"; exit 1; }
 
@@ -58,31 +65,31 @@ done
 # or renamed fails, and a theorem that is added without being declared here fails too, so
 # the expected list cannot quietly fall behind the file.
 EXPECTED=../expected/theorems.txt
-grep -oE '^(Theorem|Example) [A-Za-z_0-9]+' Soundness.v | awk '{print $2}' | sort -u > /tmp/citv-actual.txt
-sort -u "$EXPECTED" > /tmp/citv-expected.txt
-if ! diff -u /tmp/citv-expected.txt /tmp/citv-actual.txt > /tmp/citv-setdiff.txt; then
+grep -oE '^(Theorem|Example) [A-Za-z_0-9]+' Soundness.v | awk '{print $2}' | sort -u > "$CITV_TMP/actual.txt"
+sort -u "$EXPECTED" > "$CITV_TMP/expected.txt"
+if ! diff -u "$CITV_TMP/expected.txt" "$CITV_TMP/actual.txt" > "$CITV_TMP/setdiff.txt"; then
   bad "the theorem set does not match expected/theorems.txt"
-  cat /tmp/citv-setdiff.txt
+  cat "$CITV_TMP/setdiff.txt"
 fi
-N=$(wc -l < /tmp/citv-expected.txt)
+N=$(wc -l < "$CITV_TMP/expected.txt")
 [ "$N" -ge 23 ] || bad "expected/theorems.txt lists only $N names; this milestone has 23"
 
 # ------------------------------------------------------------------- Print Assumptions
 # Produced by a FRESHLY compiled file, so the reports cannot come from a cache.
 { echo 'Require Import Soundness.'
-  while read -r t; do [ -n "$t" ] && echo "Print Assumptions Soundness.$t."; done < /tmp/citv-expected.txt
+  while read -r t; do [ -n "$t" ] && echo "Print Assumptions Soundness.$t."; done < "$CITV_TMP/expected.txt"
 } > CheckAxioms.v
-$ROCQ_RUN rocq compile -Q . "" CheckAxioms.v > /tmp/citv-axioms.log 2>&1
+$ROCQ_RUN rocq compile -Q . "" CheckAxioms.v > "$CITV_TMP/axioms.log" 2>&1
 rc=$?
 rm -f CheckAxioms.v CheckAxioms.vo CheckAxioms.glob CheckAxioms.vok CheckAxioms.vos .CheckAxioms.aux
 [ $rc -eq 0 ] || { bad "Print Assumptions run failed (a named theorem may not exist)"
-                   tail -20 /tmp/citv-axioms.log; say "FAILED (axioms)"; exit 1; }
+                   tail -20 "$CITV_TMP/axioms.log"; say "FAILED (axioms)"; exit 1; }
 
-REPORTS=$(grep -c '^Closed under the global context' /tmp/citv-axioms.log)
+REPORTS=$(grep -c '^Closed under the global context' "$CITV_TMP/axioms.log")
 [ "$REPORTS" -eq "$N" ] || bad "$REPORTS clean reports for $N theorems"
-if grep -qE '^Axioms:|^Axiom |sorry|Admitted' /tmp/citv-axioms.log; then
+if grep -qE '^Axioms:|^Axiom |sorry|Admitted' "$CITV_TMP/axioms.log"; then
   bad "an axiom or an admitted proof was reported"
-  grep -nE -A2 '^Axioms:' /tmp/citv-axioms.log | head -20
+  grep -nE -A2 '^Axioms:' "$CITV_TMP/axioms.log" | head -20
 fi
 # and no theorem may be Admitted in the source either
 if grep -qE '\bAdmitted\b|\bsorry\b' Soundness.v; then bad "Soundness.v contains Admitted"; fi
