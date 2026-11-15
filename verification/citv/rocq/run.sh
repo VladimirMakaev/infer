@@ -16,8 +16,12 @@ set -u
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
+# Exit 2 throughout for "the check could not be carried out" -- a toolchain that does not
+# match the pins, or a translator that does not resolve -- and 1 for "it ran and something
+# failed".  check-axioms.sh already used 2 that way.  citv_check.sh distinguishes the two
+# by the message rather than the code, but a human running this by hand should not have to.
 echo "=== pins"
-citv_assert_pins || { echo "REFUSED: toolchain does not match the pins"; exit 1; }
+citv_assert_pins || { echo "REFUSED: toolchain does not match the pins"; exit 2; }
 echo "ok: $CITV_PINS, translator $CITV_TRANSLATOR_COMMIT"
 
 echo; echo "=== proofs, from clean"
@@ -33,8 +37,26 @@ grep -q 'REFUSED' /tmp/citv-freshattack.log \
   && echo "ok: refused, '$(grep -m1 REFUSED /tmp/citv-freshattack.log)'" \
   || { echo "REFUSED: it failed, but not via the freshness guard"; exit 1; }
 
+echo; echo "=== the translator guard must refuse a directory, as a toolchain problem"
+# A directory passes -x, so an earlier guard let CITV_TRANSLATOR=/some/dir through to
+# translate.sh; the shell's failure to execute it then landed in the error list and came back
+# out of drift as "the translator's error set changed" -- a missing toolchain reported as a
+# soundness verdict about the commit.  Both halves are asserted, because only the pair
+# distinguishes this from an ordinary failure: exit 2, AND a 'REFUSED: toolchain' line with
+# no DRIFT line anywhere.  The directory used is this one, which certainly exists.
+dir_out=$(CITV_TRANSLATOR="$PWD" ./drift.sh 2>&1); dir_rc=$?
+if [ $dir_rc -eq 2 ] && printf '%s\n' "$dir_out" | grep -q '^REFUSED: toolchain' &&
+   ! printf '%s\n' "$dir_out" | grep -q '^DRIFT:'; then
+  echo "ok: refused, '$(printf '%s\n' "$dir_out" | grep -m1 '^REFUSED: toolchain' | cut -c1-90)'"
+else
+  echo "REFUSED: a directory as CITV_TRANSLATOR gave exit $dir_rc, not a toolchain refusal:"
+  printf '%s\n' "$dir_out" | head -5
+  exit 1
+fi
+
 echo; echo "=== drift"
-./drift.sh || exit 1
+./drift.sh; drift_rc=$?
+[ $drift_rc -eq 0 ] || exit $drift_rc
 
 echo; echo "=== mutants: each must be REJECTED"
 ./mutate.sh || exit 1
