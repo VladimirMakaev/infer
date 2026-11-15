@@ -197,7 +197,15 @@ let is_java_container_read =
         L.die InternalError "is_java_container_read called with a non-Java procname.@\n"
 
 
-(** Standard library classes whose member functions are modelled as accesses to the receiver. *)
+(** Standard library classes whose member functions are modelled as accesses to the receiver.
+
+    [std::function] is not a container, but it belongs here for the same reason the containers do:
+    assigning to one is a call to a non-const member function, and without a model that call is
+    recorded as a READ of the receiver rather than a write. A class that stores a callback and swaps
+    it from one thread while another invokes it therefore has no write to conflict with, and the
+    race is invisible. The classification the list already applies gives the right answer for it
+    unchanged: [operator()] and [target] are const and so read, while [operator=], [assign] and
+    [swap] are not and so write. *)
 let cpp_containers =
   [ "std::basic_string"
   ; "std::deque"
@@ -206,6 +214,7 @@ let cpp_containers =
   ; "std::flat_multiset"
   ; "std::flat_set"
   ; "std::forward_list"
+  ; "std::function"
   ; "std::list"
   ; "std::map"
   ; "std::multimap"
