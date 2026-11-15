@@ -16,6 +16,14 @@
 # `make` and `dune build` never see it. The module under test is read from the working tree at
 # run time, so this directory cannot hold a stale fork of it.
 
+# NEVER TEST A CONDITION WITH `... | grep -q` UNDER pipefail.  grep -q exits at the first
+# match, SIGPIPE kills the writer, and pipefail makes 141 the pipeline's status -- so a match
+# reports FAILURE.  It is size- and position-dependent: measured on this box, a present needle
+# at the START of the output answers correctly up to 122KB and wrongly (141) from 152KB, so a
+# short hand test cannot see it.  The cliff is NOT the 64KB pipe buffer; it is a race between
+# two processes.  Match from a here-string, which has no second process and so no pipeline
+# status.  Found in lean/check-axioms.sh, where two sites failed OPEN; here the `!` made them
+# fail noisily instead, which is luck rather than design.
 set -u -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,8 +44,15 @@ SUBJECT_MLI="$ROOT/infer/src/pulse/PulseCItv.mli"
 if [ -z "${CITV_IN_ORACLE_SWITCH:-}" ] && [ "${CITV_NO_SWITCH:-0}" != 1 ] &&
    { [ -n "${CITV_OPAMROOT:-}" ] || [ -d "${CITV_HOME:-$HOME/.citv-rocq}/opamroot" ]; }; then
   CITV_SETUP_ALLOW_NO_OPAM=1 . "$HERE/rocq/setup.sh" || exit 2
-  if command -v opam >/dev/null 2>&1 &&
-     opam switch list --short 2>/dev/null | grep -qxF "$CITV_ORACLE_SWITCH"; then
+  # Captured first, then matched from a here-string, like every other test in this file: see
+  # the note at `set -o pipefail` above. The output here is a handful of lines today, which is
+  # exactly the reasoning that let the same bug sit in lean/check-axioms.sh -- nothing in the
+  # code bounds it, and "it is short in practice" is not a property the next reader can check.
+  # `command -v` still gates the call, so a host without opam does not spawn a doomed process:
+  # capturing first must not reorder the short-circuit that was already here.
+  _switches=''
+  command -v opam >/dev/null 2>&1 && _switches=$(opam switch list --short 2>/dev/null)
+  if [ -n "$_switches" ] && grep -qxF "$CITV_ORACLE_SWITCH" <<<"$_switches"; then
     export CITV_IN_ORACLE_SWITCH=$CITV_ORACLE_SWITCH
     exec opam exec --switch="$CITV_ORACLE_SWITCH" -- \
       "$HERE/$(basename "${BASH_SOURCE[0]}")" "$@"
@@ -134,7 +149,7 @@ classify_mutant() {
   if [ $? -ne 0 ]; then
     OUTCOME=no-compile
     LAST_OUT="$out"
-    DETAIL="$(printf '%s\n' "$out" | grep -m1 -E '^(Error|File)' | cut -c1-70)"
+    DETAIL="$(grep -m1 -E '^(Error|File)' <<<"$out" | cut -c1-70)"
     return
   fi
   out="$(run_oracle)"
@@ -200,7 +215,7 @@ if [ $MODE = adversarial ]; then
     else
       classify_mutant
       [ "$OUTCOME" = "$expected" ] || ok=0
-      if [ -n "$want" ] && ! printf '%s\n' "$LAST_OUT" | grep -q -- "$want"; then ok=0; fi
+      if [ -n "$want" ] && ! grep -q -- "$want" <<<"$LAST_OUT"; then ok=0; fi
       if [ $ok -eq 1 ]; then
         echo "  refused      $name: $OUTCOME ($DETAIL)"
       else
@@ -291,7 +306,7 @@ if [ $MODE = adversarial ]; then
     else
       classify_mutant
       [ "$OUTCOME" = "$expected" ] || ok=0
-      if [ -n "$want" ] && ! printf '%s\n' "$LAST_OUT" | grep -q -- "$want"; then ok=0; fi
+      if [ -n "$want" ] && ! grep -q -- "$want" <<<"$LAST_OUT"; then ok=0; fi
       if [ $ok -eq 1 ]; then
         echo "  refused      $name (at window $ww $tt): $OUTCOME ($DETAIL)"
       else
