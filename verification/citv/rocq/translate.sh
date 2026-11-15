@@ -28,7 +28,9 @@ OUT=${2:-}
 
 ROOT=$(git rev-parse --show-toplevel) || exit 2
 [ -n "${CITV_TRANSLATOR:-}" ] || { echo "CITV_TRANSLATOR is not set"; exit 2; }
-[ -x "$CITV_TRANSLATOR" ] || { echo "CITV_TRANSLATOR is not executable: $CITV_TRANSLATOR"; exit 2; }
+# -f as well as -x, via setup.sh's one predicate: a directory passes -x, and one reaching the
+# loop below would be "executed", fail, and have the shell's error land in the error list.
+citv_translator_ok || { echo "CITV_TRANSLATOR is not an executable file: $CITV_TRANSLATOR"; exit 2; }
 
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT

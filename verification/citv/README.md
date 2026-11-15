@@ -15,7 +15,10 @@ can be built from a small window of endpoints.
 ./verification/citv/run.sh
 ```
 
-That checks the module as it stands in the working tree and then runs every mutant. Options:
+That checks the module as it stands in the working tree and then runs every mutant. It needs
+no environment of its own: if a toolchain home is present it adopts it and re-execs inside the
+oracle switch, and it says which switch it ran in on the `switch:` line of its own output. Set
+`CITV_NO_SWITCH=1` to keep the environment you are already in. Options:
 
 | | |
 |---|---|
@@ -25,7 +28,9 @@ That checks the module as it stands in the working tree and then runs every muta
 | `--window W T` | endpoints in `[-W, W]`, integers checked over `[-T, T]` (default `4 8`) |
 
 It needs an OCaml switch with `dune zarith yojson ppx_compare ppx_yojson_conv ppx_enumerate`,
-and nothing else.
+and nothing else. `./install-toolchain.sh` builds that switch — and the Rocq half's — under
+`$CITV_HOME`, default `~/.citv-rocq`; `./install-toolchain.sh --check` says what is missing
+without building anything. See `rocq/README.md`, "What it needs", for the layout.
 At the default window the check itself takes a few seconds and the mutants a few minutes.
 
 ## What it is not part of
@@ -331,6 +336,9 @@ Two consequences worth knowing before you edit the module:
   either way. Clear it by regenerating the translation, reviewing the diff under `rocq/v/`,
   re-running the proofs and updating `rocq/expected/source.sha256` in the same commit.
 
-The harness needs `CITV_OPAMROOT` (both switches) and `CITV_TRANSLATOR` (`rocqOfOCaml.exe` at
-the pinned commit) to carry the check out. If either is missing the check reports that it could
-not run; it never reports a pass it did not establish.
+The harness needs the toolchain — both switches and a `rocqOfOCaml.exe` at the pinned commit —
+to carry the check out. It finds them under `$CITV_HOME` (default `~/.citv-rocq`, built by
+`./install-toolchain.sh`), including the `opam` binary itself, so a publisher needs no FV
+environment of its own; `CITV_OPAMROOT` and `CITV_TRANSLATOR` still override individually. If
+any of it is missing the check reports that it could not run and names the script that builds
+it; it never reports a pass it did not establish.

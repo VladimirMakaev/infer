@@ -27,8 +27,46 @@ are not committed.
 
 ### What it needs
 
-A scratch opam root — never `~/.opam`, never Infer's switch. `setup.sh` holds the pins and
-refuses the default root. The versions are **asserted**, not merely requested:
+A dedicated opam root — never `~/.opam`, never Infer's switch. `setup.sh` holds the pins and
+the layout, and refuses the default root. Build the whole toolchain with one command:
+
+```
+../install-toolchain.sh            # builds whatever is missing, resumable
+../install-toolchain.sh --check    # reports what is present, builds nothing
+```
+
+It lands in `$CITV_HOME`, default `~/.citv-rocq`, and that default matters more than it
+looks. The toolchain first lived in the scratch directory of whoever built it, which exists
+on exactly one machine; everywhere else the standing check reported "toolchain not found",
+and that is *exit 2, a check that could not be carried out* — a result nobody can act on and
+that a reader learns to ignore. Every path below is derived from `CITV_HOME`, so a second
+install (a different Rocq, a bisect) is one variable away and needs no edit to any script.
+
+| under `$CITV_HOME` | what it is |
+|---|---|
+| `bin/opam` | opam 2.3.0, sha256-pinned. The home carries its own so a shell with no FV environment can still run the check; `setup.sh` prepends `bin/` to `PATH` |
+| `prefix/` | GNU MP 6.3.0, built user-locally. Only needed where the host has `libgmp.so` but no `gmp.h`, which is the usual state of a box without `gmp-devel`. zarith needs both, and `--no-depexts` is correct precisely because this supplies what `gmp-devel` would |
+| `opamroot/coq541` | OCaml 5.4.1, Rocq, zarith, and the translator's own dependencies |
+| `opamroot/fv` | OCaml 5.2.0 and exactly what the oracle's dune files ask for |
+| `src/rocq-of-ocaml` | the translator's source at the pinned commit |
+| `bin/rocqOfOCaml.exe` | built from it, in `coq541` |
+
+Roughly an hour and 2.5 GB from nothing. `CITV_SEED_ROOT=<an existing opam root>` copies that
+root's download-cache in first and turns most of the downloading into a file copy; the cache
+is content-addressed tarballs, so seeding cannot change what gets installed.
+
+Two things not to do with it. **Do not source `setup.sh` into a shell you then build Infer
+in**: it prepends to `PATH`, `LD_LIBRARY_PATH`, `LIBRARY_PATH` and `C_INCLUDE_PATH`, and the
+build harness hashes all four into the context digest that decides whether a cached build may
+be reused — a shell carrying them silently rebuilds everything and turns a gate comparison
+into a fresh baseline. Every script here runs it in a subprocess, so this only bites by hand.
+
+**Do not copy an existing opam root to a new location** instead of building one. It appears to
+work and is wrong: `ocamlc -where` reports the path the compiler was *configured* with, so the
+copy keeps reading the original tree, and the dependency this is meant to remove survives
+until the original is deleted — at which point everything breaks at once, far from the cause.
+
+The versions are **asserted**, not merely requested:
 
 | component | pin |
 |---|---|
@@ -43,8 +81,13 @@ opam resolves `rocq-core` to 9.3.0/9.2.0 by default, which is **outside** rocq-o
 paying for, so `run.sh` refuses to start unless every pin matches.
 
 The translator is not vendored here: the generated `.v` and the proofs stand alone and are
-reviewable without it. Set `CITV_TRANSLATOR` to a `rocqOfOCaml.exe` built from the pinned commit
-to regenerate; `drift.sh` refuses rather than silently skipping if it is absent.
+reviewable without it. `CITV_TRANSLATOR` defaults to `$CITV_HOME/bin/rocqOfOCaml.exe`; point it
+elsewhere to use another build. `drift.sh` refuses rather than silently skipping if it is
+absent, and distinguishes the two cases — a path that does not resolve is
+`REFUSED: toolchain` (the check could not be carried out), while an *explicitly emptied*
+`CITV_TRANSLATOR` is the documented way to ask for a deliberately weaker run and says so. That
+is why the default is written `${CITV_TRANSLATOR=...}` and not `${CITV_TRANSLATOR:=...}`: the
+colon form would swallow the empty value and turn a request for a weaker run into a full one.
 
 ## What is proved
 

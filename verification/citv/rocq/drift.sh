@@ -10,6 +10,24 @@ cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git tree"; exit 2; }
+
+# A BROKEN TRANSLATOR IS NOT DRIFT, and since setup.sh started defaulting CITV_TRANSLATOR
+# to $CITV_HOME/bin/rocqOfOCaml.exe it is no longer caught by the "not set" branches below.
+# Left to itself, a home that has not been built yet would reach check 2, translate.sh
+# would refuse, and the refusal text would be diffed against the error pin and reported as
+# "the translator's error set changed" -- a missing toolchain wearing a soundness verdict.
+# citv_check.sh routes '^REFUSED: toolchain' to "the check could not be carried out", which
+# is what this is.  An EMPTY CITV_TRANSLATOR still means "deliberately without one" and
+# falls through to the branches below.
+#
+# The test is citv_translator_ok, not -x: a directory passes -x, so pointing CITV_TRANSLATOR
+# at one slipped through this guard and came back out of check 2 as drift.
+if [ -n "${CITV_TRANSLATOR:-}" ] && ! citv_translator_ok; then
+  echo "REFUSED: toolchain -- CITV_TRANSLATOR is $CITV_TRANSLATOR, which is not an executable file."
+  echo "         Build the toolchain with verification/citv/install-toolchain.sh, or set"
+  echo "         CITV_TRANSLATOR to a rocqOfOCaml.exe built from $CITV_TRANSLATOR_COMMIT."
+  exit 2
+fi
 SRC=infer/src/pulse/PulseCItv.ml
 FAIL=0
 bad() { printf 'DRIFT: %s\n' "$*"; FAIL=1; }

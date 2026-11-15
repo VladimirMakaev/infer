@@ -23,6 +23,27 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 SUBJECT_ML="$ROOT/infer/src/pulse/PulseCItv.ml"
 SUBJECT_MLI="$ROOT/infer/src/pulse/PulseCItv.mli"
 
+# THE TOOLCHAIN HOME.  The standing check wraps this script in `opam exec --switch=fv`, so it
+# always worked there; a human following the header above from an ordinary shell did not.  It
+# found no dune and advised an `opam install` for a switch that already has one -- and had the
+# advice been taken the build would then have failed to link, because zarith needs the home's
+# user-local libgmp and nothing had put it on LIBRARY_PATH either.  rocq/setup.sh knows both,
+# so adopt it and re-exec inside the oracle switch, exactly once.
+#
+# Deliberately conditional.  With no home this is skipped entirely and a host whose own switch
+# provides dune behaves as it did before; CITV_NO_SWITCH=1 skips it for anyone who means to use
+# the environment they are already in.
+if [ -z "${CITV_IN_ORACLE_SWITCH:-}" ] && [ "${CITV_NO_SWITCH:-0}" != 1 ] &&
+   { [ -n "${CITV_OPAMROOT:-}" ] || [ -d "${CITV_HOME:-$HOME/.citv-rocq}/opamroot" ]; }; then
+  CITV_SETUP_ALLOW_NO_OPAM=1 . "$HERE/rocq/setup.sh" || exit 2
+  if command -v opam >/dev/null 2>&1 &&
+     opam switch list --short 2>/dev/null | grep -qxF "$CITV_ORACLE_SWITCH"; then
+    export CITV_IN_ORACLE_SWITCH=$CITV_ORACLE_SWITCH
+    exec opam exec --switch="$CITV_ORACLE_SWITCH" -- \
+      "$HERE/$(basename "${BASH_SOURCE[0]}")" "$@"
+  fi
+fi
+
 MODE=all
 W=4
 T=8
@@ -48,7 +69,9 @@ for f in "$SUBJECT_ML" "$SUBJECT_MLI"; do
 done
 command -v dune >/dev/null || {
   echo "dune is not on PATH. This check needs an OCaml switch with:" >&2
-  echo "  opam install dune zarith yojson ppx_compare ppx_yojson_conv" >&2
+  echo "  dune zarith yojson ppx_compare ppx_yojson_conv ppx_enumerate" >&2
+  echo "Build one, with the Rocq half and a gmp zarith can link against, using:" >&2
+  echo "  verification/citv/install-toolchain.sh   (then re-run this; it finds the switch itself)" >&2
   exit 2
 }
 
@@ -67,6 +90,9 @@ restore_subject() {
 restore_subject
 
 echo "subject:  infer/src/pulse/PulseCItv.ml"
+# Which switch this ran in, named rather than implied: "it found dune" and "it found the
+# toolchain home's dune" are different facts, and only one of them is reproducible elsewhere.
+echo "switch:   ${CITV_IN_ORACLE_SWITCH:-the ambient environment (no toolchain home adopted)}"
 echo "sha256:   $(sha256sum "$SUBJECT_ML" | cut -d' ' -f1)"
 echo "sha256:   $(sha256sum "$SUBJECT_MLI" | cut -d' ' -f1)  (interface)"
 echo
