@@ -126,9 +126,37 @@ echo "== 5. no CONDITION in this tree reads the status of such a pipeline =="
 # script here uses `set -e`, under which a 141 would abort the script.  So the premise is
 # asserted below rather than assumed; if someone adds `set -e`, this test says so instead of
 # quietly continuing to exclude the cases that would then matter.
-scan_conditions () {  # $1 = file; prints "line:text" for each offending condition
-  grep -nE '^[[:space:]]*(if|elif|while|until|!|&&|\|\|)[^#]*\|[[:space:]]*(grep -[a-zA-Z]*[qm]|head|sed -n .*q)' "$1" \
-    | grep -v '<<<' || true
+#
+# IT JOINS CONTINUATION LINES FIRST.  The previous version matched one line at a time, anchored
+# on the keyword that opens the condition, and that missed run.sh's opam probe outright: the
+# condition opened on a line with no pipeline on it and the pipeline sat on the continuation,
+# so no anchor matched and reverting that site passed the whole suite (msg-impl's R5).  The
+# vacuity control did not catch it either, because the two-line case it used had a pipeline on
+# the FIRST line -- a control built on the easy side of the very dimension it was testing.
+scan_conditions () {  # $1 = file; prints "line: joined-condition" for each offending condition
+  awk '
+    function trim(s){ sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); return s }
+    function emit(   c) {
+      c = trim(buf)
+      if (c == "" || c ~ /^#/) return
+      # Only the condition, not the body: `if X; then printf ... | head -5; fi` on one line is
+      # a display pipeline, and flagging it would be a false positive.
+      if (match(c, /;[[:space:]]*(then|do)([[:space:]]|$)/)) c = substr(c, 1, RSTART - 1)
+      if (c !~ /^(if|elif|while|until)[[:space:]]/) return
+      # Neutralise || and && first, or the second bar of `a || grep -q x` reads as a pipe.
+      gsub(/\|\|/, " _OR_ ", c); gsub(/&&/, " _AND_ ", c)
+      if (c ~ /\|[[:space:]]*(grep -[a-zA-Z]*[qm]|head|sed -n .*q)/) print start ": " c
+    }
+    {
+      raw = $0
+      if (buf == "" && trim(raw) ~ /^#/) next        # a whole-line comment never continues code
+      if (buf == "") { start = NR; buf = raw } else { buf = buf " " trim(raw) }
+      t = trim(buf)
+      if (t ~ /(&&|\|\||\\|\|)$/) next               # bash continues the line
+      emit(); buf = ""
+    }
+    END { if (buf != "") emit() }
+  ' "$1"
 }
 offenders=0; display=0; scripts=0
 while IFS= read -r f; do
@@ -148,6 +176,23 @@ done < <(find "$HERE" -name '*.sh' ! -name 'pipefail-test.sh' | sort)
                      || bad "$offenders condition(s) above read the status of such a pipeline"
 note info "$display display-only pipeline(s) left alone; no script sets -e, so their status is unread"
 
+# 5b. COMMAND SUBSTITUTIONS, which are not conditions and so are not covered above.  A
+# `X="$(printf ... | grep -m1 ...)"` cannot invert a decision today -- nothing reads its status
+# -- but it is one `if [ $? -ne 0 ]` away from doing so, and reverting run.sh's DETAIL line was
+# the one mutant the condition scan could not see.  Narrow on purpose: only a SHELL writer into
+# an EARLY-EXITING reader.  rocq/setup.sh's `got=$(opam list ... | head -1)` has an external
+# producer and stays unflagged, and the printf-into-sed/tail/cut substitutions in run.sh read
+# to EOF, so neither can SIGPIPE.
+SUBST_RULE='\$\(([^)]*[^|])?(printf|echo|cat)[^)|]*\|[[:space:]]*(grep -[a-zA-Z]*[qm]|head|sed -n .*q)'
+subs=0
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  echo "    ${hit#"$HERE"/}"
+  subs=$((subs + 1))
+done < <(grep -rnE "$SUBST_RULE" --include='*.sh' "$HERE" 2>/dev/null | grep -v 'pipefail-test\.sh' || true)
+[ "$subs" = 0 ] && note ok "0 substitutions pipe a shell writer into an early-exiting reader" \
+                || bad "$subs substitution(s) above do"
+
 echo
 echo "== 6. vacuity control: the check in 5 must FAIL on a reverted copy =="
 # A static check that matches nothing passes forever.  Restore the old form in a scratch copy
@@ -160,12 +205,45 @@ printf '%s\n' '#!/bin/bash' 'set -u -o pipefail' \
 n=$(scan_conditions "$TMP/reverted.sh" | grep -c . || true)
 [ "$n" -ge 1 ] && note ok "the scan flags a reverted site ($n), so a clean scan means something" \
                || bad "the scan did NOT flag a reverted site: case 5 proves nothing"
-# And the second shape, the one rocq/run.sh had, on a continuation line.
+# The two-line shape rocq/run.sh had: a pipeline on the first line AND on the continuation.
 printf '%s\n' '#!/bin/bash' 'if [ $rc -eq 2 ] && printf "%s\n" "$o" | grep -q X &&' \
   '   ! printf "%s\n" "$o" | grep -q Y; then :; fi' > "$TMP/reverted2.sh"
 n2=$(scan_conditions "$TMP/reverted2.sh" | grep -c . || true)
-[ "$n2" -ge 2 ] && note ok "both lines of a two-line condition are flagged ($n2)" \
-                || bad "a continuation line escapes the scan ($n2 flagged, wanted 2)"
+[ "$n2" = 1 ] && note ok "a two-line condition is flagged once, as one logical line" \
+              || bad "the two-line condition gave $n2 hits, wanted 1"
+# THE SHAPE THAT ESCAPED (msg-impl R5): the condition OPENS on a line with no pipeline on it,
+# and the pipeline is only on the continuation. The old control used the easy variant above,
+# where the first line already matched, so it passed while this one walked through.
+printf '%s\n' '#!/bin/bash' 'if command -v opam >/dev/null 2>&1 &&' \
+  '   opam switch list --short 2>/dev/null | grep -qxF "$X"; then :; fi' > "$TMP/reverted3.sh"
+n3=$(scan_conditions "$TMP/reverted3.sh" | grep -c . || true)
+[ "$n3" = 1 ] && note ok "a pipeline on the CONTINUATION line alone is flagged ($n3)" \
+              || bad "R5 shape escapes the scan ($n3 flagged, wanted 1)"
+# Backslash continuation, the third way to spell the same thing.
+printf '%s\n' '#!/bin/bash' 'if [ -n "$a" ] \' '   && printf "%s\n" "$b" | head -1; then :; fi' \
+  > "$TMP/reverted4.sh"
+n4=$(scan_conditions "$TMP/reverted4.sh" | grep -c . || true)
+[ "$n4" = 1 ] && note ok "a backslash continuation is flagged ($n4)" \
+              || bad "a backslash-continued condition escapes the scan ($n4 flagged, wanted 1)"
+# FALSE-POSITIVE controls. A scan that flags everything would pass all of the above.
+printf '%s\n' '#!/bin/bash' \
+  'if [ -n "$w" ] && ! grep -q -- "$w" <<<"$O"; then :; fi' \
+  'if true; then printf "%s\n" "$x" | head -5; fi' \
+  'D=$(printf "%s\n" "$x" | grep -m1 E | cut -c1-5)' \
+  'if [ -f x ] || grep -q y z; then :; fi' > "$TMP/clean.sh"
+n5=$(scan_conditions "$TMP/clean.sh" | grep -c . || true)
+[ "$n5" = 0 ] && note ok "0 false positives on here-string, body-display, substitution and ||" \
+              || bad "$n5 false positive(s) on shapes that are safe"
+# And the substitution rule from 5b, both directions.
+printf '%s\n' '#!/bin/bash' 'D="$(printf "%s\n" "$o" | grep -m1 -E "^E" | cut -c1-70)"' > "$TMP/sub-bad.sh"
+printf '%s\n' '#!/bin/bash' 'g=$(opam list --short 2>/dev/null | head -1)' \
+  'D="$(printf "%s\n" "$o" | sed -n "s/^x//p")"' 'h="$(grep -m1 E <<<"$o" | cut -c1-9)"' > "$TMP/sub-ok.sh"
+nb=$(grep -cE "$SUBST_RULE" "$TMP/sub-bad.sh" || true)
+no=$(grep -cE "$SUBST_RULE" "$TMP/sub-ok.sh" || true)
+[ "$nb" = 1 ] && note ok "the substitution rule flags a reverted DETAIL line" \
+              || bad "the substitution rule missed a reverted DETAIL line ($nb)"
+[ "$no" = 0 ] && note ok "and not an external producer, a read-to-EOF consumer, or a here-string" \
+              || bad "the substitution rule has $no false positive(s)"
 
 echo
 if [ $fails -eq 0 ]; then
