@@ -20,7 +20,13 @@ That builds the proofs from clean, checks what they rest on, attacks the freshne
 then breaks the development six ways and requires each break to be refused. `--proofs` stops
 after the freshness check.
 
-`./verification/citv/lean/check-axioms.sh` is the acceptance criterion on its own.
+`./verification/citv/lean/check-axioms.sh` is the acceptance criterion on its own, and
+`./verification/citv/lean/fail-closed-test.sh` is the acceptance criterion *on it*: it drives
+the real checker with a stub `lake` and requires each refusal to fire, with a clean control
+that still passes so the refusals are not vacuous. It needs no Lean toolchain and takes a
+second. It exists because three of those refusals were written as `... | grep -q` under
+`set -o pipefail`, which reports failure on a *successful* match once the match is followed by
+more output than the pipe buffer holds — so the bad string read as absent.
 
 ### What it needs
 

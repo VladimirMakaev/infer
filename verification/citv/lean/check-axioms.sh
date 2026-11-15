@@ -23,9 +23,21 @@
 
 set -u -o pipefail
 
-# PER-RUN SCRATCH.  This one was already collision-free, being suffixed with $$, but it was
-# removed only on the success path: every early exit left a file behind in /tmp.  Same idiom
-# as the Rocq half so there is one thing to remember rather than two.
+# NEVER TEST A CONDITION WITH `... | grep -q` UNDER pipefail.  grep -q exits the moment it
+# matches; the writer upstream is then killed by SIGPIPE and exits 141, and pipefail makes 141
+# the status of the whole pipeline -- so a successful match reports FAILURE.  Every test below
+# that asks "is this bad string present?" would have answered "no" and let the build through.
+# It is invisible in testing because it only bites once the output exceeds the 64KB pipe
+# buffer, which is exactly when a real `lake build` differs from a toy one: measured here, 47
+# bytes of output detects the string and 200KB of the same output misses it.  The tests read
+# from a here-string instead, which has no second process and so no pipeline status at all.
+
+# PER-RUN SCRATCH.  Unlike the Rocq half this one was ALREADY correct: the name carried $$,
+# so two runs could not collide, and the removal sat ahead of every exit that could follow it,
+# so no path leaked.  An earlier version of this comment claimed a leak on the early-exit
+# paths; that was wrong -- those exits all happen before the file is created.  The change is
+# for one idiom across both halves, and it also covers the case the old code genuinely missed,
+# which is dying on a signal between creating the file and removing it.
 CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-lean.XXXXXXXX") || exit 2
 trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
 
@@ -70,12 +82,12 @@ if [ $STATUS -ne 0 ]; then
 fi
 # Lake prints the same reports whether it checked the module or read it back from the cache,
 # and says which it did. Only the first counts.
-if printf '%s\n' "$OUT" | grep -q 'Replayed Citv.Axioms'; then
+if grep -q 'Replayed Citv.Axioms' <<<"$OUT"; then
   echo "RESULT: FAIL -- lake replayed Citv.Axioms from its cache instead of checking it, so the"
   echo "reports below would be a recording rather than a result."
   exit 1
 fi
-if ! printf '%s\n' "$OUT" | grep -q 'Built Citv.Axioms'; then
+if ! grep -q 'Built Citv.Axioms' <<<"$OUT"; then
   echo "RESULT: FAIL -- lake did not report building Citv.Axioms at all."
   exit 1
 fi
@@ -106,7 +118,7 @@ done < "$CITV_TMP/axioms.txt"
 
 echo
 # A proof finished with sorry reports sorryAx above, and Lean also warns about it; take either.
-if printf '%s\n' "$OUT" | grep -qi "declaration uses 'sorry'"; then
+if grep -qi "declaration uses 'sorry'" <<<"$OUT"; then
   echo "RESULT: FAIL -- the build warns that a declaration uses sorry."
   exit 1
 fi
