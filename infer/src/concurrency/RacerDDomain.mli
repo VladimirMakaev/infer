@@ -51,6 +51,15 @@ module LockDomain : sig
 
   val has_released : t -> bool
   (** whether a lock held on entry has been released *)
+
+  val is_guard_pair :
+       constructor:t
+    -> destructor:t
+    -> acquired:AccessExpression.t option
+    -> released:AccessExpression.t option
+    -> caller_visible:AccessExpression.t option
+    -> bool
+  (** require complementary counts and three present, identical lock access expressions *)
 end
 
 (** Abstraction of threads that may run in parallel with the current thread. NoThread <
@@ -159,10 +168,13 @@ module AttributeMapDomain : sig
   (** propagate attributes from the leaves to the root of an RHS Hil expression *)
 end
 
-module NeverReturns : AbstractDomain.S
+module NeverReturns : AbstractDomain.S with type t = bool
 
 (** whether the procedure acquires or releases any lock at all *)
 module TouchesLocks : AbstractDomain.S with type t = bool
+
+(** whether analysis observed a recognized lock operation, independently of unknown calls *)
+module UsesLocks : AbstractDomain.S with type t = bool
 
 type t =
   { threads: ThreadsDomain.t  (** current thread: main, background, or unknown *)
@@ -175,7 +187,8 @@ type t =
   ; attribute_map: AttributeMapDomain.t
         (** map of access paths to attributes such as owned, functional, ... *)
   ; return_alias: ReturnAliasDomain.t  (** what the procedure returns, if it is an access path *)
-  ; touches_locks: TouchesLocks.t }
+  ; touches_locks: TouchesLocks.t
+  ; uses_locks: UsesLocks.t }
 
 include AbstractDomain.S with type t := t
 
@@ -196,7 +209,8 @@ type summary =
   ; return_alias: AccessExpression.t option
         (** access expression over the formals or globals whose value is returned *)
   ; attributes: AttributeMapDomain.t
-  ; touches_locks: TouchesLocks.t }
+  ; touches_locks: TouchesLocks.t
+  ; uses_locks: UsesLocks.t }
 
 val empty_summary : summary
 
@@ -222,6 +236,8 @@ val add_reads_of_hilexps : Tenv.t -> FormalMap.t -> HilExp.t list -> Location.t 
 val integrate_summary :
      FormalMap.t
   -> callee_proc_attrs:ProcAttributes.t
+  -> callee_guard_evidence:bool
+  -> callee_critical_helper:bool
   -> summary
   -> HilExp.access_expression
   -> Procname.t

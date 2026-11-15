@@ -240,6 +240,21 @@ module LockDomain = struct
 
   let has_released = function NonBottom {Counts.released} -> released > 0 | Bottom -> false
 
+  let is_guard_pair ~constructor ~destructor ~acquired ~released ~caller_visible =
+    match (constructor, destructor, acquired, released, caller_visible) with
+    | ( NonBottom {Counts.released= 0; held= acquired_count}
+      , NonBottom {Counts.released= released_count; held= 0}
+      , Some acquired
+      , Some released
+      , Some visible ) ->
+        acquired_count > 0
+        && Int.equal acquired_count released_count
+        && AccessExpression.equal acquired released
+        && AccessExpression.equal acquired visible
+    | _ ->
+        false
+
+
   let releases_more ~before ~after =
     let released = function NonBottom {Counts.released} -> released | Bottom -> 0 in
     released after > released before
@@ -297,17 +312,19 @@ module ThreadsDomain = struct
 
   let is_any = function AnyThread -> true | _ -> false
 
-  let integrate_summary ~caller_astate ~callee_astate =
+  let update_for_lock_use = function AnyThreadButSelf -> AnyThreadButSelf | _ -> AnyThread
+
+  let integrate_summary ~caller_astate ~callee_astate ~callee_uses_lock =
     (* if we know the callee runs on the main thread, assume the caller does too. otherwise, keep
-       the caller's thread context *)
+       the caller's thread context unless a lock operation was observed in the callee. A callee's
+       AnyThread annotation alone does not establish concurrency in its caller. *)
     match callee_astate with
     | AnyThreadButSelf ->
         callee_astate
+    | _ when callee_uses_lock ->
+        update_for_lock_use caller_astate
     | _ ->
         caller_astate
-
-
-  let update_for_lock_use = function AnyThreadButSelf -> AnyThreadButSelf | _ -> AnyThread
 end
 
 module OwnershipAbstractValue = struct
@@ -443,7 +460,7 @@ module AccessSnapshot = struct
                   {elem with access= Access.map ~f:(fun _ -> new_exp) elem.access} ) ) )
 
 
-  let update_callee_access threads locks actuals_ownership (snapshot : t) =
+  let update_callee_access ~callee_uses_lock threads locks actuals_ownership (snapshot : t) =
     let update_ownership_precondition actual_index (acc : OwnershipAbstractValue.t) =
       if actual_index >= Array.length actuals_ownership then
         (* vararg methods can result into missing actuals so simply ignore *)
@@ -460,6 +477,7 @@ module AccessSnapshot = struct
     in
     let thread =
       ThreadsDomain.integrate_summary ~callee_astate:snapshot.elem.thread ~caller_astate:threads
+        ~callee_uses_lock
     in
     let lock =
       LockDomain.integrate_summary ~caller_astate:locks ~callee_astate:snapshot.elem.lock
@@ -468,10 +486,10 @@ module AccessSnapshot = struct
     map snapshot ~f:(fun elem -> {elem with lock; thread; ownership_precondition})
 
 
-  let integrate_summary ~caller_formals ~callee_formals callsite threads locks actuals_array
-      actuals_ownership snapshot =
+  let integrate_summary ~caller_formals ~callee_formals ~callee_uses_lock callsite threads locks
+      actuals_array actuals_ownership snapshot =
     subst_actuals_into_formals callee_formals actuals_array snapshot
-    |> Option.map ~f:(update_callee_access threads locks actuals_ownership)
+    |> Option.map ~f:(update_callee_access ~callee_uses_lock threads locks actuals_ownership)
     |> Option.map ~f:(fun snapshot -> with_callsite snapshot callsite)
     |> Option.bind ~f:(filter caller_formals)
 
@@ -659,6 +677,10 @@ module NeverReturns = AbstractDomain.BooleanAnd
     [LockDomain] cannot tell the two apart. *)
 module TouchesLocks = AbstractDomain.BooleanOr
 
+(** Positive evidence of a recognized lock operation, as opposed to a call that may touch a lock. It
+    survives balanced acquisition/release pairs and is propagated through callees. *)
+module UsesLocks = AbstractDomain.BooleanOr
+
 type t =
   { threads: ThreadsDomain.t
   ; locks: LockDomain.t
@@ -667,7 +689,8 @@ type t =
   ; ownership: OwnershipDomain.t
   ; attribute_map: AttributeMapDomain.t
   ; return_alias: ReturnAliasDomain.t
-  ; touches_locks: TouchesLocks.t }
+  ; touches_locks: TouchesLocks.t
+  ; uses_locks: UsesLocks.t }
 [@@deriving abstract_domain]
 
 let initial =
@@ -679,7 +702,16 @@ let initial =
   let attribute_map = AttributeMapDomain.empty in
   let return_alias = ReturnAliasDomain.bottom in
   let touches_locks = false in
-  {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
+  let uses_locks = false in
+  { threads
+  ; locks
+  ; never_returns
+  ; accesses
+  ; ownership
+  ; attribute_map
+  ; return_alias
+  ; touches_locks
+  ; uses_locks }
 
 
 type summary =
@@ -691,7 +723,8 @@ type summary =
   ; return_attribute: Attribute.t
   ; return_alias: AccessExpression.t option
   ; attributes: AttributeMapDomain.t
-  ; touches_locks: TouchesLocks.t }
+  ; touches_locks: TouchesLocks.t
+  ; uses_locks: UsesLocks.t }
 
 let empty_summary =
   { threads= ThreadsDomain.bottom
@@ -702,7 +735,8 @@ let empty_summary =
   ; return_attribute= Attribute.top
   ; return_alias= None
   ; attributes= AttributeMapDomain.top
-  ; touches_locks= false }
+  ; touches_locks= false
+  ; uses_locks= false }
 
 
 let pp_summary fmt
@@ -714,7 +748,8 @@ let pp_summary fmt
     ; return_attribute
     ; return_alias
     ; attributes
-    ; touches_locks } =
+    ; touches_locks
+    ; uses_locks } =
   F.fprintf fmt
     "@\n\
      Threads: %a, Locks: %a, NeverReturns: %a @\n\
@@ -723,26 +758,33 @@ let pp_summary fmt
      Return Attribute: %a @\n\
      Return Alias: %a @\n\
      Attributes: %a @\n\
-     TouchesLocks: %a @\n"
+     TouchesLocks: %a, UsesLocks: %a @\n"
     ThreadsDomain.pp threads LockDomain.pp locks NeverReturns.pp never_returns AccessDomain.pp
     accesses OwnershipAbstractValue.pp return_ownership Attribute.pp return_attribute
     (Pp.option AccessExpression.pp) return_alias AttributeMapDomain.pp attributes TouchesLocks.pp
-    touches_locks
+    touches_locks UsesLocks.pp uses_locks
 
 
 let pp fmt
-    {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
-    =
+    { threads
+    ; locks
+    ; never_returns
+    ; accesses
+    ; ownership
+    ; attribute_map
+    ; return_alias
+    ; touches_locks
+    ; uses_locks } =
   F.fprintf fmt
     "Threads: %a, Locks: %a, NeverReturns: %a @\n\
      Accesses %a @\n\
      Ownership: %a @\n\
      Attributes: %a @\n\
      Return Alias: %a @\n\
-     TouchesLocks: %a @\n"
+     TouchesLocks: %a, UsesLocks: %a @\n"
     ThreadsDomain.pp threads LockDomain.pp locks NeverReturns.pp never_returns AccessDomain.pp
     accesses OwnershipDomain.pp ownership AttributeMapDomain.pp attribute_map ReturnAliasDomain.pp
-    return_alias TouchesLocks.pp touches_locks
+    return_alias TouchesLocks.pp touches_locks UsesLocks.pp uses_locks
 
 
 let add_unannotated_call_access formals pname actuals loc (astate : t) =
@@ -756,8 +798,15 @@ let add_unannotated_call_access formals pname actuals loc (astate : t) =
 
 
 let astate_to_summary proc_desc formals
-    {threads; locks; never_returns; accesses; ownership; attribute_map; return_alias; touches_locks}
-    =
+    { threads
+    ; locks
+    ; never_returns
+    ; accesses
+    ; ownership
+    ; attribute_map
+    ; return_alias
+    ; touches_locks
+    ; uses_locks } =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let return_var_exp =
     AccessExpression.base
@@ -811,8 +860,9 @@ let astate_to_summary proc_desc formals
     (* destructors seldom run concurrently with other methods, so only keep the effect on locks, e.g.
        a RAII guard releasing its lock. [touches_locks] has to survive with it: a hand-written RAII
        type whose destructor unlocks is exactly the case where the effect is real and the procedure
-       that scoped it must not be treated as lock-free. *)
-    {empty_summary with locks; touches_locks}
+       that scoped it must not be treated as lock-free. Positive lock-use evidence must also survive
+       so that the caller retains the concurrent context established by that operation. *)
+    {empty_summary with locks; touches_locks; uses_locks}
   else
     { threads
     ; locks
@@ -822,7 +872,8 @@ let astate_to_summary proc_desc formals
     ; return_attribute
     ; return_alias
     ; attributes
-    ; touches_locks }
+    ; touches_locks
+    ; uses_locks }
 
 
 let add_access tenv formals loc ~is_write (astate : t) exp =
@@ -882,17 +933,23 @@ let add_reads_of_hilexps tenv formals exps loc astate =
   List.fold exps ~init:astate ~f:(add_access tenv formals loc ~is_write:false)
 
 
-let add_callee_accesses ~caller_formals ~callee_formals ~callee_accesses callee_pname actuals loc
-    (caller_astate : t) =
+let add_callee_accesses ~caller_formals ~callee_formals ~callee_accesses ~callee_guard_evidence
+    ~callee_critical_helper callee_pname actuals loc (caller_astate : t) =
   let callsite = CallSite.make callee_pname loc in
   (* precompute arrays for actuals and ownership for fast random access *)
   let actuals_array = Array.of_list_map actuals ~f:accexp_of_hilexp in
   let actuals_ownership =
     Array.of_list_map actuals ~f:(OwnershipDomain.ownership_of_expr caller_astate.ownership)
   in
-  let process snapshot acc =
-    AccessSnapshot.integrate_summary ~caller_formals ~callee_formals callsite caller_astate.threads
-      caller_astate.locks actuals_array actuals_ownership snapshot
+  let process (snapshot : AccessSnapshot.t) acc =
+    let callee_uses_lock =
+      callee_guard_evidence
+      || callee_critical_helper
+         && LockDomain.is_locked snapshot.elem.lock
+         && ThreadsDomain.is_any snapshot.elem.thread
+    in
+    AccessSnapshot.integrate_summary ~caller_formals ~callee_formals ~callee_uses_lock callsite
+      caller_astate.threads caller_astate.locks actuals_array actuals_ownership snapshot
     |> fun snapshot_opt -> AccessDomain.add_opt snapshot_opt acc
   in
   let accesses = AccessDomain.fold process callee_accesses caller_astate.accesses in
@@ -912,18 +969,19 @@ let branch_never_returns () =
       (* this is incorrect, as there is no identity element for an inverted set *)
       AttributeMapDomain.empty
   ; return_alias= ReturnAliasDomain.bottom
-  ; touches_locks= false }
+  ; touches_locks= false
+  ; uses_locks= false }
 
 
-let integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_pname actuals loc
-    astate =
+let integrate_summary formals ~callee_proc_attrs ~callee_guard_evidence ~callee_critical_helper
+    summary ret_access_exp callee_pname actuals loc astate =
   let {threads; locks; never_returns; return_ownership; return_attribute} = summary in
   if never_returns then branch_never_returns ()
   else
     let callee_formals = FormalMap.make callee_proc_attrs in
     let astate =
       add_callee_accesses ~caller_formals:formals ~callee_formals ~callee_accesses:summary.accesses
-        callee_pname actuals loc astate
+        ~callee_guard_evidence ~callee_critical_helper callee_pname actuals loc astate
     in
     let locks = LockDomain.integrate_summary ~caller_astate:astate.locks ~callee_astate:locks in
     (* no treatment of [never_returns] as the callee's is [false] *)
@@ -938,6 +996,7 @@ let integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_p
     let attribute_map = AttributeMapDomain.add ret_access_exp return_attribute attribute_map in
     let threads =
       ThreadsDomain.integrate_summary ~caller_astate:astate.threads ~callee_astate:threads
+        ~callee_uses_lock:(callee_guard_evidence || callee_critical_helper)
     in
     (* A lock touched inside the callee is still a lock this procedure touched: the chain credit
        asks whether the caller held its own callers' lock for the whole of its body, and
@@ -945,7 +1004,8 @@ let integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_p
        procedure whose only lock effect is a call to [void release() { mu_.unlock(); }] looks like
        a pure forwarder. *)
     let touches_locks = TouchesLocks.join astate.touches_locks summary.touches_locks in
-    {astate with locks; never_returns; threads; ownership; attribute_map; touches_locks}
+    let uses_locks = UsesLocks.join astate.uses_locks summary.uses_locks in
+    {astate with locks; never_returns; threads; ownership; attribute_map; touches_locks; uses_locks}
 
 
 let mark_touches_locks (astate : t) = {astate with touches_locks= true}
@@ -953,7 +1013,8 @@ let mark_touches_locks (astate : t) = {astate with touches_locks= true}
 let acquire_lock (astate : t) =
   { astate with
     locks= LockDomain.acquire_lock astate.locks
-  ; threads= ThreadsDomain.update_for_lock_use astate.threads }
+  ; threads= ThreadsDomain.update_for_lock_use astate.threads
+  ; uses_locks= true }
 
 
 let release_lock ~only_acquired (astate : t) =
@@ -964,13 +1025,18 @@ let release_lock ~only_acquired (astate : t) =
   let attribute_map =
     AttributeMapDomain.forget_lock_held ~before:astate.locks ~after:locks astate.attribute_map
   in
-  {astate with locks; threads= ThreadsDomain.update_for_lock_use astate.threads; attribute_map}
+  { astate with
+    locks
+  ; threads= ThreadsDomain.update_for_lock_use astate.threads
+  ; attribute_map
+  ; uses_locks= true }
 
 
 let add_lock_attribute attribute ret_access_exp (astate : t) =
   { astate with
     attribute_map= AttributeMapDomain.add ret_access_exp attribute astate.attribute_map
-  ; threads= ThreadsDomain.update_for_lock_use astate.threads }
+  ; threads= ThreadsDomain.update_for_lock_use astate.threads
+  ; uses_locks= true }
 
 
 let lock_if_true ~guard =

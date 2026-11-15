@@ -13,6 +13,336 @@ module L = Logging
 type analysis_data =
   {interproc: RacerDDomain.summary InterproceduralAnalysis.t; formals: FormalMap.t}
 
+module GuardIdentity = struct
+  module AE = HilExp.AccessExpression
+
+  type state =
+    { roots: AE.t Var.Map.t
+    ; aliases: (AE.t * AE.t) list
+    ; guards: (AE.t * AE.t) list
+    ; observed: AE.t list
+    ; acquired: AE.t list
+    ; released: AE.t list }
+
+  type proof = {acquired_lock: AE.t; released_lock: AE.t; visible_lock: AE.t}
+
+  let empty =
+    {roots= Var.Map.empty; aliases= []; guards= []; observed= []; acquired= []; released= []}
+
+
+  let put key value bindings =
+    (key, value) :: List.filter bindings ~f:(fun (old, _) -> not (AE.equal key old))
+
+
+  (* Preserve every field and pointer edge. Only inverse address/dereference operations cancel. *)
+  let step (prefix : AE.t) (edge : HilExp.t option MemoryAccess.t) =
+    match (edge, prefix) with
+    | MemoryAccess.TakeAddress, Dereference parent ->
+        Some parent
+    | _ ->
+        AE.add_access prefix edge
+
+
+  let rec normalize ?(follow_alias = true) (state : state) fuel (exp : AE.t) : AE.t option =
+    if fuel <= 0 then None
+    else
+      let rebuilt =
+        match exp with
+        | Base (var, _) -> (
+          match Var.Map.find_opt var state.roots with
+          | Some value when not (AE.equal exp value) ->
+              normalize state (fuel - 1) value
+          | _ ->
+              Some exp )
+        | FieldOffset (prefix, field) ->
+            normalize state (fuel - 1) prefix
+            |> Option.map ~f:(fun prefix -> AE.field_offset prefix field)
+        | AddressOf prefix ->
+            normalize state (fuel - 1) prefix
+            |> Option.bind ~f:(fun prefix -> step prefix MemoryAccess.TakeAddress)
+        | Dereference prefix ->
+            normalize state (fuel - 1) prefix
+            |> Option.bind ~f:(fun prefix -> step prefix MemoryAccess.Dereference)
+        | ArrayOffset _ ->
+            None
+      in
+      Option.bind rebuilt ~f:(fun rebuilt ->
+          if not follow_alias then Some rebuilt
+          else
+            match List.Assoc.find state.aliases ~equal:AE.equal rebuilt with
+            | Some value when not (AE.equal rebuilt value) ->
+                normalize state (fuel - 1) value
+            | _ ->
+                Some rebuilt )
+
+
+  let expression (state : state) (exp : HilExp.t) : AE.t option =
+    match exp with AccessExpression path -> normalize state 64 path | _ -> None
+
+
+  let record (state : state) ~acquire (exp : HilExp.t) : state option =
+    expression state exp
+    |> Option.map ~f:(fun lock ->
+        if acquire then {state with acquired= lock :: state.acquired}
+        else {state with released= lock :: state.released} )
+
+
+  let rec union_path tenv (exp : AE.t) =
+    let union_type (typ : Typ.t) =
+      match typ.desc with
+      | Tstruct (CUnion _) | Tptr ({desc= Tstruct (CUnion _)}, _) ->
+          true
+      | _ ->
+          false
+    in
+    Option.exists (AE.get_typ exp tenv) ~f:union_type
+    ||
+    match exp with
+    | FieldOffset (parent, _) | AddressOf parent | Dereference parent ->
+        union_path tenv parent
+    | ArrayOffset _ ->
+        true
+    | Base _ ->
+        false
+
+
+  let observe (state : state) (exp : AE.t) =
+    let rec fields current (exp : AE.t) =
+      match exp with
+      | FieldOffset (parent, _) ->
+          Option.bind (normalize ~follow_alias:false current 64 exp) ~f:(fun field ->
+              fields {current with observed= field :: current.observed} parent )
+      | AddressOf parent | Dereference parent ->
+          fields current parent
+      | Base _ ->
+          Some current
+      | ArrayOffset _ ->
+          None
+    in
+    fields state exp
+
+
+  let assign tenv formals (state : state) (lhs : AE.t) (rhs : HilExp.t) : state option =
+    (* Constructor input symbols remain immutable. A reassignment cannot reuse their old identity. *)
+    match lhs with
+    | Base base when FormalMap.is_formal base formals ->
+        None
+    | _ when union_path tenv lhs ->
+        None
+    | _ -> (
+      match AE.get_typ lhs tenv with
+      | Some {Typ.desc= Tptr _} ->
+          let target =
+            match lhs with Base _ -> Some lhs | _ -> normalize ~follow_alias:false state 64 lhs
+          in
+          Option.bind target ~f:(fun target ->
+              let written =
+                (* Keep constructor disambiguation principal. *)
+                match (target : AE.t) with
+                | Base (var, _) ->
+                    Var.Map.mem var state.roots
+                | _ ->
+                    Option.is_some (List.Assoc.find state.aliases ~equal:AE.equal target)
+                    || List.mem state.observed target ~equal:AE.equal
+              in
+              if written || not (List.is_empty state.acquired && List.is_empty state.released) then
+                None
+              else
+                expression state rhs
+                |> Option.map ~f:(fun value ->
+                    (* Keep constructor disambiguation principal. *)
+                    match (target : AE.t) with
+                    | Base (var, _) ->
+                        {state with roots= Var.Map.add var value state.roots}
+                    | _ ->
+                        {state with aliases= put target value state.aliases} ) )
+      | Some {Typ.desc= Tstruct _ | Tarray _} ->
+          None
+      | Some _ ->
+          Some state
+      | None ->
+          None )
+
+
+  (* Interpret captured straight-line bodies with production HIL conversion. Missing bodies,
+     branch/loop paths, unknown expressions, transfers and conditional lock effects decline. *)
+  let rec evaluate tenv stack (pname : Procname.t) (actuals : HilExp.t list option) (state : state)
+      : state option =
+    if List.length stack >= 32 || List.mem stack pname ~equal:Procname.equal then None
+    else
+      Procdesc.load pname
+      |> Option.bind ~f:(fun proc_desc ->
+          let formals = FormalMap.make (Procdesc.get_attributes proc_desc) in
+          let inputs =
+            match actuals with
+            | None ->
+                Some state
+            | Some actuals ->
+                List.foldi actuals ~init:(Some state) ~f:(fun index current actual ->
+                    Option.bind current ~f:(fun current ->
+                        Option.bind (FormalMap.get_formal_base index formals) ~f:(fun (var, _) ->
+                            expression current actual
+                            |> Option.map ~f:(fun value ->
+                                {current with roots= Var.Map.add var value current.roots} ) ) ) )
+          in
+          let current = ref inputs in
+          let ssa = ref Var.Map.empty in
+          let resolve var = Var.Map.find_opt var !ssa in
+          let rec simple_address (exp : Exp.t) =
+            match exp with
+            | Var _ | Lvar _ ->
+                true
+            | Lfield ({exp= parent}, _, _) ->
+                simple_address parent
+            | _ ->
+                false
+          in
+          let inspect (instr : Sil.instr) =
+            let supported =
+              match instr with
+              | Load {e} ->
+                  simple_address e
+              | Store {e1} ->
+                  simple_address e1
+              | Call (_, Exp.Const (Const.Cfun callee), _, _, _)
+                when Procname.equal callee BuiltinDecl.__cast ->
+                  false
+              | _ ->
+                  true
+            in
+            if not supported then current := None
+            else
+              current :=
+                Option.bind !current ~f:(fun current ->
+                    match
+                      HilInstr.of_sil ~include_array_indexes:false ~f_resolve_id:resolve instr
+                    with
+                    | Bind (var, exp) ->
+                        (* Keep production SSA expression shapes, including frontend-temp
+                            dereferences. Reference cells cannot be rewritten after observation. *)
+                        ssa := Var.Map.add var exp !ssa ;
+                        observe current exp
+                    | Instr (Assign (lhs, rhs, _)) ->
+                        assign tenv formals current lhs rhs
+                    | Instr (Call (_, Direct callee, actuals, call_flags, _)) ->
+                        if
+                          call_flags.CallFlags.cf_virtual || call_flags.cf_interface
+                          || call_flags.cf_assign_last_arg
+                        then None
+                        else call tenv (pname :: stack) current callee actuals
+                    | Instr (Metadata (LoopBackEdge _ | LoopEntry _))
+                    | Instr (Call (_, Indirect _, _, _, _) | Assume _) ->
+                        None
+                    | Instr (Metadata _) ->
+                        Some current )
+          in
+          let rec walk seen node =
+            if Option.is_none !current then ()
+            else if List.exists seen ~f:(Procdesc.Node.equal node) then current := None
+            else (
+              Instrs.iter (Procdesc.Node.get_instrs node) ~f:inspect ;
+              match Procdesc.Node.get_succs node with
+              | [] ->
+                  ()
+              | [next] ->
+                  walk (node :: seen) next
+              | _ ->
+                  current := None )
+          in
+          walk [] (Procdesc.get_start_node proc_desc) ;
+          !current )
+
+
+  and call tenv stack (state : state) (pname : Procname.t) actuals : state option =
+    match ConcurrencyModels.get_lock_effect pname actuals with
+    | Lock [lock] ->
+        record state ~acquire:true lock
+    | Unlock [lock] ->
+        record state ~acquire:false lock
+    | GuardConstruct {guard; locks= [lock]; acquire_now= true} ->
+        Option.bind (expression state guard) ~f:(fun guard ->
+            Option.bind (expression state lock) ~f:(fun lock ->
+                Some
+                  {state with guards= put guard lock state.guards; acquired= lock :: state.acquired} ) )
+    | GuardDestroy guard ->
+        Option.bind (expression state guard) ~f:(fun guard ->
+            List.Assoc.find state.guards ~equal:AE.equal guard
+            |> Option.map ~f:(fun lock ->
+                { state with
+                  guards= List.filter state.guards ~f:(fun (old, _) -> not (AE.equal guard old))
+                ; released= lock :: state.released } ) )
+    | NoEffect ->
+        evaluate tenv stack pname (Some actuals) state
+    | _ ->
+        None
+
+
+  let project formals actuals (exp : AE.t) : AE.t option =
+    Option.bind
+      (FormalMap.get_formal_index (AE.get_base exp) formals)
+      ~f:(fun index ->
+        Option.bind (List.nth actuals index) ~f:(function
+          | HilExp.AccessExpression actual ->
+              let edges = AE.to_accesses exp |> snd in
+              List.fold edges ~init:(Some actual) ~f:(fun prefix edge ->
+                  Option.bind prefix ~f:(fun prefix -> step prefix edge) )
+          | _ ->
+              None ) )
+
+
+  let prove tenv ~constructor ~destructor ?actuals () : proof option =
+    Option.bind (Attributes.load constructor) ~f:(fun constructor_attrs ->
+        let formals = FormalMap.make constructor_attrs in
+        (* State and lock-proof records have disjoint labels. *)
+        Option.bind (evaluate tenv [] constructor None empty) ~f:(fun (after_constructor : state) ->
+            match (after_constructor.acquired, after_constructor.released) with
+            | [acquired], [] ->
+                Option.bind (FormalMap.get_formal_base 0 formals) ~f:(fun receiver ->
+                    let after_constructor = {after_constructor with acquired= []; released= []} in
+                    evaluate tenv [] destructor
+                      (Some [HilExp.AccessExpression (AE.base receiver)])
+                      after_constructor
+                    (* The destructor retains constructor state and reference-field bindings. *)
+                    |> Option.bind ~f:(fun (after_destructor : state) ->
+                        match (after_destructor.acquired, after_destructor.released) with
+                        | [], [released] -> (
+                            let outside_receiver (exp : AE.t) =
+                              FormalMap.get_formal_index (AE.get_base exp) formals
+                              |> Option.exists ~f:(fun index -> index > 0)
+                            in
+                            if not (outside_receiver acquired && outside_receiver released) then
+                              None
+                            else
+                              match actuals with
+                              | None ->
+                                  Some
+                                    { acquired_lock= acquired
+                                    ; released_lock= released
+                                    ; visible_lock= acquired }
+                              | Some actuals ->
+                                  Option.bind (project formals actuals acquired) ~f:(fun acquired ->
+                                      Option.bind (project formals actuals released)
+                                        ~f:(fun released ->
+                                          Option.bind (List.hd actuals) ~f:(function
+                                            | HilExp.AccessExpression guard ->
+                                                if
+                                                  Var.equal
+                                                    (fst (AE.get_base acquired))
+                                                    (fst (AE.get_base guard))
+                                                then None
+                                                else
+                                                  Some
+                                                    { acquired_lock= acquired
+                                                    ; released_lock= released
+                                                    ; visible_lock= acquired }
+                                            | _ ->
+                                                None ) ) ) )
+                        | _ ->
+                            None ) )
+            | _ ->
+                None ) )
+end
+
 module TransferFunctions (CFG : ProcCfg.S) = struct
   module CFG = CFG
   module Domain = RacerDDomain
@@ -71,13 +401,264 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         astate
 
 
-  let process_call_summary analyze_dependency tenv formals ret_access_exp callee_pname actuals loc
-      astate =
+  (* Constructor and destructor are distinct variants, neither is a [CPPMethod]. *)
+  let cpp_guard_role = function
+    | Procname.ObjC_Cpp {kind= CPPConstructor _; class_name} ->
+        Some (`Acquire, class_name)
+    | Procname.ObjC_Cpp {kind= CPPDestructor _; class_name} ->
+        Some (`Release, class_name)
+    | _ ->
+        None
+
+
+  (* A candidate guard must release the same caller-reachable lock it acquired. *)
+  let paired_guard_summary ?actuals analyze_dependency tenv pname (summary : Domain.summary) =
+    match cpp_guard_role pname with
+    | None ->
+        false
+    | Some (role, class_name) ->
+        summary.uses_locks && (not summary.never_returns)
+        && Option.exists (Tenv.lookup tenv class_name) ~f:(fun ({methods} : Struct.t) ->
+            List.exists methods ~f:(fun method_info ->
+                let other_pname = Struct.name_of_tenv_method method_info in
+                match cpp_guard_role other_pname with
+                | Some (other_role, other_class)
+                  when (not (Poly.equal role other_role)) && Typ.Name.equal class_name other_class
+                  -> (
+                  match analyze_dependency other_pname with
+                  | Ok (other : Domain.summary) when other.uses_locks && not other.never_returns ->
+                      let constructor, destructor =
+                        match role with
+                        | `Acquire ->
+                            (summary.locks, other.locks)
+                        | `Release ->
+                            (other.locks, summary.locks)
+                      in
+                      let constructor_pname, destructor_pname =
+                        match role with
+                        | `Acquire ->
+                            (pname, other_pname)
+                        | `Release ->
+                            (other_pname, pname)
+                      in
+                      GuardIdentity.prove tenv ~constructor:constructor_pname
+                        ~destructor:destructor_pname ?actuals ()
+                      |> Option.exists ~f:(fun (identity : GuardIdentity.proof) ->
+                          Domain.LockDomain.is_guard_pair ~constructor ~destructor
+                            ~acquired:(Some identity.acquired_lock)
+                            ~released:(Some identity.released_lock)
+                            ~caller_visible:(Some identity.visible_lock) )
+                  | _ ->
+                      false )
+                | _ ->
+                    false ) )
+
+
+  let local_guard_object proc_desc formals = function
+    | HilExp.AccessExpression ((Base _ | AddressOf (Base _)) as access_exp) ->
+        let ((var, _) as base) = AccessExpression.get_base access_exp in
+        (not (FormalMap.is_formal base formals || Var.is_global var))
+        && Option.exists (Var.get_pvar var) ~f:(fun pvar ->
+            not (Procdesc.is_captured_pvar proc_desc pvar) )
+    | _ ->
+        false
+
+
+  let direct_receiver_call proc_desc formals callee_pname actuals =
+    (* Keep constructor disambiguation principal. *)
+    let rec base_only (access_exp : HilExp.AccessExpression.t) =
+      match access_exp with
+      | HilExp.AccessExpression.Base base ->
+          Some base
+      | Dereference exp | AddressOf exp ->
+          base_only exp
+      | FieldOffset _ | ArrayOffset _ ->
+          None
+    in
+    match
+      ( Procname.get_class_type_name (Procdesc.get_proc_name proc_desc)
+      , Procname.get_class_type_name callee_pname
+      , List.hd actuals )
+    with
+    | Some caller_class, Some callee_class, Some (HilExp.AccessExpression exp) ->
+        Typ.Name.equal caller_class callee_class
+        && Option.exists (base_only exp) ~f:(fun ((var, _) as base) ->
+            Var.is_this var
+            && Option.equal Int.equal (FormalMap.get_formal_index base formals) (Some 0) )
+    | _ ->
+        false
+
+
+  (* A deliberately small helper grammar: one straight-line normal path, one local guard
+     construction/destruction pair, no other call, and only receiver field accesses. In particular,
+     a balanced backlog drain, wait loop, parser, I/O operation or cache population is not this
+     grammar. Exceptional paths are not asserted to be straight-line by this shape check. *)
+  let critical_guard_helper analyze_dependency tenv pname (summary : Domain.summary)
+      (attrs : ProcAttributes.t) =
+    let is_private_method =
+      match pname with
+      | Procname.ObjC_Cpp {kind= CPPMethod _} ->
+          ProcAttributes.(equal_access (get_access attrs) Private)
+      | _ ->
+          false
+    in
+    let helper_formals = FormalMap.make attrs in
+    let receiver_field_accesses =
+      is_private_method && attrs.ProcAttributes.is_defined
+      && Int.equal (FormalMap.cardinal helper_formals) 1
+      && Domain.AccessDomain.fold
+           (fun (snapshot : Domain.AccessSnapshot.t) all_receiver_fields ->
+             all_receiver_fields
+             &&
+             match snapshot.elem.access with
+             | Domain.Access.Read {exp} | Write {exp} ->
+                 Option.equal Int.equal
+                   (FormalMap.get_formal_index (AccessExpression.get_base exp) helper_formals)
+                   (Some 0)
+             | ContainerRead _ | ContainerWrite _ | InterfaceCall _ ->
+                 false )
+           summary.accesses true
+    in
+    let has_guarded_access =
+      receiver_field_accesses
+      && Domain.AccessDomain.exists
+           (fun (snapshot : Domain.AccessSnapshot.t) ->
+             Domain.LockDomain.is_locked snapshot.elem.lock
+             && Domain.ThreadsDomain.is_any snapshot.elem.thread )
+           summary.accesses
+    in
+    if
+      (not is_private_method)
+      || (not attrs.ProcAttributes.is_defined)
+      || (not (Int.equal (FormalMap.cardinal helper_formals) 1))
+      || (not receiver_field_accesses) || (not has_guarded_access) || summary.never_returns
+      || Domain.LockDomain.is_locked summary.locks
+      || Domain.LockDomain.has_released summary.locks
+    then false
+    else
+      Procdesc.load pname
+      |> Option.exists ~f:(fun helper_desc ->
+          let valid = ref true in
+          let calls = ref [] in
+          let bindings = ref Var.Map.empty in
+          let resolve var = Var.Map.find_opt var !bindings in
+          (* Call actuals use the production non-dereferencing HIL conversion. *)
+          let to_hil (exp, typ) =
+            HilExp.of_sil ~include_array_indexes:false ~f_resolve_id:resolve ~add_deref:false exp
+              typ
+          in
+          (* Keep SIL constructor disambiguation principal. *)
+          let inspect (instr : Sil.instr) =
+            match instr with
+            | Sil.Load {id; e; typ} ->
+                let access =
+                  HilExp.access_expr_of_exp ~include_array_indexes:false ~f_resolve_id:resolve e typ
+                in
+                bindings := Var.Map.remove (Var.of_id id) !bindings ;
+                Option.iter access ~f:(fun access ->
+                    bindings := Var.Map.add (Var.of_id id) access !bindings )
+            | Store _ | Metadata _ ->
+                ()
+            | Prune _ ->
+                valid := false
+            | Call (_, Exp.Const (Const.Cfun callee), actuals, _, _) -> (
+                let actuals = List.map actuals ~f:to_hil in
+                let role =
+                  match ConcurrencyModels.get_lock_effect callee actuals with
+                  | GuardConstruct {guard; locks; acquire_now= true}
+                    when (not (List.is_empty locks))
+                         && List.for_all locks ~f:(function
+                           | HilExp.AccessExpression lock -> (
+                               FormalMap.is_formal (AccessExpression.get_base lock) helper_formals
+                               &&
+                               match guard with
+                               | HilExp.AccessExpression guard ->
+                                   not
+                                     (Var.equal
+                                        (fst (AccessExpression.get_base lock))
+                                        (fst (AccessExpression.get_base guard)) )
+                               | _ ->
+                                   false )
+                           | _ ->
+                               false ) ->
+                      cpp_guard_role callee
+                  | GuardDestroy _ ->
+                      cpp_guard_role callee
+                  | NoEffect -> (
+                    match cpp_guard_role callee with
+                    | None ->
+                        None
+                    | Some _ -> (
+                      match analyze_dependency callee with
+                      | Ok callee_summary ->
+                          let constructor_actuals =
+                            match cpp_guard_role callee with
+                            | Some (`Acquire, _) ->
+                                Some actuals
+                            | _ ->
+                                None
+                          in
+                          if
+                            paired_guard_summary ?actuals:constructor_actuals analyze_dependency
+                              tenv callee callee_summary
+                          then cpp_guard_role callee
+                          else None
+                      | _ ->
+                          None ) )
+                  | _ ->
+                      None
+                in
+                match (role, List.hd actuals) with
+                | Some (role, class_name), Some guard
+                  when local_guard_object helper_desc helper_formals guard ->
+                    calls := (role, class_name, guard) :: !calls
+                | _ ->
+                    valid := false )
+            | Call _ ->
+                valid := false
+          in
+          let rec walk visited node =
+            if not !valid then ()
+            else if List.exists visited ~f:(Procdesc.Node.equal node) then valid := false
+            else (
+              Instrs.iter (Procdesc.Node.get_instrs node) ~f:inspect ;
+              match Procdesc.Node.get_succs node with
+              | [] ->
+                  ()
+              | [next] ->
+                  walk (node :: visited) next
+              | _ ->
+                  valid := false )
+          in
+          walk [] (Procdesc.get_start_node helper_desc) ;
+          !valid
+          &&
+          match List.rev !calls with
+          | [(`Acquire, constructor_class, guard); (`Release, destructor_class, destroyed)] ->
+              Typ.Name.equal constructor_class destructor_class && HilExp.equal guard destroyed
+          | _ ->
+              false )
+
+
+  let process_call_summary analyze_dependency proc_desc tenv formals ret_access_exp callee_pname
+      actuals loc astate =
     match analyze_dependency callee_pname with
     | Ok summary ->
         let callee_proc_attrs = Attributes.load_exn callee_pname in
-        Domain.integrate_summary formals ~callee_proc_attrs summary ret_access_exp callee_pname
-          actuals loc astate
+        let callee_guard_evidence =
+          ( match cpp_guard_role callee_pname with
+            | Some (`Acquire, _) ->
+                paired_guard_summary ~actuals analyze_dependency tenv callee_pname summary
+            | _ ->
+                false )
+          && Option.exists (List.hd actuals) ~f:(local_guard_object proc_desc formals)
+        in
+        let callee_critical_helper =
+          direct_receiver_call proc_desc formals callee_pname actuals
+          && critical_guard_helper analyze_dependency tenv callee_pname summary callee_proc_attrs
+        in
+        Domain.integrate_summary formals ~callee_proc_attrs ~callee_guard_evidence
+          ~callee_critical_helper summary ret_access_exp callee_pname actuals loc astate
     | Error _ ->
         (* No summary, so nothing is known about this callee's effect on locks. [TouchesLocks] is
            evidence of disturbance, not a proof of its absence, and the chain credit reads it as a
@@ -172,8 +753,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     | NoEffect when RacerDModels.proc_is_ignored_by_racerd callee_pname ->
         astate
     | NoEffect ->
-        process_call_summary analyze_dependency tenv formals ret_access_exp callee_pname actuals loc
-          astate
+        process_call_summary analyze_dependency proc_desc tenv formals ret_access_exp callee_pname
+          actuals loc astate
 
 
   let process_for_functional_values tenv ret_access_exp callee_pname (astate : Domain.t) =
@@ -429,7 +1010,10 @@ let analyze ({InterproceduralAnalysis.proc_desc; tenv} as interproc) =
             add_owned_formal acc base
           else add_conditionally_owned_formal acc base index )
     in
-    let initial = {initial with ownership; threads; locks} in
+    let uses_locks =
+      Procdesc.is_java_synchronized proc_desc || Procdesc.is_csharp_synchronized proc_desc
+    in
+    let initial = {initial with ownership; threads; locks; uses_locks} in
     let formals = FormalMap.make proc_attrs in
     let analysis_data = {interproc; formals} in
     Analyzer.compute_post analysis_data ~initial proc_desc

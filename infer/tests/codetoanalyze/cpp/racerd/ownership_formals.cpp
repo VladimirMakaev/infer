@@ -116,11 +116,8 @@ class Sharer {
     }
   }
 
-  // The shared buffer is a member, so the actual is not owned and this caller is where the
-  // deferred race should land. It does not report, and measurement says that is NOT a loss
-  // caused by the deferral: the frontier base cc63c3ec99, without this change, is silent here
-  // too. The race was never caught at the callee either, so nothing is moved and dropped --
-  // this is a standing coverage gap, recorded so the control is not mistaken for a live one.
+  // Known limitation: a container-writing helper is outside the scoped-guard grammar.
+  // The member buffer is shared; its unlocked read still needs caller thread evidence.
   int FN_use_shared_buffer_bad() {
     fill(buffer_);
     return buffer_.empty() ? 0 : buffer_.front();
