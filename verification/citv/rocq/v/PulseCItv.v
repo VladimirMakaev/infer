@@ -81,8 +81,9 @@ Module Bound.
       PlusInfinity
     | (Int i1, Int i2) => Int (IntLit.add i1 i2)
     | ((MinusInfinity, PlusInfinity) | (PlusInfinity, MinusInfinity)) =>
-      (* was: L.die InternalError "cannot add %a and %a" pp b1 pp b2 *)
-      axiom
+      (* was: L.die InternalError "cannot add %a and %a" pp b1 pp b2.
+         Unreachable: see bound_add_die_arm_is_unreachable. *)
+      MinusInfinity
     end.
   
   Definition minus (function_parameter : t) : t :=

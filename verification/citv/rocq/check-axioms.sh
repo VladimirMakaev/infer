@@ -65,7 +65,7 @@ if ! diff -u /tmp/citv-expected.txt /tmp/citv-actual.txt > /tmp/citv-setdiff.txt
   cat /tmp/citv-setdiff.txt
 fi
 N=$(wc -l < /tmp/citv-expected.txt)
-[ "$N" -ge 12 ] || bad "expected/theorems.txt lists only $N names; this milestone has 12"
+[ "$N" -ge 23 ] || bad "expected/theorems.txt lists only $N names; this milestone has 23"
 
 # ------------------------------------------------------------------- Print Assumptions
 # Produced by a FRESHLY compiled file, so the reports cannot come from a cache.
