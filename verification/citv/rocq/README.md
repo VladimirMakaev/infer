@@ -58,6 +58,45 @@ see "The value model" below for why that distinction is the whole point of this 
 | `abduce_le_sat_sound` | if it tightens instead, **no solution is lost** — for three of the four shapes; the fourth is excluded by an explicit hypothesis and refuted below |
 | `abduce_le_sat_is_unsound_on_outside_lhs` | a machine-checked **counterexample**: with `Outside` on the left and `Between` on the right, the refinement drops a value that satisfies the constraint |
 | four `witness_*` results | the regression checks described under "The value model" |
+| `add_sound` | if `add` returns an interval, the real sum of any two admitted values is in it |
+| `minus_sound` | the same for negation, for **both** arms — `Between`, where the constructor swaps the endpoints, and `Outside`, where it swaps which disjunct holds |
+| `unop_neg_sound` | `unop Neg` is `minus`, so it inherits that |
+| `binop_PlusA_sound`, `binop_MinusA_sound` | the two operators `binop` interprets arithmetically. `MinusA` is implemented as `minus a_rhs >>= add a_lhs` while the concrete operation is `IntLit.sub`, so the proof needs `sub_is_add_neg` to close the gap |
+| `binop_unsupported_is_none`, `unop_bnot_is_none`, `unop_lnot_is_none` | the other eighteen binary operators and the other two unary ones decline. That is most of `binop`'s surface and is stated rather than skipped: "returns `None`" is a soundness obligation too, just a trivial one |
+| `bound_add_die_arm_is_unreachable` | the arm where the real code dies cannot be selected once both operands have a concrete value |
+| four `*_off_the_signed_fragment` results | machine-checked **counterexamples** showing the `Signed` hypothesis on the five results above cannot be dropped |
+
+### The arithmetic, and the hypothesis it carries
+
+Every arithmetic result above assumes its literals are `Signed`. Two separate things make
+that the right statement.
+
+**It cannot be dropped.** `IntLit` orders lexicographically on `(area, i)`, and `lift1` and
+`lift2` join the signedness tag, so an operation can move a literal between *areas* and
+reorder it without the arithmetic having moved it. `Signed 1 <= Unsigned (-1)`, but adding
+`Unsigned 2` to each gives `Unsigned 3` and `Unsigned 1` — the smaller operand now has the
+larger sum. Negation is not antitone for the same reason. Both failures reach the interval
+level: `add_is_unsound_off_the_signed_fragment` exhibits a value in the operand whose real
+sum is outside the returned interval, and `minus_is_unsound_off_the_signed_fragment` does
+the same for negation.
+
+**It costs nothing, because every `IntLit` the analyser can build is `Signed.`** That is an
+invariant of the OCaml module, not of anything here, and it rests on four facts about
+`infer/src/IR/IntLit.ml` and its interface: the record is built in exactly two places and
+both write `Signed`; every other producer goes through `lift1`, which preserves the tag, or
+`lift2`, which joins two, and `Signed` joined with `Signed` is `Signed`; `type t` is
+abstract and the interface never names the field or the `Unsigned` constructor; and the
+derived `t_of_sexp` has no callers.
+
+The **closure** half of that is machine-checked here — `sgn_add`, `sgn_neg` and
+`sgn_itv_minus` are exactly "the operations stay in the fragment". The base case is the
+inspection above and is *not* formalised, because this development sees the translated
+`PulseCItv`, not the whole of `IntLit.ml`. So the four refutations describe values the
+analyser cannot currently build, and they are kept as **regression checks on that
+invariant**: if a new constructor, an exposed field or a deserialiser with a caller ever
+produces an `Unsigned` literal, they stop being hypothetical and the arithmetic results
+stop covering the reachable inputs.
+
 
 ### The arm that is refuted, and why
 
@@ -97,6 +136,22 @@ unported. The obstruction is concrete and is the same one as above:
 either scoping them to an all-`Signed` invariant and justifying where in Infer that holds,
 or doing the area analysis for the shift. Neither is attempted here, and nothing in this
 directory claims them.
+
+### The arm the real code dies in
+
+`Bound.add` has a case the real code answers with `L.die`, which never returns. A Rocq
+match must be total, so the arm needs an inhabitant, and it used to be the support
+library's `axiom`. That was wrong in a way worth recording: `Print Assumptions` follows the
+*constants a theorem mentions*, not the branches its proof visits, so every theorem about
+`PulseCItv.add` inherited `Basics.axiom` — which is `forall A : Set, A`, i.e. inconsistent
+— even though no proof could reach the arm. The axiom check refused four R4 theorems for
+exactly that, which is the gate doing its job.
+
+It is now a concrete bound. The choice is arbitrary, so it had better be inert, and
+`bound_add_die_arm_is_unreachable` shows it is: the arm is selected only by `MinusInfinity`
+together with `PlusInfinity`, and whichever way round they come one of them contradicts the
+concretisation, because `sat_lower PlusInfinity` and `sat_upper MinusInfinity` are both
+`False`.
 
 ## Why the axiom check, and why it has no whitelist
 
@@ -241,8 +296,9 @@ markers.
 ## Mutants
 
 A green proof run means nothing unless an unsound module is rejected. `mutate.sh` breaks the
-translated module four ways, one per theorem family, and each must **compile** (so that a
-rejection means the proof talking, not a broken file) and then be **refused**:
+translated module eleven ways, at least one per theorem family, and each must **compile**
+(so that a rejection means the proof talking, not a broken file) and then be **refused**.
+`MIN_MUTANTS` is 11; the floor has only ever gone up, 4 → 6 → 11.
 
 | mutant | what it breaks |
 |---|---|
@@ -252,11 +308,22 @@ rejection means the proof talking, not a broken file) and then be **refused**:
 | `abduce_le/over-tighten-the-between-outside-arm` | shifts that arm's lower bound one too far |
 | `IntLit/lift1-drops-the-tags` | rebuilds a default `Signed`/`NotPointer` record instead of `{x with i}` |
 | `IntLit/equal-ignores-the-area` | compares values only, so the two negative tags stop being distinguished |
+| `add/drop-the-second-upper-bound` | returns `upper1` instead of `upper1 + upper2`, so a real sum can exceed the result |
+| `minus/forget-to-swap-the-between-arm` | negates the endpoints without exchanging them |
+| `minus/forget-to-swap-the-outside-arm` | the same on the `Outside` arm, which the Between mutant does not touch |
+| `binop/MinusA-forgets-the-negation` | computes `a_lhs + a_rhs` where the concrete operation is subtraction |
+| `binop/PlusA-subtracts-instead` | the mirror image, so neither operator can be satisfied by the other's implementation |
 
 The first four aim at `abduce_le`, which is what is still proved. The `abduce_lt` and
 `flip_abduced` mutants of an earlier round are gone because the theorems they attacked are
 withdrawn — no floor was lowered to make a run pass.
 
-The last two aim at `IntLit.v`, which previously had no mutant at all: review found that a
+The next two aim at `IntLit.v`, which previously had no mutant at all: review found that a
 `lift1` which silently dropped the tags compiled and left every proof passing. It does not
 any more.
+
+The last five are R4's. Two of them exist as a pair on purpose: `MinusA-forgets-the-negation`
+and `PlusA-subtracts-instead` are mirror images, so neither operator's theorem can be
+satisfied by the other operator's implementation. `minus` gets one mutant per arm, because
+a mutant of the `Between` arm leaves the `Outside` arm untested and that arm is where the
+negation has to swap which disjunct holds.

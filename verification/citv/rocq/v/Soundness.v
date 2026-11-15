@@ -572,3 +572,371 @@ Proof. vm_compute. reflexivity. Qed.
 Example witness_lift1_keeps_pointerness :
   (IntLit.neg p5).(IntLit.t.pointerness) = IntLit.Pointer.
 Proof. vm_compute. reflexivity. Qed.
+
+(** * R4: the arithmetic - add, minus, unop, binop
+
+    The statement R4 was planned with is
+
+      binop op a1 a2 = Some r -> gamma a1 x -> gamma a2 y -> gamma r (x op y)
+
+    and it is FALSE on this module. IntLit's order is lexicographic on (area, i), and
+    lift1/lift2 join the signedness tag, so an operation can move a literal between AREAS
+    and thereby reorder it without the arithmetic having moved it. Two consequences, both
+    refuted by computation at the end of this section:
+
+      add is not monotone     Signed 1 <= Unsigned (-1), yet
+                              Signed 1 + Unsigned 2 = Unsigned 3 is ABOVE
+                              Unsigned (-1) + Unsigned 2 = Unsigned 1
+      neg is not antitone     neg (Signed 1) = Signed (-1) is in area 1, while
+                              neg (Unsigned (-1)) = Unsigned 1 is in area 2
+
+    So the arithmetic is proved on the fragment where the order behaves: the SIGNED
+    literals. That is not an arbitrary restriction. On Signed values area is 1 exactly
+    when i < 0 and 2 otherwise, so the lexicographic order COINCIDES with the order on i
+    (sgn_ile below), and ordinary interval reasoning becomes valid. The fragment is closed
+    under the operations, because join_signedness Signed Signed = Signed. *)
+
+Definition sgn (x : IntLit.t) : Prop := x.(IntLit.t.signedness) = IntLit.Signed.
+
+(** On Signed literals the tagged order and the order on the value agree. *)
+Lemma sgn_lex : forall x y, sgn x -> sgn y ->
+    (x.(IntLit.t.i) <= y.(IntLit.t.i) <-> lexle (irank x) (irank y)).
+Proof.
+  intros x y Sx Sy. unfold lexle, irank, fst, snd.
+  destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx];
+    destruct (Z_lt_le_dec y.(IntLit.t.i) 0) as [Hy | Hy].
+  - rewrite (area_neg_signed x Hx Sx), (area_neg_signed y Hy Sy). lia.
+  - rewrite (area_neg_signed x Hx Sx), (area_nonneg y Hy). lia.
+  - rewrite (area_nonneg x Hx), (area_neg_signed y Hy Sy). lia.
+  - rewrite (area_nonneg x Hx), (area_nonneg y Hy). lia.
+Qed.
+
+Lemma sgn_lexlt : forall x y, sgn x -> sgn y ->
+    (x.(IntLit.t.i) < y.(IntLit.t.i) <-> lexlt (irank x) (irank y)).
+Proof.
+  intros x y Sx Sy. unfold lexlt, irank, fst, snd.
+  destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx];
+    destruct (Z_lt_le_dec y.(IntLit.t.i) 0) as [Hy | Hy].
+  - rewrite (area_neg_signed x Hx Sx), (area_neg_signed y Hy Sy). lia.
+  - rewrite (area_neg_signed x Hx Sx), (area_nonneg y Hy). lia.
+  - rewrite (area_nonneg x Hx), (area_neg_signed y Hy Sy). lia.
+  - rewrite (area_nonneg x Hx), (area_nonneg y Hy). lia.
+Qed.
+
+Lemma sgn_ile : forall x y, sgn x -> sgn y ->
+    (ile x y <-> x.(IntLit.t.i) <= y.(IntLit.t.i)).
+Proof.
+  intros x y Sx Sy. rewrite ile_iff. split; intro H.
+  - apply (sgn_lex x y Sx Sy). exact H.
+  - apply (sgn_lex x y Sx Sy). exact H.
+Qed.
+
+Lemma sgn_ilt : forall x y, sgn x -> sgn y ->
+    (ilt x y <-> x.(IntLit.t.i) < y.(IntLit.t.i)).
+Proof.
+  intros x y Sx Sy. rewrite ilt_iff. split; intro H.
+  - apply (sgn_lexlt x y Sx Sy). exact H.
+  - apply (sgn_lexlt x y Sx Sy). exact H.
+Qed.
+
+(** The fragment is closed, and the value components are the obvious ones. *)
+Lemma add_i : forall x y,
+    (IntLit.add x y).(IntLit.t.i) = x.(IntLit.t.i) + y.(IntLit.t.i).
+Proof. intros x y. reflexivity. Qed.
+
+Lemma neg_i : forall x, (IntLit.neg x).(IntLit.t.i) = - x.(IntLit.t.i).
+Proof. intros x. reflexivity. Qed.
+
+Lemma sgn_add : forall x y, sgn x -> sgn y -> sgn (IntLit.add x y).
+Proof.
+  intros x y Sx Sy. unfold sgn, IntLit.add, IntLit.lift2, IntLit.join_signedness. cbn.
+  rewrite Sx, Sy. reflexivity.
+Qed.
+
+Lemma sgn_neg : forall x, sgn x -> sgn (IntLit.neg x).
+Proof. intros x Sx. exact Sx. Qed.
+
+(** Subtraction is addition of the negation, tags and all. Needed because binop MinusA
+    is implemented as [minus a_rhs >>= add a_lhs] while the concrete operation is [sub].
+    This one holds with no signedness hypothesis: both sides join the same two tags. *)
+Lemma sub_is_add_neg : forall x y, IntLit.sub x y = IntLit.add x (IntLit.neg y).
+Proof.
+  intros x y. unfold IntLit.sub, IntLit.add, IntLit.neg, IntLit.lift1, IntLit.lift2,
+    IntLit.t.with_i.
+  cbn. f_equal; try reflexivity; lia.
+Qed.
+
+(** ** Lifting the fragment to intervals
+
+    [sgn_itv] says every literal an interval mentions is Signed.  The infinities carry no
+    literal, so they are vacuously in the fragment. *)
+
+Definition sgn_bound (b : Bound.t) : Prop :=
+  match b with
+  | Bound.Int i => sgn i
+  | Bound.MinusInfinity | Bound.PlusInfinity => True
+  end.
+
+Definition sgn_itv (a : PulseCItv.t) : Prop :=
+  match a with
+  | Unsafe.Between l u => sgn_bound l /\ sgn_bound u
+  | Unsafe.Outside i j => sgn i /\ sgn j
+  end.
+
+(** Bound.add has an arm that the generated file renders as the support library's [axiom]
+    (the real code dies there).  It is reached only by MinusInfinity with PlusInfinity, and
+    the concretisation rules that out on both sides: [sat_lower PlusInfinity] and
+    [sat_upper MinusInfinity] are both False, so an inhabited interval never presents the
+    offending pair.  That is why none of the theorems below depends on an axiom. *)
+
+Lemma sat_lower_add : forall l1 l2 x y,
+    sgn_bound l1 -> sgn_bound l2 -> sgn x -> sgn y ->
+    sat_lower l1 x -> sat_lower l2 y ->
+    sat_lower (Bound.add l1 l2) (IntLit.add x y).
+Proof.
+  intros l1 l2 x y S1 S2 Sx Sy H1 H2.
+  destruct l1 as [i1 | |]; destruct l2 as [i2 | |]; cbn in *; try exact I;
+    try contradiction.
+  apply (sgn_ile _ _ (sgn_add i1 i2 S1 S2) (sgn_add x y Sx Sy)).
+  rewrite !add_i.
+  apply (sgn_ile _ _ S1 Sx) in H1. apply (sgn_ile _ _ S2 Sy) in H2. lia.
+Qed.
+
+Lemma sat_upper_add : forall u1 u2 x y,
+    sgn_bound u1 -> sgn_bound u2 -> sgn x -> sgn y ->
+    sat_upper u1 x -> sat_upper u2 y ->
+    sat_upper (Bound.add u1 u2) (IntLit.add x y).
+Proof.
+  intros u1 u2 x y S1 S2 Sx Sy H1 H2.
+  destruct u1 as [i1 | |]; destruct u2 as [i2 | |]; cbn in *; try exact I;
+    try contradiction.
+  apply (sgn_ile _ _ (sgn_add x y Sx Sy) (sgn_add i1 i2 S1 S2)).
+  rewrite !add_i.
+  apply (sgn_ile _ _ Sx S1) in H1. apply (sgn_ile _ _ Sy S2) in H2. lia.
+Qed.
+
+(** * add *)
+Theorem add_sound : forall a1 a2 r x y,
+    sgn_itv a1 -> sgn_itv a2 -> sgn x -> sgn y ->
+    PulseCItv.add a1 a2 = Some r ->
+    gamma a1 x -> gamma a2 y ->
+    gamma r (IntLit.add x y).
+Proof.
+  intros a1 a2 r x y S1 S2 Sx Sy Hr G1 G2.
+  destruct a1 as [l1 u1 | p1 q1]; destruct a2 as [l2 u2 | p2 q2];
+    cbn in Hr; try discriminate.
+  injection Hr as <-. destruct S1 as [Sl1 Su1]. destruct S2 as [Sl2 Su2].
+  destruct G1 as [Gl1 Gu1]. destruct G2 as [Gl2 Gu2].
+  split.
+  - exact (sat_lower_add _ _ _ _ Sl1 Sl2 Sx Sy Gl1 Gl2).
+  - exact (sat_upper_add _ _ _ _ Su1 Su2 Sx Sy Gu1 Gu2).
+Qed.
+
+(** * minus
+
+    Negation must be ANTITONE for the Between arm, because the constructor swaps the
+    endpoints.  It is, on Signed literals; see the refutation at the end for why the
+    hypothesis cannot be dropped. *)
+
+Lemma sat_lower_minus : forall u x, sgn_bound u -> sgn x ->
+    sat_upper u x -> sat_lower (Bound.minus u) (IntLit.neg x).
+Proof.
+  intros u x Su Sx H. destruct u as [i | |]; cbn in *; try exact I; try contradiction.
+  apply (sgn_ile _ _ (sgn_neg i Su) (sgn_neg x Sx)).
+  rewrite !neg_i. apply (sgn_ile _ _ Sx Su) in H. lia.
+Qed.
+
+Lemma sat_upper_minus : forall l x, sgn_bound l -> sgn x ->
+    sat_lower l x -> sat_upper (Bound.minus l) (IntLit.neg x).
+Proof.
+  intros l x Sl Sx H. destruct l as [i | |]; cbn in *; try exact I; try contradiction.
+  apply (sgn_ile _ _ (sgn_neg x Sx) (sgn_neg i Sl)).
+  rewrite !neg_i. apply (sgn_ile _ _ Sl Sx) in H. lia.
+Qed.
+
+Theorem minus_sound : forall a r x,
+    sgn_itv a -> sgn x ->
+    PulseCItv.minus a = Some r -> gamma a x -> gamma r (IntLit.neg x).
+Proof.
+  intros a r x Sa Sx Hr G. destruct a as [l u | p q]; cbn in Hr; injection Hr as <-.
+  - destruct Sa as [Sl Su]. destruct G as [Gl Gu]. split.
+    + exact (sat_lower_minus _ _ Su Sx Gu).
+    + exact (sat_upper_minus _ _ Sl Sx Gl).
+  - (* the Outside arm: x < p or q < x, negated, swaps which disjunct holds *)
+    destruct Sa as [Sp Sq]. cbn in *. destruct G as [G | G].
+    + right. apply (sgn_ilt _ _ (sgn_neg p Sp) (sgn_neg x Sx)).
+      rewrite !neg_i. apply (sgn_ilt _ _ Sx Sp) in G. lia.
+    + left. apply (sgn_ilt _ _ (sgn_neg x Sx) (sgn_neg q Sq)).
+      rewrite !neg_i. apply (sgn_ilt _ _ Sq Sx) in G. lia.
+Qed.
+
+Lemma sgn_itv_minus : forall a r, sgn_itv a -> PulseCItv.minus a = Some r -> sgn_itv r.
+Proof.
+  intros a r Sa Hr. destruct a as [l u | p q]; cbn in Hr; injection Hr as <-.
+  - destruct Sa as [Sl Su]. split.
+    + destruct u as [i | |]; cbn in Su |- *;
+        [ exact (sgn_neg i Su) | exact I | exact I ].
+    + destruct l as [i | |]; cbn in Sl |- *;
+        [ exact (sgn_neg i Sl) | exact I | exact I ].
+  - destruct Sa as [Sp Sq]. split; [ exact (sgn_neg q Sq) | exact (sgn_neg p Sp) ].
+Qed.
+
+(** * unop
+
+    Only Neg is interpreted; the other two decline, so there is nothing to be unsound
+    about.  Stated rather than skipped: "returns None" is most of this function. *)
+
+Theorem unop_neg_sound : forall a r x,
+    sgn_itv a -> sgn x ->
+    PulseCItv.unop Unop.Neg a = Some r -> gamma a x -> gamma r (IntLit.neg x).
+Proof. intros a r x Sa Sx Hr G. exact (minus_sound a r x Sa Sx Hr G). Qed.
+
+Lemma unop_bnot_is_none : forall a, PulseCItv.unop Unop.BNot a = None.
+Proof. reflexivity. Qed.
+
+Lemma unop_lnot_is_none : forall a, PulseCItv.unop Unop.LNot a = None.
+Proof. reflexivity. Qed.
+
+(** * binop
+
+    PlusA is add and MinusA is [minus a_rhs >>= add a_lhs].  The concrete operation for
+    MinusA is IntLit.sub, which is why sub_is_add_neg is needed: the implementation goes
+    round through the negation and the statement must still be about subtraction. *)
+
+Theorem binop_PlusA_sound : forall k a1 a2 r x y,
+    sgn_itv a1 -> sgn_itv a2 -> sgn x -> sgn y ->
+    PulseCItv.binop (Binop.PlusA k) a1 a2 = Some r ->
+    gamma a1 x -> gamma a2 y -> gamma r (IntLit.add x y).
+Proof.
+  intros k a1 a2 r x y S1 S2 Sx Sy Hr G1 G2.
+  exact (add_sound a1 a2 r x y S1 S2 Sx Sy Hr G1 G2).
+Qed.
+
+Theorem binop_MinusA_sound : forall k a1 a2 r x y,
+    sgn_itv a1 -> sgn_itv a2 -> sgn x -> sgn y ->
+    PulseCItv.binop (Binop.MinusA k) a1 a2 = Some r ->
+    gamma a1 x -> gamma a2 y -> gamma r (IntLit.sub x y).
+Proof.
+  intros k a1 a2 r x y S1 S2 Sx Sy Hr G1 G2.
+  cbn in Hr.
+  destruct (PulseCItv.minus a2) as [m |] eqn:Hm; cbn in Hr; [| discriminate].
+  rewrite sub_is_add_neg.
+  apply (add_sound a1 m r x (IntLit.neg y) S1
+           (sgn_itv_minus a2 m S2 Hm) Sx (sgn_neg y Sy) Hr G1).
+  exact (minus_sound a2 m y S2 Sy Hm G2).
+Qed.
+
+(** Everything else declines.  Eighteen operators, which is most of binop's surface. *)
+Lemma binop_unsupported_is_none : forall a1 a2,
+    PulseCItv.binop Binop.PlusPI a1 a2 = None
+    /\ PulseCItv.binop Binop.MinusPI a1 a2 = None
+    /\ PulseCItv.binop Binop.MinusPP a1 a2 = None
+    /\ (forall k, PulseCItv.binop (Binop.Mult k) a1 a2 = None)
+    /\ PulseCItv.binop Binop.DivF a1 a2 = None
+    /\ PulseCItv.binop Binop.Shiftlt a1 a2 = None
+    /\ PulseCItv.binop Binop.Shiftrt a1 a2 = None
+    /\ PulseCItv.binop Binop.Lt a1 a2 = None
+    /\ PulseCItv.binop Binop.Gt a1 a2 = None
+    /\ PulseCItv.binop Binop.Le a1 a2 = None
+    /\ PulseCItv.binop Binop.Ge a1 a2 = None
+    /\ PulseCItv.binop Binop.Eq a1 a2 = None
+    /\ PulseCItv.binop Binop.Ne a1 a2 = None
+    /\ PulseCItv.binop Binop.BAnd a1 a2 = None
+    /\ PulseCItv.binop Binop.BXor a1 a2 = None
+    /\ PulseCItv.binop Binop.BOr a1 a2 = None
+    /\ PulseCItv.binop Binop.LAnd a1 a2 = None
+    /\ PulseCItv.binop Binop.LOr a1 a2 = None.
+Proof. intros a1 a2. repeat split; reflexivity. Qed.
+
+(** * Why the Signed hypothesis is the right one, and why it is not a restriction
+
+    Every theorem above carries [sgn]. Two separate facts justify that.
+
+    FIRST, it cannot be dropped. The order is lexicographic on (area, i) and lift1/lift2
+    join the signedness tag, so an operation can move a literal between AREAS and reorder
+    it without the arithmetic having moved it. The four results below are computations,
+    not assumptions: add is not monotone, neg is not antitone, and each failure escapes to
+    the interval level, where a value really in the operand has its real image outside the
+    returned interval.
+
+    SECOND, it costs nothing, because every IntLit a Pulse analysis can build is Signed.
+    That is an invariant of the OCaml module rather than something provable here, and it
+    was established by inspection of infer/src/IR/IntLit.ml and its interface:
+
+      - the record is constructed in exactly two places, [of_z] and [null], and both write
+        [signedness= Signed];
+      - every other producer goes through [lift1], which preserves the tag, or [lift2],
+        which joins two of them, and Signed joined with Signed is Signed;
+      - [type t] is abstract in IntLit.mli, which never mentions Unsigned or the field, so
+        no caller can build one;
+      - the derived [t_of_sexp], the one remaining way in, has no callers.
+
+    The CLOSURE half of that argument is machine-checked here - sgn_add, sgn_neg and
+    sgn_itv_minus are exactly "the operations stay in the fragment". The base case, that
+    every constructor yields Signed, is the inspection above and is not formalised: this
+    development sees the translated PulseCItv, not the whole of IntLit.ml.
+
+    So the refutations below describe values the analyser cannot currently build. They are
+    kept as REGRESSION CHECKS on that invariant: the day something starts producing an
+    Unsigned literal - a new constructor, an exposed field, a deserialiser with a caller -
+    these four stop being hypothetical and the theorems above stop covering the reachable
+    inputs. *)
+
+Definition s1 : IntLit.t := IntLit.t.Build IntLit.Signed 1 IntLit.NotPointer.
+Definition u2 : IntLit.t := IntLit.t.Build IntLit.Unsigned 2 IntLit.NotPointer.
+
+(** The interval is well formed: its lower bound really is below its upper bound. *)
+Example mixed_interval_is_well_formed : IntLit.leq s1 um1 = true.
+Proof. reflexivity. Qed.
+
+Definition mixed_a1 : PulseCItv.t := Unsafe.Between (Bound.Int s1) (Bound.Int um1).
+Definition mixed_a2 : PulseCItv.t := Unsafe.Between (Bound.Int u2) (Bound.Int u2).
+
+Theorem add_is_not_monotone_off_the_signed_fragment :
+  IntLit.leq s1 um1 = true
+  /\ IntLit.leq (IntLit.add s1 u2) (IntLit.add um1 u2) = false.
+Proof. split; reflexivity. Qed.
+
+Theorem neg_is_not_antitone_off_the_signed_fragment :
+  IntLit.leq s1 um1 = true
+  /\ IntLit.leq (IntLit.neg um1) (IntLit.neg s1) = false.
+Proof. split; reflexivity. Qed.
+
+(** Lifted: a value in the operand whose image is outside the result. *)
+Theorem add_is_unsound_off_the_signed_fragment :
+  gamma mixed_a1 um1 /\ gamma mixed_a2 u2 /\
+  match PulseCItv.add mixed_a1 mixed_a2 with
+  | Some r => gamma r (IntLit.add um1 u2) -> False
+  | None => False
+  end.
+Proof.
+  repeat split; unfold gamma, sat_lower, sat_upper, ile; cbn; try reflexivity.
+  intros [H _]; discriminate.
+Qed.
+
+Theorem minus_is_unsound_off_the_signed_fragment :
+  gamma mixed_a1 um1 /\
+  match PulseCItv.minus mixed_a1 with
+  | Some r => gamma r (IntLit.neg um1) -> False
+  | None => False
+  end.
+Proof.
+  repeat split; unfold gamma, sat_lower, sat_upper, ile; cbn; try reflexivity.
+  intros [_ H]; discriminate.
+Qed.
+
+(** The arm of Bound.add that the real code dies in is rendered as a concrete bound (see
+    strip.py). That choice is arbitrary, so it had better be unreachable - otherwise a
+    theorem could be proved THROUGH it. It is: the arm is selected only by MinusInfinity
+    together with PlusInfinity, and whichever way round they come, one of them contradicts
+    the concretisation, because [sat_lower PlusInfinity] and [sat_upper MinusInfinity] are
+    both False. Stated for both uses of Bound.add, the lower pair and the upper pair. *)
+Theorem bound_add_die_arm_is_unreachable : forall b1 b2 x y,
+    ((sat_lower b1 x /\ sat_lower b2 y) \/ (sat_upper b1 x /\ sat_upper b2 y)) ->
+    ~ ((b1 = Bound.MinusInfinity /\ b2 = Bound.PlusInfinity)
+       \/ (b1 = Bound.PlusInfinity /\ b2 = Bound.MinusInfinity)).
+Proof.
+  intros b1 b2 x y H C.
+  destruct C as [[-> ->] | [-> ->]]; destruct H as [[H1 H2] | [H1 H2]]; cbn in *;
+    contradiction.
+Qed.

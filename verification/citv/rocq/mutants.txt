@@ -2,8 +2,10 @@
 # Each must (a) still COMPILE, so that a failure is the proof talking and not a broken
 # file, and (b) make the proofs be REJECTED.
 #
-# SIX mutants, and MIN_MUTANTS in mutate.sh is 6.  Four aim at abduce_le, whose four arms
-# are what is still proved; two aim at IntLit.v, which previously had no mutant at all.
+# ELEVEN mutants, and MIN_MUTANTS in mutate.sh is 11.  Four aim at abduce_le, two at
+# IntLit.v, and five at the R4 arithmetic: one per theorem that could otherwise be
+# satisfied by a weaker implementation (add, minus's two arms, and binop's two
+# interpreted operators).
 #
 # An earlier milestone also carried mutants for abduce_lt and flip_abduced.  Those are gone
 # because the theorems they attacked are WITHDRAWN, not because the floor was lowered to
@@ -15,3 +17,8 @@ abduce_le/over-tighten-the-rhs | PulseCItv.v | (Some (between max_l1l2 upper2)) 
 abduce_le/over-tighten-the-between-outside-arm | PulseCItv.v | Bound.max (Bound.Int (IntLit.add IntLit.one u2)) lower1 ||| Bound.max (Bound.Int (IntLit.add IntLit.one (IntLit.add IntLit.one u2))) lower1
 IntLit/lift1-drops-the-tags | IntLit.v | t.with_i (f_value x_value.(t.i)) x_value. ||| t.Build Signed (f_value x_value.(t.i)) NotPointer.
 IntLit/equal-ignores-the-area | IntLit.v | Definition equal (i1 : t) (i2 : t) : bool := eq i1 i2. ||| Definition equal (i1 : t) (i2 : t) : bool := Z.eqb i1.(t.i) i2.(t.i).
+add/drop-the-second-upper-bound | PulseCItv.v | Some (between (Bound.add lower1 lower2) (Bound.add upper1 upper2)) ||| Some (between (Bound.add lower1 lower2) upper1)
+minus/forget-to-swap-the-between-arm | PulseCItv.v | Some (between (Bound.minus upper) (Bound.minus lower)) ||| Some (between (Bound.minus lower) (Bound.minus upper))
+minus/forget-to-swap-the-outside-arm | PulseCItv.v | Some (outside (IntLit.neg u_value) (IntLit.neg l_value)) ||| Some (outside (IntLit.neg l_value) (IntLit.neg u_value))
+binop/MinusA-forgets-the-negation | PulseCItv.v | IStd.Option.Monad_infix.op_gtgteq (minus a_rhs) (add a_lhs) ||| add a_lhs a_rhs
+binop/PlusA-subtracts-instead | PulseCItv.v | | Binop.PlusA _ => add a_lhs a_rhs ||| | Binop.PlusA _ => IStd.Option.Monad_infix.op_gtgteq (minus a_rhs) (add a_lhs)

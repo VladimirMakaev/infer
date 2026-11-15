@@ -48,10 +48,23 @@ t = cut(t, 'Module F := Stdlib.Format.\n\n', 'Module L := Logging.', 'PulseCItv:
 t = cut(t, 'Module L := Logging.\n\n', 'Module Bound.', 'PulseCItv: module alias L')
 t = cut(t, '  Definition pp (fmt : Stdlib.Format.formatter)', '  Definition equal (b1 : t)',
         'PulseCItv: Bound.pp')
+# The real code DIES here (L.die never returns), but a Rocq match must be total, so the
+# arm needs some inhabitant. It used to be the support library's [axiom], and that was a
+# mistake worth recording: Print Assumptions follows the CONSTANTS a theorem mentions, not
+# the branches its proof visits, so every theorem about PulseCItv.add inherited
+# Basics.axiom -- which is [forall A : Set, A], i.e. inconsistent -- even though no proof
+# could reach the arm. Four R4 theorems were refused by check-axioms.sh for exactly that.
+#
+# A concrete constructor makes them axiom-free. The choice is arbitrary and provably
+# inert: Soundness.v's bound_add_die_arm_is_unreachable shows the pair that selects this
+# arm cannot occur once both operands have a concrete value, because sat_lower
+# PlusInfinity and sat_upper MinusInfinity are both False. So nothing is proved THROUGH
+# this value; it exists only to make the function total.
 t = cut(t, '      L.die IStd.InternalError\n', '    end.\n  \n  Definition minus',
         'PulseCItv: the L.die arm of Bound.add',
-        '      (* was: L.die InternalError "cannot add %a and %a" pp b1 pp b2 *)\n'
-        '      axiom\n')
+        '      (* was: L.die InternalError "cannot add %a and %a" pp b1 pp b2.\n'
+        '         Unreachable: see bound_add_die_arm_is_unreachable. *)\n'
+        '      MinusInfinity\n')
 t = cut(t, 'Definition pp (fmt : F.formatter)', 'Definition is_equal_to_zero',
         'PulseCItv: top-level pp')
 (OUT / 'PulseCItv.v').write_text(t)
