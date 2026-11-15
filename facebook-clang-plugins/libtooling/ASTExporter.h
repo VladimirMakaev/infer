@@ -4292,8 +4292,10 @@ int ASTExporter<ATDWriter>::UnaryExprOrTypeTraitExprTupleSize() {
 //@atd } <ocaml field_prefix="uttei_">
 //@atd type unary_expr_or_type_trait_kind = [
 //@atd | AlignOf
+//@atd | AlignOfWithAlign of int
 //@atd | OpenMPRequiredSimdAlign
 //@atd | PreferredAlignOf
+//@atd | PreferredAlignOfWithAlign of int
 //@atd | SizeOf
 //@atd | SizeOfWithSize of int
 //@atd | VecStep
@@ -4308,15 +4310,32 @@ void ASTExporter<ATDWriter>::VisitUnaryExprOrTypeTraitExpr(
 
   OF.emitTag("kind");
   switch (Node->getKind()) {
-  case UETT_AlignOf:
-    OF.emitSimpleVariant("AlignOf");
+  case UETT_AlignOf: {
+    // Export the alignment the same way SizeOf exports the width below: without it the
+    // frontend has to invent an unknown value, and arithmetic over alignof -- `RoundUp(n,
+    // alignof(T))` being the common one -- stops being decidable.
+    const Type *ArgType = Node->getTypeOfArgument().getTypePtr();
+    if (hasMeaningfulTypeInfo(ArgType)) {
+      VariantScope Scope(OF, "AlignOfWithAlign");
+      OF.emitInteger(Context.getTypeInfo(ArgType).Align / 8);
+    } else {
+      OF.emitSimpleVariant("AlignOf");
+    }
     break;
+  }
   case UETT_OpenMPRequiredSimdAlign:
     OF.emitSimpleVariant("OpenMPRequiredSimdAlign");
     break;
-  case UETT_PreferredAlignOf:
-    OF.emitSimpleVariant("PreferredAlignOf");
+  case UETT_PreferredAlignOf: {
+    const Type *ArgType = Node->getTypeOfArgument().getTypePtr();
+    if (hasMeaningfulTypeInfo(ArgType)) {
+      VariantScope Scope(OF, "PreferredAlignOfWithAlign");
+      OF.emitInteger(Context.getPreferredTypeAlign(ArgType) / 8);
+    } else {
+      OF.emitSimpleVariant("PreferredAlignOf");
+    }
     break;
+  }
   case UETT_SizeOf:
   case UETT_DataSizeOf: {
     const Type *ArgType = Node->getTypeOfArgument().getTypePtr();

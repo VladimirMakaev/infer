@@ -572,7 +572,16 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           {Exp.typ; nbytes; dynamic_length= None; subtype= Subtype.exact; nullable= false}
         in
         mk_trans_result (Exp.Sizeof sizeof_data, typ) control
+    | `AlignOfWithAlign align | `PreferredAlignOfWithAlign align ->
+        (* The alignment is a compile-time constant and the exporter folded it. Translating it as
+           a constant rather than an unknown keeps arithmetic over it decidable: [RoundUp (n,
+           alignof t)] is [((n + a - 1) / a) * a], and division by an unknown [a] cannot be
+           folded, so a guard comparing the rounded value back to [n] stays satisfiable and its
+           branch is explored even when [n] is zero. *)
+        mk_trans_result (Exp.int (IntLit.of_int align), typ) control
     | `AlignOf | `OpenMPRequiredSimdAlign | `PreferredAlignOf | `VecStep | `VectorElements ->
+        (* no folded value: an incomplete, dependent or non-constant-size type, or a trait whose
+           value the exporter does not compute *)
         let nondet = (Exp.Var (Ident.create_fresh Ident.knormal), typ) in
         mk_trans_result nondet control
 
