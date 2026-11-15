@@ -8,7 +8,7 @@ set -u
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
-MIN_MUTANTS=11
+MIN_MUTANTS=12
 total=0; ok=0
 while IFS= read -r line; do
   case "$line" in ''|'#'*) continue;; esac

@@ -380,7 +380,7 @@ let abduce_le (a1 : t) (a2 : t) =
         Satisfiable (None, Some (between lower PlusInfinity))
   | Outside (l1, u1), Between (_lower2, upper2) ->
       (* similarly, two cases:
-         1. u1≥u2: can refine to x≤min(l1+1, u2)
+         1. u1≥u2: can refine to x≤min(l1, u2)
          x: -----\[       \]---------------------
          y: ..-\]
          or y:      ...-----\]
@@ -389,8 +389,13 @@ let abduce_le (a1 : t) (a2 : t) =
          y:          ...---\]
       *)
       if Bound.ge (Int u1) upper2 then
-        (* case 1: l1>l2 *)
-        let upper = Bound.min (Int (IntLit.(add one) l1)) upper2 in
+        (* case 1: l1>l2.  The bound is [l1] rather than [l1+1]: x is strictly below l1 here,
+           so x≤l1 holds, and it avoids adding to a literal.  Addition joins IntLit's
+           signedness tag and the comparison orders by (area, value), so [l1+1] can land in a
+           lower area than l1 and stop being an upper bound at all - for an unsigned l1 it
+           does.  No unsigned literal is reachable today, but the arithmetic is the only
+           reason this arm needed the assumption. *)
+        let upper = Bound.min (Int l1) upper2 in
         Satisfiable (Some (between MinusInfinity upper), None)
       else (* case 2: l1≤l2 *)
         Satisfiable (None, None)

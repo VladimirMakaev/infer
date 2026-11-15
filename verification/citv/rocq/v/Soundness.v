@@ -408,20 +408,33 @@ Qed.
     right, is NOT sound over IntLit's real order, and is refuted immediately below rather
     than quietly left out. *)
 
-Definition not_outside_between (a1 a2 : PulseCItv.t) : Prop :=
-  match a1, a2 with
-  | Unsafe.Outside _ _, Unsafe.Between _ _ => False
-  | _, _ => True
-  end.
+(** [Bound.ge (Int u1) b] with y under b gives y <= u1: the guard of the Outside/Between
+    arm, in the form the proof needs. *)
+(** [geq] is the only comparison the ord tactic does not reduce on its own, because
+    nothing used it before this arm. *)
+Lemma geq_true_ile : forall a b, IntLit.geq a b = true -> ile b a.
+Proof.
+  intros a b H. unfold IntLit.geq in H. apply sge_true in H. apply ile_iff.
+  destruct (compare_value_spec a b) as [[Hc Hlt] | [[Hc [Ha Hi]] | [Hc Hlt]]];
+    rewrite Hc in H; unfold lexle, lexlt, irank, fst, snd in *; lia.
+Qed.
+
+Lemma ge_int_upper : forall u1 b y,
+    Bound.ge (Bound.Int u1) b = true -> sat_upper b y -> ile y u1.
+Proof.
+  intros u1 b y H Hy. destruct b as [i | |]; cbn in H, Hy.
+  - exact (ile_trans _ _ _ Hy (geq_true_ile _ _ H)).
+  - contradiction.
+  - discriminate.
+Qed.
 
 Theorem abduce_le_sat_sound :
   forall (a1 a2 : PulseCItv.t) (o1 o2 : option PulseCItv.t),
-    not_outside_between a1 a2 ->
     PulseCItv.abduce_le a1 a2 = Satisfiable o1 o2 ->
     forall x y : IntLit.t, gamma a1 x -> gamma a2 y -> ile x y ->
       refines o1 x /\ refines o2 y.
 Proof.
-  intros a1 a2 o1 o2 Hshape Hsat x y G1 G2 Hxy.
+  intros a1 a2 o1 o2 Hsat x y G1 G2 Hxy.
   destruct a1 as [lower1 upper1 | l1 u1];
     destruct a2 as [lower2 upper2 | l2 u2];
     unfold PulseCItv.abduce_le in Hsat.
@@ -455,8 +468,25 @@ Proof.
       destruct G2 as [G2 | G2]; [ contradiction | ].
       (* u2 < y, and the refinement's lower bound is exactly IntLit.add one u2 *)
       exact (add_one_le _ _ G2).
-  - (* Outside / Between: excluded by the shape hypothesis, and refuted below *)
-    cbn in Hshape. contradiction.
+  - (* Outside / Between.  This arm used to be excluded by a hypothesis and refuted by a
+       counterexample: it bounded x by l1+1, and adding to a literal joins the signedness
+       tag, so for an unsigned l1 the sum lands in a lower area and stops being an upper
+       bound.  The bound is now l1 itself, which needs no arithmetic and therefore cannot
+       cross an area, so the arm holds for EVERY signedness and the hypothesis is gone. *)
+    destruct G2 as [Gl2 Gu2].
+    destruct (Bound.ge (Bound.Int u1) upper2) eqn:E.
+    + inversion Hsat; subst; clear Hsat.
+      split; [ | exact I ]. cbn [between gamma sat_lower]. split; [ exact I | ].
+      apply sat_upper_min.
+      * (* x <= l1.  Either x is below l1 already, or it is above u1 - and then
+           u1 < x <= y <= upper2 <= u1 is impossible. *)
+        cbn [sat_upper]. destruct G1 as [G1 | G1].
+        -- exact (ilt_ile _ _ G1).
+        -- exfalso. apply (ilt_irrefl u1).
+           exact (ilt_ile_trans _ _ _ G1
+                    (ile_trans _ _ _ Hxy (ge_int_upper _ _ _ E Gu2))).
+      * exact (sat_upper_mono _ _ _ Hxy Gu2).
+    + inversion Hsat; subst. split; exact I.
   - inversion Hsat; subst. split; exact I.
 Qed.
 
@@ -471,26 +501,29 @@ Qed.
 Definition um1 : IntLit.t := IntLit.t.Build IntLit.Unsigned (-1) IntLit.NotPointer.
 Definition um2 : IntLit.t := IntLit.t.Build IntLit.Unsigned (-2) IntLit.NotPointer.
 
-Theorem abduce_le_sat_is_unsound_on_outside_lhs :
-  exists (a1 a2 : PulseCItv.t) (o1 o2 : option PulseCItv.t) (x y : IntLit.t),
-    PulseCItv.abduce_le a1 a2 = Satisfiable o1 o2
-    /\ gamma a1 x /\ gamma a2 y /\ ile x y
-    /\ ~ refines o1 x.
+(** The case R1 REFUTED, now a proof, on the very literals that broke it.
+
+    It used to read: abduce_le returns a refinement bounding x by l1+1, with l1 unsigned
+    -1; adding one joins the tag and lands on unsigned 0, which sits in area 2 while l1
+    sits in area 3, so the "upper bound" is below the value it is supposed to admit, and
+    um2 - genuinely in Outside(um1,um1) and genuinely <= itself - falls outside the
+    refinement. The arm now bounds x by l1 itself, so there is no arithmetic to cross an
+    area, and the same instance goes through. Kept as a pinned regression check: if the
+    arithmetic ever comes back, this fails. *)
+Theorem abduce_le_sat_sound_on_the_formerly_refuted_case :
+  forall o1 o2,
+    PulseCItv.abduce_le (Unsafe.Outside um1 um1)
+      (Unsafe.Between (Bound.Int um2) (Bound.Int um2)) = Satisfiable o1 o2 ->
+    refines o1 um2 /\ refines o2 um2.
 Proof.
-  exists (Unsafe.Outside um1 um1).
-  exists (Unsafe.Between (Bound.Int um2) (Bound.Int um2)).
-  exists (Some (between Bound.MinusInfinity
-                  (Bound.min (Bound.Int (IntLit.add IntLit.one um1)) (Bound.Int um2)))).
-  exists None. exists um2. exists um2.
-  split; [ vm_compute; reflexivity | ].
-  (* um2 is inside Outside(um1,um1): it is strictly below um1 *)
-  split; [ left; unfold ilt; vm_compute; reflexivity | ].
-  (* and inside [um2,um2] *)
-  split; [ split; unfold ile; vm_compute; reflexivity | ].
-  (* and x <= y holds *)
-  split; [ unfold ile; vm_compute; reflexivity | ].
-  (* but it is NOT inside the refinement the abduction returned *)
-  intros [_ H]. unfold ile in H. vm_compute in H. discriminate.
+  intros o1 o2 H.
+  apply (abduce_le_sat_sound _ _ _ _ H um2 um2).
+  - (* um2 is in Outside(um1,um1): strictly below um1 *)
+    left; unfold ilt; vm_compute; reflexivity.
+  - (* and in [um2,um2] *)
+    split; unfold ile; vm_compute; reflexivity.
+  - (* and um2 <= um2 *)
+    unfold ile; vm_compute; reflexivity.
 Qed.
 
 Print Assumptions abduce_le_unsat_sound.
@@ -528,7 +561,7 @@ Example witness_negative_unsigned_is_above_zero :
   IntLit.lt s0 um1 = true.
 Proof. vm_compute. reflexivity. Qed.
 
-Print Assumptions abduce_le_sat_is_unsound_on_outside_lhs.
+Print Assumptions abduce_le_sat_sound_on_the_formerly_refuted_case.
 
 (** * Equality is NOT structural, and lift1 keeps the tags
 
