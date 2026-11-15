@@ -16,6 +16,13 @@ set -u
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
+# PER-RUN SCRATCH, not a fixed /tmp path.  Two of these running at once -- a reviewer's copy
+# while the standing check fires -- wrote the SAME files and silently corrupted each other's
+# results, which is the worst shape a check can fail in: both runs look like they completed.
+# CITV_KEEP_TMP=1 keeps the directory for debugging; failures already tail their own logs.
+CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-run.XXXXXXXX") || exit 2
+trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
+
 # Exit 2 throughout for "the check could not be carried out" -- a toolchain that does not
 # match the pins, or a translator that does not resolve -- and 1 for "it ran and something
 # failed".  check-axioms.sh already used 2 that way.  citv_check.sh distinguishes the two
@@ -29,12 +36,12 @@ echo; echo "=== proofs, from clean"
 [ "${1:-}" = --proofs ] && exit 0
 
 echo; echo "=== the freshness guard must refuse a clean that did not happen"
-if CITV_CLEAN=false ./check-axioms.sh > /tmp/citv-freshattack.log 2>&1; then
+if CITV_CLEAN=false ./check-axioms.sh > "$CITV_TMP/freshattack.log" 2>&1; then
   echo "REFUSED: check-axioms.sh passed with a failing clean; the guard is not load-bearing"
   exit 1
 fi
-grep -q 'REFUSED' /tmp/citv-freshattack.log \
-  && echo "ok: refused, '$(grep -m1 REFUSED /tmp/citv-freshattack.log)'" \
+grep -q 'REFUSED' "$CITV_TMP/freshattack.log" \
+  && echo "ok: refused, '$(grep -m1 REFUSED "$CITV_TMP/freshattack.log")'" \
   || { echo "REFUSED: it failed, but not via the freshness guard"; exit 1; }
 
 echo; echo "=== the translator guard must refuse a directory, as a toolchain problem"

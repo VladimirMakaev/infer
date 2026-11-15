@@ -23,6 +23,12 @@
 
 set -u -o pipefail
 
+# PER-RUN SCRATCH.  This one was already collision-free, being suffixed with $$, but it was
+# removed only on the success path: every early exit left a file behind in /tmp.  Same idiom
+# as the Rocq half so there is one thing to remember rather than two.
+CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-lean.XXXXXXXX") || exit 2
+trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
+
 WHITELIST="propext Quot.sound Classical.choice"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="${1:-$HERE}"
@@ -79,9 +85,9 @@ echo "whitelist: $WHITELIST"
 echo "freshness: $CLEAN succeeded, the artefact was gone, and lake reports Built, not Replayed"
 echo
 
-printf '%s\n' "$OUT" | sed -n "s/.*'\(Citv[^']*\)' depends on axioms: \[\(.*\)\]/\1\t\2/p" > /tmp/.citv-axioms.$$
-printf '%s\n' "$OUT" | sed -n "s/.*'\(Citv[^']*\)' does not depend on any axioms.*/\1\t/p" >> /tmp/.citv-axioms.$$
-REPORTS=$(grep -c . /tmp/.citv-axioms.$$)
+printf '%s\n' "$OUT" | sed -n "s/.*'\(Citv[^']*\)' depends on axioms: \[\(.*\)\]/\1\t\2/p" > "$CITV_TMP/axioms.txt"
+printf '%s\n' "$OUT" | sed -n "s/.*'\(Citv[^']*\)' does not depend on any axioms.*/\1\t/p" >> "$CITV_TMP/axioms.txt"
+REPORTS=$(grep -c . "$CITV_TMP/axioms.txt")
 
 BAD=0
 while IFS=$'\t' read -r NAME AXIOMS; do
@@ -96,8 +102,7 @@ while IFS=$'\t' read -r NAME AXIOMS; do
   else
     echo "  ok       $NAME [${AXIOMS:-none}]"
   fi
-done < /tmp/.citv-axioms.$$
-rm -f /tmp/.citv-axioms.$$
+done < "$CITV_TMP/axioms.txt"
 
 echo
 # A proof finished with sorry reports sorryAx above, and Lean also warns about it; take either.

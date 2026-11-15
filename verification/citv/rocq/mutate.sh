@@ -8,6 +8,13 @@ set -u
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
+# PER-RUN SCRATCH, not a fixed /tmp path.  Two of these running at once -- a reviewer's copy
+# while the standing check fires -- wrote the SAME files and silently corrupted each other's
+# results, which is the worst shape a check can fail in: both runs look like they completed.
+# CITV_KEEP_TMP=1 keeps the directory for debugging; failures already tail their own logs.
+CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-mut.XXXXXXXX") || exit 2
+trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
+
 MIN_MUTANTS=12
 total=0; ok=0
 while IFS= read -r line; do
@@ -19,7 +26,7 @@ while IFS= read -r line; do
   new=$(printf '%s' "$rest" | awk -F'\\|\\|\\|' '{print $2}' | sed 's/^ *//; s/ *$//')
   total=$((total+1))
 
-  rm -rf /tmp/citv-mut && cp -r v /tmp/citv-mut
+  rm -rf "$CITV_TMP/mut" && cp -r v "$CITV_TMP/mut"
   OLD="$old" NEW="$new" python3 -I -c '
 import os,sys,pathlib
 p=pathlib.Path(sys.argv[1]); t=p.read_text()
@@ -27,13 +34,13 @@ old,new=os.environ["OLD"],os.environ["NEW"]
 n=t.count(old)
 if n!=1: sys.exit("anchor found %d times, expected 1: %r" % (n, old[:60]))
 p.write_text(t.replace(old,new))
-' "/tmp/citv-mut/$target" || { echo "  $name: ANCHOR FAILED (the generated text moved)"; continue; }
+' "$CITV_TMP/mut/$target" || { echo "  $name: ANCHOR FAILED (the generated text moved)"; continue; }
 
-  ( cd /tmp/citv-mut || exit 2
+  ( cd "$CITV_TMP/mut" || exit 2
     for f in IStd IntLit Binop Unop PulseCItv; do
-      $ROCQ_RUN rocq compile -Q . "" $f.v > /tmp/citv-mut-build.log 2>&1 || exit 3
+      $ROCQ_RUN rocq compile -Q . "" $f.v > "$CITV_TMP/mut-build.log" 2>&1 || exit 3
     done
-    $ROCQ_RUN rocq compile -Q . "" Soundness.v > /tmp/citv-mut-proof.log 2>&1 || exit 4
+    $ROCQ_RUN rocq compile -Q . "" Soundness.v > "$CITV_TMP/mut-proof.log" 2>&1 || exit 4
     exit 0 )
   rc=$?
   case $rc in

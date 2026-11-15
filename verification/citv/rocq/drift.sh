@@ -9,6 +9,13 @@ set -u
 cd "$(dirname "$0")" || exit 2
 . ./setup.sh || exit 2
 
+# PER-RUN SCRATCH, not a fixed /tmp path.  Two of these running at once -- a reviewer's copy
+# while the standing check fires -- wrote the SAME files and silently corrupted each other's
+# results, which is the worst shape a check can fail in: both runs look like they completed.
+# CITV_KEEP_TMP=1 keeps the directory for debugging; failures already tail their own logs.
+CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-drift.XXXXXXXX") || exit 2
+trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
+
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git tree"; exit 2; }
 
 # A BROKEN TRANSLATOR IS NOT DRIFT, and since setup.sh started defaulting CITV_TRANSLATOR
@@ -50,9 +57,9 @@ fi
 if [ -z "${CITV_TRANSLATOR:-}" ]; then
   echo "skip 2/3  CITV_TRANSLATOR not set"
 else
-  ./translate.sh --errors-only > /tmp/citv-errs.txt 2>&1 || true
-  if ! diff -u expected/translator-errors.txt /tmp/citv-errs.txt > /tmp/citv-errdiff.txt; then
-    bad "the translator's error set changed"; cat /tmp/citv-errdiff.txt
+  ./translate.sh --errors-only > "$CITV_TMP/errs.txt" 2>&1 || true
+  if ! diff -u expected/translator-errors.txt "$CITV_TMP/errs.txt" > "$CITV_TMP/errdiff.txt"; then
+    bad "the translator's error set changed"; cat "$CITV_TMP/errdiff.txt"
   else
     echo "ok 2/3  translator reports exactly the $(wc -l < expected/translator-errors.txt) known sites"
   fi
@@ -69,17 +76,17 @@ if [ -z "${CITV_TRANSLATOR:-}" ]; then
     echo "      CITV_ALLOW_NO_TRANSLATOR=1 to accept a weaker run deliberately."
   fi
 else
-  rm -rf /tmp/citv-regen && mkdir -p /tmp/citv-regen
-  if ./translate.sh --out /tmp/citv-regen > /tmp/citv-regen.log 2>&1; then
+  mkdir -p "$CITV_TMP/regen"
+  if ./translate.sh --out "$CITV_TMP/regen" > "$CITV_TMP/regen.log" 2>&1; then
     for f in IStd IntLit Binop Unop PulseCItv; do
-      if ! cmp -s "v/$f.v" "/tmp/citv-regen/$f.v"; then
+      if ! cmp -s "v/$f.v" ""$CITV_TMP/regen"/$f.v"; then
         bad "regenerated $f.v differs from the committed one"
-        diff -u "v/$f.v" "/tmp/citv-regen/$f.v" | head -40
+        diff -u "v/$f.v" ""$CITV_TMP/regen"/$f.v" | head -40
       fi
     done
     [ $FAIL -eq 0 ] && echo "ok 3/3  all five generated files regenerate byte-identically"
   else
-    bad "translate.sh failed"; tail -20 /tmp/citv-regen.log
+    bad "translate.sh failed"; tail -20 "$CITV_TMP/regen.log"
   fi
 fi
 
