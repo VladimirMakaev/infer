@@ -110,6 +110,11 @@ module Bound : sig
 
   val div_const_u : t -> Ints.NonZeroInt.t -> t option
 
+  val shiftrt_const_l : t -> int -> t option
+  (** Floor division by 2^n for a nonnegative count. Symbolic coefficients must divide exactly. *)
+
+  val shiftrt_const_u : t -> int -> t option
+
   val get_symbols : t -> Symb.SymbolSet.t
 
   val has_void_ptr_symb : t -> bool

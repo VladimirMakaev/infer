@@ -320,6 +320,19 @@ module ItvPure = struct
             top )
 
 
+  let shiftrt_const : int -> t -> t =
+   fun n (l, u) ->
+    let default_l, default_u =
+      if Bound.(le zero l) then
+        (Bound.zero, Bound.overapprox_max Bound.zero Bound.(plus_u ~weak:false u mone))
+      else if Bound.(le u zero) then (l, Bound.zero)
+      else if Bound.(le l zero && le zero u) then (l, u)
+      else (Bound.minf, Bound.pinf)
+    in
+    ( Option.value ~default:default_l (Bound.shiftrt_const_l l n)
+    , Option.value ~default:default_u (Bound.shiftrt_const_u u n) )
+
+
   (* x >> [-1,-1] does nothing. *)
   let shiftrt : t -> t -> t =
    fun x y ->
@@ -328,10 +341,8 @@ module ItvPure = struct
       match get_const y with
       | Some n when Z.(leq n zero) ->
           x
-      | Some n when Z.(geq n (of_int 64)) ->
-          zero
       | Some n -> (
-        match Z.to_int n with n -> div_const x Z.(one lsl n) | exception Z.Overflow -> top )
+        match Z.to_int n with n -> shiftrt_const n x | exception Z.Overflow -> top )
       | None ->
           top
 

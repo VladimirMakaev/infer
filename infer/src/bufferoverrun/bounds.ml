@@ -125,6 +125,19 @@ module SymLinear = struct
    fun x n -> if NonZeroInt.is_one n then x else M.map (fun c -> NonZeroInt.exact_div_exn c n) x
 
 
+  let exact_shiftrt_exn : t -> int -> t =
+   fun x n ->
+    if Int.equal n 0 then x
+    else
+      M.map
+        (fun (coeff : NonZeroInt.t) ->
+          let value = (coeff :> Z.t) in
+          if Int.(Z.trailing_zeros value < n) then raise NonZeroInt.DivisionNotExact ;
+          (* An exact division of a nonzero coefficient cannot become zero. *)
+          Option.value_exn (NonZeroInt.of_big_int (Z.shift_right value n)) )
+        x
+
+
   (* Returns a symbol when the map contains only one symbol s with a
      given coefficient. *)
   let one_symbol_of_coeff : NonZeroInt.t -> t -> Symb.Symbol.t option =
@@ -1059,6 +1072,34 @@ module Bound = struct
   let div_const_l = div_const Symb.BoundEnd.LowerBound
 
   let div_const_u = div_const Symb.BoundEnd.UpperBound
+
+  (* Arithmetic shifting floors division by 2^n, including for negative bounds. Using the shift
+     directly also avoids allocating a power of two for a very large count. *)
+  let shiftrt_const : Symb.BoundEnd.t -> t -> int -> t option =
+   fun bound_end x n ->
+    if Int.(n < 0) then None
+    else if Int.equal n 0 then Some x
+    else
+      match x with
+      | MInf | PInf ->
+          Some x
+      | Linear (c, terms) when SymLinear.is_zero terms ->
+          Some (of_big_int (Z.shift_right c n))
+      | Linear (c, terms) when Z.equal c Z.zero || Int.(Z.trailing_zeros c >= n) -> (
+        match SymLinear.exact_shiftrt_exn terms n with
+        | terms' ->
+            Some (Linear (Z.shift_right c n, terms'))
+        | exception NonZeroInt.DivisionNotExact ->
+            None )
+      | MinMax _ ->
+          Option.map (big_int_of_minmax bound_end x) ~f:(fun c -> of_big_int (Z.shift_right c n))
+      | _ ->
+          None
+
+
+  let shiftrt_const_l = shiftrt_const Symb.BoundEnd.LowerBound
+
+  let shiftrt_const_u = shiftrt_const Symb.BoundEnd.UpperBound
 
   let rec get_symbols : t -> Symb.SymbolSet.t = function
     | MInf | PInf ->

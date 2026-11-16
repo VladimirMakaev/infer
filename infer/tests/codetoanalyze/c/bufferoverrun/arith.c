@@ -643,3 +643,129 @@ uint64_t wrap_read_through_pointer_to_pointer_Bad(uint64_t n) {
   }
   return sink_u64(**pp);
 }
+
+
+/* A 128-bit operand makes a shift by 64 valid. Signed shifts round down. */
+void shift_negative_by_64_bad() {
+  __int128 value = -8;
+  int count = 64;
+  int a[1];
+  a[value >> count] = 1;
+}
+
+void shift_negative_by_64_ok() {
+  __int128 value = -8;
+  int count = 64;
+  int a[1];
+  a[(value >> count) + 1] = 1;
+}
+
+/* Extract the high half of a wide product before narrowing to 64 bits. */
+void shift_wide_by_64_bad() {
+  unsigned __int128 product = (unsigned __int128)(UINT64_C(1) << 50) * (UINT64_C(1) << 50);
+  uint64_t high = (uint64_t)(product >> 64);
+  int a[1];
+  a[high] = 1;
+}
+
+void shift_wide_by_64_ok() {
+  unsigned __int128 product = (unsigned __int128)1 << 63;
+  uint64_t high = (uint64_t)(product >> 64);
+  int a[1];
+  a[high] = 1;
+}
+
+void shift_minus_one_bad() {
+  int64_t value = -1;
+  int a[1];
+  a[value >> 1] = 1;
+}
+
+void shift_minus_one_ok() {
+  int64_t value = -1;
+  int a[1];
+  a[(value >> 1) + 1] = 1;
+}
+
+void shift_minus_three_bad() {
+  int64_t value = -3;
+  int a[1];
+  a[value >> 1] = 1;
+}
+
+void shift_minus_three_ok() {
+  int64_t value = -3;
+  int a[1];
+  a[(value >> 1) + 2] = 1;
+}
+
+void shift_exact_negative_bad() {
+  int64_t value = -8;
+  int a[1];
+  a[value >> 1] = 1;
+}
+
+void shift_exact_negative_ok() {
+  int64_t value = -8;
+  int a[1];
+  a[(value >> 1) + 4] = 1;
+}
+
+void shift_nonnegative_bad() {
+  int64_t value = 8;
+  int a[4];
+  a[value >> 1] = 1;
+}
+
+void shift_nonnegative_ok() {
+  int64_t value = 8;
+  int a[5];
+  a[value >> 1] = 1;
+}
+
+void shift_nonnegative_by_64_ok() {
+  unsigned __int128 value = 8;
+  int a[1];
+  a[value >> 64] = 1;
+}
+
+void shift_zero_count_bad() {
+  int64_t value = -1;
+  int a[1];
+  a[value >> 0] = 1;
+}
+
+void shift_zero_count_ok() {
+  int64_t value = -1;
+  int a[1];
+  a[(value >> 0) + 1] = 1;
+}
+
+void shift_negative_range_bad(int value) {
+  if (value < -3 || value > -1) {
+    return;
+  }
+  int a[1];
+  a[value >> 1] = 1;
+}
+
+void shift_negative_range_ok(int value) {
+  if (value < -3 || value > -1) {
+    return;
+  }
+  int a[2];
+  a[(value >> 1) + 2] = 1;
+}
+
+/* Exact symbolic shift: (n * 2) >> 1 keeps the coefficient, so the offset is
+   n and not the sign-based fallback. The symbol must stay unpruned, because a
+   guard would turn the bound into a MinMax and take a different path. */
+void shift_symbolic_exact_bad(int n) {
+  int a[n];
+  a[(n * 2) >> 1] = 0;
+}
+
+void shift_symbolic_exact_ok(int n) {
+  int a[n + 1];
+  a[(n * 2) >> 1] = 0;
+}
