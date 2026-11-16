@@ -1830,6 +1830,23 @@ void ASTExporter<ATDWriter>::VisitFunctionDecl(const FunctionDecl *D) {
     DeclWithBody = nullptr;
   }
   bool HasDeclarationBody = D->doesThisDeclarationHaveABody();
+  const auto *Ctor = dyn_cast_or_null<CXXConstructorDecl>(DeclWithBody);
+  if (Ctor && Ctor->isDefaulted() && Ctor->isDefaultConstructor() &&
+      Context.getDiagnostics().hasErrorOccurred() &&
+      Ctor->init_begin() == Ctor->init_end()) {
+    const auto *Body = dyn_cast_or_null<CompoundStmt>(Ctor->getBody());
+    // After an error, Sema can give a defaulted constructor an empty recovery
+    // body without synthesizing its member initializers. A default member
+    // initializer proves that this is not a complete, legitimate no-op body.
+    bool MissingInitializer = false;
+    for (const auto *Field : Ctor->getParent()->fields()) {
+      MissingInitializer |= Field->hasInClassInitializer();
+    }
+    if (Body && Body->body_empty() && MissingInitializer) {
+      DeclWithBody = nullptr;
+      HasDeclarationBody = false;
+    }
+  }
   if (HasDeclarationBody && shouldSkipBodyOf(D)) {
     HasDeclarationBody = false;
   }
