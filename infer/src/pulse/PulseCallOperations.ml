@@ -602,6 +602,23 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     astate =
   let open ExecutionDomain in
   let caller_astate = astate in
+  (* Keep the argument paths in the state before summary application, which can rename equal
+     values while materializing other arguments. Only diagnostics need these expressions. *)
+  let source_actuals =
+    lazy
+      (let actuals = actuals_without_closure call_flags ~actuals in
+       let exps = actuals_without_closure call_flags ~actuals:tb_arg_exps in
+       match List.zip actuals exps with
+       | Unequal_lengths ->
+           []
+       | Ok actual_exps -> (
+         match List.zip formals (List.take actual_exps (List.length formals)) with
+         | Unequal_lengths ->
+             []
+         | Ok pairs ->
+             List.map pairs ~f:(fun ((formal, _), ((addr_hist, _), exp)) ->
+                 (formal, Decompiler.find_call_argument exp addr_hist caller_astate) ) ) )
+  in
   let copy_to_caller_return_variable astate return_val_opt =
     (* Copies the return value of the callee into the return register of the caller.
         We use this function when the callee throws an exception.
@@ -663,7 +680,7 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     in
     let sat_unsat, contradiction =
       PulseInterproc.apply_summary analysis_data path ~callee_proc_name call_loc ~callee_summary
-        ~captured_formals ~captured_actuals ~formals
+        ~source_actuals ~captured_formals ~captured_actuals ~formals
         ~actuals:(trim_actuals_if_var_arg (Some callee_proc_name) ~actuals ~formals)
         astate
     in

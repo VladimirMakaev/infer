@@ -31,6 +31,11 @@ val find_from_origin : ValueOrigin.t -> AbductiveDomain.t -> DecompilerExpr.t
     null pointer and every zero of a path among them, carries whichever name was recorded last; the
     origin of a load is not shared. Falls back to {!find}. *)
 
+val find_call_argument :
+  Exp.t -> AbstractValue.t * ValueHistory.t -> AbductiveDomain.t -> DecompilerExpr.t
+(** Name an already-evaluated argument from its expression and load origin before summary
+    materialization can rename equal values. Literal arguments do not borrow a value's name. *)
+
 val add_iterator_source :
      AbstractValue.t
   -> CallEvent.t

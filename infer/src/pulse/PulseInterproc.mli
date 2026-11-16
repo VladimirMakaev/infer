@@ -60,6 +60,7 @@ val apply_summary :
   -> callee_proc_name:Procname.t
   -> Location.t
   -> callee_summary:AbductiveDomain.Summary.t
+  -> ?source_actuals:(Pvar.t * DecompilerExpr.t) list Lazy.t
   -> captured_formals:(Pvar.t * Typ.t) list
   -> captured_actuals:((AbstractValue.t * ValueHistory.t) * Typ.t) list
   -> formals:(Pvar.t * Typ.t) list

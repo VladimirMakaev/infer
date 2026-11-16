@@ -1419,20 +1419,48 @@ let deref_source_in_callee_pre (pre : BaseDomain.t) addr_pre =
 
 (** name the invalid address after the caller cell the callee's check is on, as a direct dereference
     does through its [ValueOrigin]; [find_from_origin] falls back to [find] itself *)
-let decompile_invalid_address call_state astate ~addr_pre ~addr_caller ~hist_caller =
-  match
+let decompile_invalid_address ~source_actuals call_state astate ~addr_pre ~addr_caller ~hist_caller
+    =
+  let source_actual =
     let open IOption.Let_syntax in
     let* src_callee = deref_source_in_callee_pre call_state.callee_pre addr_pre in
-    let+ src_caller = to_caller_value call_state src_callee in
-    ValueOrigin.InMemory {src= src_caller; access= Dereference; dest= (addr_caller, hist_caller)}
-  with
-  | Some origin ->
-      Decompiler.find_from_origin origin astate
-  | None ->
-      Decompiler.find addr_caller astate
+    let* formal =
+      UnsafeStack.fold
+        (fun var origin found ->
+          match var with
+          | Var.ProgramVar pvar when AbstractValue.equal (ValueOrigin.value origin) src_callee ->
+              Some pvar
+          | _ ->
+              found )
+        call_state.callee_pre.stack None
+    in
+    (* This is the incoming value of a formal in PRE, not its possibly reassigned POST value.
+       A later assignment to the formal must not rename an earlier required access. *)
+    match List.Assoc.find (Lazy.force source_actuals) ~equal:Pvar.equal formal with
+    | Some (DecompilerExpr.SourceExpr (expr, _)) ->
+        Some (DecompilerExpr.SourceExpr (expr, Some addr_caller))
+    | Some (DecompilerExpr.Unknown _) ->
+        Some (DecompilerExpr.Unknown (Some addr_caller))
+    | None ->
+        None
+  in
+  match source_actual with
+  | Some expr ->
+      expr
+  | None -> (
+    match
+      let open IOption.Let_syntax in
+      let* src_callee = deref_source_in_callee_pre call_state.callee_pre addr_pre in
+      let+ src_caller = to_caller_value call_state src_callee in
+      ValueOrigin.InMemory {src= src_caller; access= Dereference; dest= (addr_caller, hist_caller)}
+    with
+    | Some origin ->
+        Decompiler.find_from_origin origin astate
+    | None ->
+        Decompiler.find addr_caller astate )
 
 
-let check_all_valid path call_state =
+let check_all_valid path ~source_actuals call_state =
   (* collect all the checks to perform then do each check in timestamp order to make sure we report
      the first issue if any *)
   let pre = call_state.callee_pre in
@@ -1519,8 +1547,8 @@ let check_all_valid path call_state =
                     AccessToInvalidAddress
                       { calling_context= []
                       ; invalid_address=
-                          decompile_invalid_address call_state astate ~addr_pre ~addr_caller
-                            ~hist_caller
+                          decompile_invalid_address ~source_actuals call_state astate ~addr_pre
+                            ~addr_caller ~hist_caller
                       ; invalidation
                       ; invalidation_trace
                       ; access_trace
@@ -1598,7 +1626,7 @@ let check_all_taint_valid path astate {subst; call_location; callee_proc_name; c
 
    - if aliasing is introduced at any time then give up *)
 let apply_summary analysis_data path ~callee_proc_name call_location ~callee_summary
-    ~captured_formals ~captured_actuals ~formals ~actuals astate =
+    ?(source_actuals = lazy []) ~captured_formals ~captured_actuals ~formals ~actuals astate =
   let aux () =
     let empty_call_state =
       { astate
@@ -1651,7 +1679,9 @@ let apply_summary analysis_data path ~callee_proc_name call_location ~callee_sum
         let res =
           let* call_state = result in
           L.d_printfln "Pre applied successfully, call_state after = %a" pp_call_state call_state ;
-          let* astate = check_all_valid path call_state |> AccessResult.of_result path in
+          let* astate =
+            check_all_valid path ~source_actuals call_state |> AccessResult.of_result path
+          in
           (* if at that stage [call_state.first_error] is set but we haven't error'd then there is a
              problem; give up because something is wrong, except in over-approximation mode where we
              don't want to lose our precious single state because of this *)
