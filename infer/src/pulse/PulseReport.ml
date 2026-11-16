@@ -468,7 +468,7 @@ let do_report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed 
       else original_issue_type
     in
     let issue_type = get_issue_type tenv ~latent diagnostic proc_desc in
-    let message, suggestion = get_message_and_suggestion diagnostic in
+    let message, suggestion = get_message_and_suggestion ~tenv diagnostic in
     let message =
       Option.fold reachable_from ~init:message ~f:(fun message reachable_from ->
           F.sprintf "(reachable from %s) %s" reachable_from message )

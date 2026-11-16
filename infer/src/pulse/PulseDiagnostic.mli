@@ -164,7 +164,9 @@ val unnecessary_copy_remedy_is_a_move :
 (** whether the suggestion for this copy offers a [std::move] rather than a reference; the same case
     analysis that picks the suggestion text *)
 
-val get_message_and_suggestion : t -> string * string option
+val get_message_and_suggestion : ?tenv:Tenv.t -> t -> string * string option
+(** With a type environment, null messages omit known non-pointer trailing field names and their
+    misattributed origin phrase. Other paths, and debug rendering without [tenv], are unchanged. *)
 
 val get_location : t -> Location.t
 
