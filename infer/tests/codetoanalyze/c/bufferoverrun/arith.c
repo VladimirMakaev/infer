@@ -769,3 +769,134 @@ void shift_symbolic_exact_ok(int n) {
   int a[n + 1];
   a[(n * 2) >> 1] = 0;
 }
+
+/* Zero must remain possible when a nonpositive AND operand can be zero. */
+void band_zero_equality_bad(int choice) {
+  int64_t x = 0;
+  int64_t y = choice ? -3 : -2;
+  int64_t value = x & y;
+  if (value == 0) {
+    int a[1];
+    a[1] = 1;
+  }
+}
+
+void band_nonconstant_zero_bad(int left, int right) {
+  int64_t x = left ? -1 : 0;
+  int64_t y = right ? -3 : -2;
+  int64_t value = x & y;
+  if (value == 0) {
+    int a[1];
+    a[1] = 1;
+  }
+}
+
+void band_zero_offset_bad(int choice) {
+  int64_t x = 0;
+  int64_t y = choice ? -3 : -2;
+  int64_t value = x & y;
+  if (value >= -8) {
+    int a[7];
+    a[value + 8] = 1;
+  }
+}
+
+void band_mask_offset_bad(int cond, int choice) {
+  int64_t mask = -(int64_t)(cond != 0);
+  int64_t value = mask & (choice ? -3 : -2);
+  if (value >= -8) {
+    int a[7];
+    a[value + 8] = 1;
+  }
+}
+
+/* Firing controls: the access, the equality guard, strictly negative cases. */
+void band_literal_offset_control_bad() {
+  int64_t value = 0;
+  if (value >= -8) {
+    int a[7];
+    a[value + 8] = 1;
+  }
+}
+
+void band_nonnegative_control_bad(int choice) {
+  int64_t x = 0;
+  int64_t y = choice ? 3 : 2;
+  int64_t value = x & y;
+  if (value == 0) {
+    int a[1];
+    a[1] = 1;
+  }
+}
+
+/* The ternary arms must differ: band_sem constant-folds a pair of singletons
+   before reaching the strictly negative branch these controls pin. */
+void band_negative_control_bad(int left, int right) {
+  int64_t x = left ? -3 : -4;
+  int64_t y = right ? -2 : -6;
+  int64_t value = x & y;
+  if (value >= -8) {
+    int a[1];
+    a[value + 8] = 1;
+  }
+}
+
+void band_mask_literal_control_bad(int left, int right) {
+  int64_t x = left ? -3 : -2;
+  int64_t y = right ? -7 : -4;
+  int64_t value = x & y;
+  if (value >= -8) {
+    int a[1];
+    a[value + 8] = 1;
+  }
+}
+
+void band_zero_equality_ok(int choice) {
+  int64_t x = 0;
+  int64_t y = choice ? -3 : -2;
+  int64_t value = x & y;
+  if (value == 0) {
+    int a[1];
+    a[0] = 1;
+  }
+}
+
+void band_nonconstant_offset_ok(int left, int right) {
+  int64_t x = left ? -1 : 0;
+  int64_t y = right ? -3 : -2;
+  int64_t value = x & y;
+  if (value >= -8) {
+    int a[9];
+    a[value + 8] = 1;
+  }
+}
+
+void band_mask_offset_ok(int cond, int choice) {
+  int64_t mask = -(int64_t)(cond != 0);
+  int64_t value = mask & (choice ? -3 : -2);
+  if (value >= -8) {
+    int a[9];
+    a[value + 8] = 1;
+  }
+}
+
+void band_negative_equality_ok(int left, int right) {
+  int64_t x = left ? -3 : -4;
+  int64_t y = right ? -2 : -6;
+  int64_t value = x & y;
+  if (value == -4) {
+    int a[1];
+    a[0] = 1;
+  }
+}
+
+/* The minimum upper bound remains useful when both intervals exclude zero. */
+void band_strict_negative_range_ok(int left, int right) {
+  int64_t x = left ? -3 : -2;
+  int64_t y = right ? -7 : -4;
+  int64_t value = x & y;
+  if (value >= -8) {
+    int a[5];
+    a[value + 8] = 1;
+  }
+}
