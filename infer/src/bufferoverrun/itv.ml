@@ -354,7 +354,14 @@ module ItvPure = struct
         if Z.(equal x' y') then x else of_big_int Z.(x' land y')
     | _, _ ->
         if is_ge_zero x && is_ge_zero y then (Bound.zero, Bound.overapprox_min (ub x) (ub y))
-        else if is_le_zero x && is_le_zero y then (Bound.minf, Bound.overapprox_min (ub x) (ub y))
+        else if is_le_zero x && is_le_zero y then
+          let upper =
+            (* A zero operand can produce zero even when the other operand is negative. *)
+            if Bound.lt (ub x) Bound.zero && Bound.lt (ub y) Bound.zero then
+              Bound.overapprox_min (ub x) (ub y)
+            else Bound.zero
+          in
+          (Bound.minf, upper)
         else if is_ge_zero x then (Bound.zero, ub x)
         else if is_ge_zero y then (Bound.zero, ub y)
         else top
