@@ -651,7 +651,33 @@ let unnecessary_copy_remedy_is_a_move ~from ~copied_into ~in_conditional_arm =
   match copy_remedy ~from ~copied_into ~in_conditional_arm with Move -> true | Reference -> false
 
 
-let get_message_and_suggestion diagnostic =
+let is_nonpointer_field_name tenv = function
+  | DecompilerExpr.SourceExpr ((_, accesses), _) ->
+      (* Source accesses are reversed; the final load may follow the field access. Do not inspect
+         fields behind an array subscript or a method call, whose result has a different type. *)
+      let field =
+        match accesses with
+        | DecompilerExpr.FieldAccess field :: _
+        | DecompilerExpr.Dereference :: DecompilerExpr.FieldAccess field :: _ ->
+            Some field
+        | _ ->
+            None
+      in
+      let open IOption.Let_syntax in
+      let nonpointer =
+        let* tenv = tenv in
+        let* field = field in
+        let+ {Struct.typ; _} =
+          Tenv.resolve_field_info tenv (Fieldname.get_class_name field) field
+        in
+        not (Typ.is_pointer typ)
+      in
+      Option.value nonpointer ~default:false
+  | DecompilerExpr.Unknown _ ->
+      false
+
+
+let get_message_and_suggestion ?tenv diagnostic =
   match diagnostic with
   | AssertionError {location} ->
       F.asprintf "assertion error at %a" Location.pp location |> no_suggestion
@@ -673,7 +699,8 @@ let get_message_and_suggestion diagnostic =
       in
       match invalidation with
       | ConstantDereference i when IntLit.equal i IntLit.zero ->
-          (let pp_access_trace fmt (trace : Trace.t) =
+          (let suppress_name_and_origin = is_nonpointer_field_name tenv invalid_address in
+           let pp_access_trace fmt (trace : Trace.t) =
              match immediate_or_first_call calling_context trace with
              | `Immediate ->
                  ()
@@ -693,7 +720,8 @@ let get_message_and_suggestion diagnostic =
            in
            let pp_must_be_valid_reason fmt expr =
              let pp_prefix fmt null_nil_block =
-               if DecompilerExpr.is_unknown expr then
+               if suppress_name_and_origin then F.pp_print_string fmt null_nil_block
+               else if DecompilerExpr.is_unknown expr then
                  F.fprintf fmt "%s %a" null_nil_block
                    (pp_invalidation_trace invalidation_line)
                    invalidation_trace
