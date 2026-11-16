@@ -31,6 +31,16 @@ end
 (** invariant: the representation is always "canonical": coefficients cannot be [Q.zero] *)
 type t = Q.t * Q.t VarMap.t [@@deriving compare, equal]
 
+exception NotRepresentable
+
+let check_rational q = if Q.is_rational q then q else raise_notrace NotRepresentable
+
+let assert_valid (c, vs) =
+  if Config.pulse_sanity_checks then (
+    assert (Q.is_rational c) ;
+    assert (VarMap.for_all (fun _ q -> Q.is_rational q && not (Q.is_zero q)) vs) )
+
+
 let yojson_of_t (c, vs) = `List [VarMap.yojson_of_t Q.yojson_of_t vs; Q.yojson_of_t c]
 
 let fold (_, vs) ~init ~f = IContainer.fold_of_pervasives_map_fold VarMap.fold vs ~init ~f
@@ -86,9 +96,15 @@ let zero = (Q.zero, VarMap.empty)
 let is_zero (c, vs) = Q.is_zero c && VarMap.is_empty vs
 
 let mult q ((c, vs) as l) =
+  let q = check_rational q in
   if Q.is_zero q then (* needed for correctness: coeffs cannot be zero *) zero
   else if Q.is_one q then (* purely an optimisation *) l
-  else (Q.mul q c, VarMap.map (fun c -> Q.mul q c) vs)
+  else
+    let result =
+      (Q.mul q c |> check_rational, VarMap.map (fun c -> Q.mul q c |> check_rational) vs)
+    in
+    assert_valid result ;
+    result
 
 
 let pivot (x, coeff) (c, vs) =
@@ -118,7 +134,7 @@ let solve_eq l1 l2 = solve_eq_zero (subtract l1 l2)
 
 let of_var v = (Q.zero, VarMap.singleton v Q.one)
 
-let of_q q = (q, VarMap.empty)
+let of_q q = (check_rational q, VarMap.empty)
 
 let get_as_const (c, vs) = if VarMap.is_empty vs then Some c else None
 

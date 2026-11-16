@@ -50,6 +50,7 @@ module Term : sig
     | StringConcat of t * t
     | IsInstanceOf of {var: Var.t; typ: Typ.t; nullable: bool}
     | IsInt of t * Typ.ikind
+    | Opaque of t
   [@@deriving compare, equal, yojson_of]
 
   module Set : Stdlib.Set.S

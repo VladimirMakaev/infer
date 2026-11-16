@@ -114,19 +114,18 @@ void function_empty_range_interproc_ok() {
   find_first_non_space(x);
 }
 
-// arithmetic on integers does not wrap around but ignores too-large
-// values. However, somehow the FP is gone for other reasons.
-void int_over_cap_ok() {
+// Integer arithmetic is unbounded in the solver. Abstaining at a representation
+// limit preserves the path, exposing this existing unsigned-wraparound FP.
+void FP_int_over_cap_ok() {
   unsigned long one = 1;
   // 2^(63+63+3) + 2*2^(63+3) + 1*8 = 2^129 + 2^67 + 8 = 8 mod 2^64
   // this is convoluted to escape various simplifications from Z that would
   // avoid the false positive
   unsigned long x = ((one << 62) * 2 + 1) * ((one << 62) * 2 + 1) * 8;
   unsigned long y = ((one << 62) * 2 + 1) * ((one << 62) * 2 + 1) * 8;
-  // - x == y+1 is true in "Formulas" because x = y = Q.undef, but not true in
-  //   inferbo intervals because they keep arbitrary precision integers
-  // - x != 8 is not true in Formulas but true in inferbo
-  // - In C both of these would be false, so overall we get a false positive
+  // In C both conditions are false. The solver does not wrap x to 8, so the
+  // second condition can produce a false positive. A representation limit must
+  // not hide it by declaring the entire path infeasible.
   if (x == y + 1 || x != 8) {
     int* p = nullptr;
     *p = 42;

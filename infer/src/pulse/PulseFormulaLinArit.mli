@@ -13,6 +13,10 @@ module Var = PulseFormulaVar
 (** linear combination of variables, eg [2·x + 3/4·y + 12] *)
 type t [@@deriving compare, yojson_of, equal]
 
+exception NotRepresentable
+
+val assert_valid : t -> unit
+
 (* ['term_t] is meant to be [Term.t] but we cannot mention [Term] yet as it depends on [LinArith];
      we resolve the circular dependency further down this file *)
 type 'term_t subst_target =

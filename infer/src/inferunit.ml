@@ -42,6 +42,7 @@ let () =
         ; JavaClassNameTests.tests
         ; LivenessTests.tests
         ; ProcCfgTests.tests
+        ; PulseFormulaOpaqueTests.tests
         ; RestartSchedulerTests.tests
         ; SchedulerTests.tests
         ; SeverityTests.tests
