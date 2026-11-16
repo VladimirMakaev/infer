@@ -86,6 +86,7 @@ type t =
   | StringConcat of t * t
   | IsInstanceOf of {var: Var.t; typ: Typ.t; nullable: bool}
   | IsInt of t * (Typ.ikind[@ignore])
+  | Opaque of t
 [@@deriving compare, equal, yojson_of]
 
 let equal_syntax = equal
@@ -105,6 +106,8 @@ let needs_paren = function
   | Procname _ ->
       false
   | FunctionApplication _ ->
+      false
+  | Opaque _ ->
       false
   | Minus _
   | BitNot _
@@ -198,11 +201,13 @@ and pp_no_paren pp_var fmt = function
         Format.pp_print_bool nullable
   | IsInt (t, ikind) ->
       F.fprintf fmt "is_int(%a, %s)" (pp_no_paren pp_var) t (Typ.ikind_to_string ikind)
+  | Opaque t ->
+      F.fprintf fmt "opaque(%a)" (pp_no_paren pp_var) t
 
 
 let pp = pp_paren ~needs_paren
 
-let of_q q = Const q
+let of_q q = if Q.is_rational q then Const q else Opaque (Const q)
 
 let of_intlit i = IntLit.to_big_int i |> Q.of_bigint |> of_q
 
@@ -295,7 +300,9 @@ let is_zero = function Const c -> Q.is_zero c | _ -> false
 
 let is_non_zero_const = function Const c -> Q.is_not_zero c | _ -> false
 
-let has_known_non_boolean_type = function
+let rec has_known_non_boolean_type = function
+  | Opaque source ->
+      has_known_non_boolean_type source
   | LessThan _
   | LessEqual _
   | Equal _
@@ -334,7 +341,7 @@ let has_known_non_boolean_type = function
 let fold_map_direct_subterms t ~init ~f =
   match t with
   (* no sub-terms *)
-  | Var _ | Const _ | String _ | Procname _ | Linear _ | IsInstanceOf _ ->
+  | Var _ | Const _ | String _ | Procname _ | Linear _ | IsInstanceOf _ | Opaque _ ->
       (init, t)
   (* list of sub-terms *)
   | FunctionApplication {f= t_f; actuals} ->
@@ -444,8 +451,17 @@ let satunsat_map_direct_subterms t ~f =
   with FoundUnsat unsat_info -> Unsat unsat_info
 
 
+let symbolic_linear l =
+  LinArith.fold l
+    ~init:(Const (LinArith.get_constant_part l))
+    ~f:(fun acc (v, coefficient) -> Add (acc, Mult (Const coefficient, Var v)))
+
+
 let rec fold_subst_variables ~init ~f_subst ?(f_post = fun ~prev:_ acc t -> (acc, t)) t =
   match t with
+  | Opaque source ->
+      let acc, source' = fold_opaque_variables ~init ~f_subst source in
+      f_post ~prev:t acc (if phys_equal source source' then t else Opaque source')
   | Var v ->
       let acc, op = f_subst init v in
       let t' = match op with VarSubst v' when Var.equal v v' -> t | _ -> of_subst_target op in
@@ -469,10 +485,30 @@ let rec fold_subst_variables ~init ~f_subst ?(f_post = fun ~prev:_ acc t -> (acc
     | Some v ->
         (* avoid code duplication for the [Var v] case *)
         fold_subst_variables ~init ~f_subst ~f_post (Var v)
-    | None ->
-        let acc, l' = LinArith.fold_subst_variables l ~init ~f:f_subst in
-        let t' = if phys_equal l l' then t else Linear l' in
-        f_post ~prev:t acc t' )
+    | None -> (
+        let substitutions = ref [] in
+        let accumulator = ref init in
+        let collect acc v =
+          let acc, target = f_subst acc v in
+          accumulator := acc ;
+          substitutions := (v, target) :: !substitutions ;
+          (acc, target)
+        in
+        try
+          let acc, l' = LinArith.fold_subst_variables l ~init ~f:collect in
+          let t' = if phys_equal l l' then t else Linear l' in
+          f_post ~prev:t acc t'
+        with LinArith.NotRepresentable ->
+          let substitutions = Var.Map.of_seq (ListLabels.to_seq !substitutions) in
+          let acc, source =
+            fold_opaque_variables (symbolic_linear l) ~init:!accumulator ~f_subst:(fun acc v ->
+                match Var.Map.find_opt v substitutions with
+                | Some target ->
+                    (acc, target)
+                | None ->
+                    f_subst acc v )
+          in
+          f_post ~prev:t acc (Opaque source) ) )
   | Const _
   | String _
   | Procname _
@@ -505,6 +541,33 @@ let rec fold_subst_variables ~init ~f_subst ?(f_post = fun ~prev:_ acc t -> (acc
       f_post ~prev:t acc t'
 
 
+and fold_opaque_variables ~init ~f_subst t =
+  match t with
+  | Var v -> (
+      let acc, target = f_subst init v in
+      let t' =
+        match target with VarSubst v' when Var.equal v v' -> t | _ -> of_subst_target target
+      in
+      (acc, match t' with Linear l -> symbolic_linear l | _ -> t') )
+  | Linear l ->
+      let changed = ref false in
+      let acc, source =
+        fold_opaque_variables (symbolic_linear l) ~init ~f_subst:(fun acc v ->
+            let acc, target = f_subst acc v in
+            (match target with VarSubst v' when Var.equal v v' -> () | _ -> changed := true) ;
+            (acc, target) )
+      in
+      (acc, if !changed then source else t)
+  | Opaque source ->
+      let acc, source' = fold_opaque_variables ~init ~f_subst source in
+      (acc, if phys_equal source source' then t else Opaque source')
+  | IsInstanceOf _ ->
+      fold_subst_variables ~init ~f_subst t
+  | _ ->
+      fold_map_direct_subterms t ~init ~f:(fun acc sub ->
+          fold_opaque_variables ~init:acc ~f_subst sub )
+
+
 let fold_variables ~init ~f ?f_post t =
   fold_subst_variables t ~init ~f_subst:(fun acc v -> (f acc v, VarSubst v)) ?f_post |> fst
 
@@ -521,8 +584,24 @@ let has_var_notin vars t =
 
 (** reduce to a constant when the direct sub-terms are constants *)
 let eval_const_shallow_ t0 =
-  let map_const t f = match t with Const c -> f c | _ -> t0 in
-  let map_const2 t1 t2 f = match (t1, t2) with Const c1, Const c2 -> f c1 c2 | _ -> t0 in
+  let check_constant q = if not (Q.is_rational q) then raise_notrace LinArith.NotRepresentable in
+  let map_const t f =
+    match t with
+    | Const c ->
+        check_constant c ;
+        f c
+    | _ ->
+        t0
+  in
+  let map_const2 t1 t2 f =
+    match (t1, t2) with
+    | Const c1, Const c2 ->
+        check_constant c1 ;
+        check_constant c2 ;
+        f c1 c2
+    | _ ->
+        t0
+  in
   let q_map t q_f = map_const t (fun c -> Const (q_f c)) in
   let q_map2 t1 t2 q_f = map_const2 t1 t2 (fun c1 c2 -> Const (q_f c1 c2)) in
   let q_predicate_map t q_f = map_const t (fun c -> q_f c |> of_bool) in
@@ -539,10 +618,10 @@ let eval_const_shallow_ t0 =
     conv2 Q.to_bigint Q.to_bigint (Option.map ~f:Q.of_bigint) q1 q2 f |> Option.join
   in
   let exception Undefined in
-  let or_raise = function Some q -> q | None -> raise_notrace Undefined in
+  let or_raise = function Some q -> q | None -> raise_notrace LinArith.NotRepresentable in
   let eval_const_shallow_or_raise t0 =
     match t0 with
-    | Const _ | Var _ | IsInstanceOf _ | String _ | Procname _ | FunctionApplication _ ->
+    | Const _ | Var _ | IsInstanceOf _ | String _ | Procname _ | FunctionApplication _ | Opaque _ ->
         t0
     | Linear l ->
         LinArith.get_as_const l |> Option.value_map ~default:t0 ~f:(fun c -> Const c)
@@ -621,21 +700,24 @@ let eval_const_shallow_ t0 =
   in
   match eval_const_shallow_or_raise t0 with
   | Const q as t ->
-      if Q.is_rational q then Some t else None
+      if Q.is_rational q then Some t else Some (Opaque t0)
   | t ->
       Some t
   | exception Undefined ->
       None
+  | exception LinArith.NotRepresentable ->
+      Some (Opaque t0)
 
 
 (* defend in depth against exceptions and debug *)
 let eval_const_shallow t =
-  let t' = Z.protect eval_const_shallow_ t |> Option.join in
-  match t' with
+  match Z.protect eval_const_shallow_ t with
   | None ->
+      Sat (Opaque t)
+  | Some None ->
       let reason () = F.asprintf "Undefined result when evaluating %a" (pp_no_paren Var.pp) t in
       Unsat {reason; source= __POS__}
-  | Some t' ->
+  | Some (Some t') ->
       if not (phys_equal t t') then
         Debug.p "eval_const_shallow: %a -> %a@\n" (pp_no_paren Var.pp) t (pp_no_paren Var.pp) t' ;
       Sat t'
@@ -647,7 +729,7 @@ let simplify_shallow t =
   let exception UnsatExn of unsat_info in
   let rec simplify_shallow_or_raise t =
     match t with
-    | Var _ | Const _ ->
+    | Var _ | Const _ | Opaque _ ->
         t
     | Minus (Minus t) ->
         (* [--t = t] *)
@@ -694,6 +776,9 @@ let simplify_shallow t =
     | (DivI (t1, t2) | DivF (t1, t2)) when equal_syntax t1 t2 ->
         (* [t / t = 1] *)
         one
+    | Mod (_, Const c) when Q.is_zero c ->
+        (* [t % 0 = undefined], including a nonconstant numerator *)
+        raise_notrace Undefined
     | Mod (Const c, _) when Q.is_zero c ->
         (* [0 % t = 0] *)
         zero
@@ -718,7 +803,11 @@ let simplify_shallow t =
           | None ->
               None
           | Some (t, q) -> (
-            match Q.to_bigint q with Some z -> Some (t, z) | None -> None )
+            match Q.to_bigint q with
+            | Some z ->
+                Some (t, z)
+            | None ->
+                raise_notrace LinArith.NotRepresentable )
         in
         match (is_t1_var_plus_int, Q.to_bigint m) with
         | Some (t, z), Some m -> (
@@ -727,8 +816,12 @@ let simplify_shallow t =
               Mod (t, t2)
           | Some z_simpl when Z.(not (equal z z_simpl)) ->
               Mod (Add (t, Const (Q.of_bigint z_simpl)), t2)
-          | _ ->
-              t )
+          | Some _ ->
+              t
+          | None ->
+              raise_notrace LinArith.NotRepresentable )
+        | _, None ->
+            raise_notrace LinArith.NotRepresentable
         | _ ->
             t )
     | BitAnd (t1, t2) when is_zero t1 || is_zero t2 ->
@@ -743,7 +836,7 @@ let simplify_shallow t =
       match Q.to_int q with
       | None ->
           (* overflows or otherwise undefined, propagate puzzlement *)
-          raise_notrace Undefined
+          raise_notrace LinArith.NotRepresentable
       | Some i -> (
           if i >= 64 then (* assume 64-bit or fewer architecture *) zero
           else if i < 0 then
@@ -812,16 +905,15 @@ let simplify_shallow t =
         t
   in
   match Z.protect simplify_shallow_or_raise t with
-  | (exception Undefined) | None ->
+  | exception Undefined ->
       let reason () = F.asprintf "Undefined result when simplifying %a" (pp_no_paren Var.pp) t in
       Unsat {reason; source= __POS__}
+  | None | (exception LinArith.NotRepresentable) ->
+      Sat (Opaque t)
   | exception UnsatExn unsat_info ->
       Unsat unsat_info
   | Some (Const q) when not (Q.is_rational q) ->
-      let reason () =
-        F.asprintf "Non-rational result %a when simplifying %a" Q.pp_print q (pp_no_paren Var.pp) t
-      in
-      Unsat {reason; source= __POS__}
+      Sat (Opaque t)
   | Some t' ->
       if not (phys_equal t t') then
         Debug.p "simplify_shallow: %a -> %a@\n" (pp_no_paren Var.pp) t (pp_no_paren Var.pp) t' ;
@@ -837,7 +929,7 @@ let linearize t =
     | Var v ->
         Some (LinArith.of_var v)
     | Const c ->
-        if Q.is_rational c then Some (LinArith.of_q c) else None
+        Some (LinArith.of_q c)
     | Linear l ->
         Some l
     | Minus t ->
@@ -853,6 +945,7 @@ let linearize t =
     | Procname _
     | String _
     | FunctionApplication _
+    | Opaque _
     | Mult _
     | DivI _
     | DivF _
@@ -876,6 +969,8 @@ let linearize t =
         None
   in
   match aux_linearize t with
+  | exception LinArith.NotRepresentable ->
+      Opaque t
   | None ->
       t
   | Some l ->
@@ -907,6 +1002,7 @@ let get_as_var = function
   | String _
   | Procname _
   | FunctionApplication _
+  | Opaque _
   | Add _
   | Minus _
   | LessThan _
@@ -941,6 +1037,7 @@ let get_as_const = function
   | String _
   | Procname _
   | FunctionApplication _
+  | Opaque _
   | Add _
   | Minus _
   | LessThan _
@@ -974,6 +1071,7 @@ let is_non_numeric_constant = function
   | Var _
   | Procname _
   | FunctionApplication _
+  | Opaque _
   | Add _
   | Minus _
   | LessThan _
@@ -1003,12 +1101,13 @@ let get_as_linear = function
   | Linear l ->
       Some l
   | Const q ->
-      Some (LinArith.of_q q)
+      if Q.is_rational q then Some (LinArith.of_q q) else None
   | Var x ->
       Some (LinArith.of_var x)
   | String _
   | Procname _
   | FunctionApplication _
+  | Opaque _
   | Add _
   | Minus _
   | LessThan _

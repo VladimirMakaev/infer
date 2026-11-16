@@ -734,6 +734,7 @@ end = struct
 
 
   let add_linear_eq v l phi =
+    LinArith.assert_valid l ;
     Debug.p "add_linear_eq %a=%a@\n" Var.pp v (LinArith.pp Var.pp) l ;
     let phi =
       match Var.Map.find_opt v phi.linear_eqs with
@@ -767,6 +768,7 @@ end = struct
 
 
   let add_tableau_eq v l phi =
+    LinArith.assert_valid l ;
     Debug.p "add_tableau_eq %a=%a@\n" Var.pp v (LinArith.pp Var.pp) l ;
     let phi =
       match Var.Map.find_opt v phi.tableau with
@@ -2017,7 +2019,11 @@ end = struct
       (* No null pointers in Erlang *)
       let reason () = F.asprintf "%a=0 but %a is an Erlang pointer, hence ≠0" Var.pp v Var.pp v in
       Unsat {reason; source= __POS__}
-    else solve_lin_eq ~fuel new_eqs (LinArith.of_var v) (LinArith.of_q Q.zero) phi
+    else
+      try solve_lin_eq ~fuel new_eqs (LinArith.of_var v) (LinArith.of_q Q.zero) phi
+      with LinArith.NotRepresentable ->
+        let atom = Atom.Equal (Term.Opaque (Term.Equal (Term.Var v, Term.zero)), Term.one) in
+        Sat (add_atom atom phi, new_eqs)
 
 
   and and_below ~fuel v t (phi, new_eqs) =
@@ -2133,4 +2139,37 @@ end = struct
 
 
   let and_var_var v1 v2 (phi, new_eqs) = with_base_fuel phi @@ merge_vars new_eqs v1 v2 phi
+
+  (* Capped coefficient substitution can occur while propagating an otherwise valid fact through
+     the existing linear equations or tableau. The maps are persistent: retain the input state
+     and record the new fact as an opaque fixed point instead of committing a poisoned map. *)
+  let abstain atom (phi, new_eqs) =
+    let atom = Atom.Equal (Term.Opaque (Atom.to_term atom), Term.one) in
+    Sat (add_atom atom phi, new_eqs)
+
+
+  let and_atom atom phi_new_eqs ~add_term =
+    try and_atom atom phi_new_eqs ~add_term
+    with LinArith.NotRepresentable -> abstain atom phi_new_eqs
+
+
+  let and_normalized_atoms phi_new_eqs atoms ~orig_atom ~add_term =
+    try and_normalized_atoms phi_new_eqs atoms ~orig_atom ~add_term
+    with LinArith.NotRepresentable -> abstain orig_atom phi_new_eqs
+
+
+  let and_var_term v term phi_new_eqs =
+    try and_var_term v term phi_new_eqs
+    with LinArith.NotRepresentable -> abstain (Atom.Equal (Term.Var v, term)) phi_new_eqs
+
+
+  let and_var_linarith v linear phi_new_eqs =
+    try and_var_linarith v linear phi_new_eqs
+    with LinArith.NotRepresentable ->
+      abstain (Atom.Equal (Term.Var v, Term.symbolic_linear linear)) phi_new_eqs
+
+
+  let and_var_var v1 v2 phi_new_eqs =
+    try and_var_var v1 v2 phi_new_eqs
+    with LinArith.NotRepresentable -> abstain (Atom.Equal (Term.Var v1, Term.Var v2)) phi_new_eqs
 end

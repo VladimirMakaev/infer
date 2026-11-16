@@ -742,28 +742,24 @@ module DictIter = struct
     | None ->
         fresh ()
     | Some q -> (
-        let* index_int =
-          match QSafeCapped.to_int q with
-          | None ->
-              L.internal_error "bad index in iter_next_dict@\n" ;
-              unreachable
-          | Some i ->
-              ret i
-        in
-        let* index_acc =
-          match List.nth fields index_int with
-          | None ->
-              L.internal_error "iter next out of bounds@\n" ;
-              unreachable
-          | Some ia ->
-              ret ia
-        in
-        match (index_acc : Access.t) with
-        | FieldAccess fn ->
-            f fn
-        | _ ->
-            L.internal_error "iter next dict non field access@\n" ;
-            unreachable )
+      match QSafeCapped.to_int q with
+      | None ->
+          fresh ()
+      | Some index_int -> (
+          let* index_acc =
+            match List.nth fields index_int with
+            | None ->
+                L.internal_error "iter next out of bounds@\n" ;
+                unreachable
+            | Some ia ->
+                ret ia
+          in
+          match (index_acc : Access.t) with
+          | FieldAccess fn ->
+              f fn
+          | _ ->
+              L.internal_error "iter next dict non field access@\n" ;
+              unreachable ) )
 
 
   let iter_get_key iter dict : unit DSL.model_monad =
