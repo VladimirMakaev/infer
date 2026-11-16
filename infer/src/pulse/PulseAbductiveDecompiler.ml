@@ -48,6 +48,20 @@ let find_from_origin value_origin astate =
   Option.value_or_thunk expr ~default:(fun () -> find (ValueOrigin.value value_origin) astate)
 
 
+let rec find_call_argument exp ((address, _) as addr_hist) astate =
+  match (exp : Exp.t) with
+  | Var id ->
+      find_from_origin (ValueOrigin.OnStack {var= Var.of_id id; addr_hist}) astate
+  | Lvar pvar ->
+      DecompilerExpr.SourceExpr ((PVar pvar, []), Some address)
+  | Cast (_, exp) ->
+      find_call_argument exp addr_hist astate
+  | Const _ ->
+      DecompilerExpr.Unknown (Some address)
+  | _ ->
+      find address astate
+
+
 let add_iterator_source v call ~src ~is_reference_receiver astate =
   AbductiveDomain.map_decompiler astate ~f:(fun decompiler ->
       Decompiler.add_iterator_source v call ~src ~is_reference_receiver decompiler )

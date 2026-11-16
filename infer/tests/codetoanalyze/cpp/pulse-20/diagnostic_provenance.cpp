@@ -272,10 +272,10 @@ int range_for_over_null_range_bad() {
   return size;
 }
 
-// Known limitation: where the dereference happens while applying a callee's
-// summary rather than in a model, the name still comes from the shared value,
-// so the later argument wins and this reports `keys->size()`. The pointer is
-// named only where the check knows where the value was loaded from.
+// The later zero-valued size argument shares the pointer's abstract value.
+// A summary's PRE access must use the data argument's saved origin, buffer.data,
+// before materialization can replace its name with keys->size().
+// The required incoming value is named independently of later parameter writes.
 void copy_into(char* data, std::size_t size) { *data = (char)size; }
 
 void name_of_null_crossing_a_call_bad(const std::vector<int>& keys) {
