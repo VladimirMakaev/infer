@@ -1,0 +1,5 @@
+let isminusone = function {signedness= Signed; i} when Z.(equal i minus_one) -> true | _ -> false
+let isnegative = function {signedness= Signed; i} when Z.(lt i zero) -> true | _ -> false
+let null = {signedness= Signed; i= Z.zero; pointerness= Pointer}
+let of_z z_of_int i = {signedness= Signed; i= z_of_int i; pointerness= NotPointer}
+{ signedness= join_signedness intlit1.signedness intlit2.signedness

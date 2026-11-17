@@ -1,0 +1,3 @@
+match (signedness1, signedness2) with Signed, Signed -> Signed | _ -> Unsigned
+type signedness = Signed | Unsigned [@@deriving compare, sexp, hash, equal, normalize]
+| true, Unsigned ->

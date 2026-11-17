@@ -113,8 +113,16 @@ see "The value model" below for why that distinction is the whole point of this 
 | result | statement |
 |---|---|
 | `abduce_le_unsat_sound` | if `abduce_le` says `x <= y` is impossible, no pair drawn from the two concretisations satisfies it. All four operand shapes |
-| `abduce_le_sat_sound` | if it tightens instead, **no solution is lost** — for three of the four shapes; the fourth is excluded by an explicit hypothesis and refuted below |
-| `abduce_le_sat_is_unsound_on_outside_lhs` | a machine-checked **counterexample**: with `Outside` on the left and `Between` on the right, the refinement drops a value that satisfies the constraint |
+| `abduce_le_sat_sound` | if it tightens instead, **no solution is lost**. All four operand shapes: the `Outside`/`Between` arm used to be excluded by a hypothesis and refuted, and the arm was then repaired |
+| `abduce_le_sat_sound_on_the_formerly_refuted_case` | the instance that broke that arm, kept as a pinned regression: if the arithmetic ever comes back into the bound, this fails |
+| `abduce_lt_unsat_sound` | if `abduce_lt` says `x < y` is impossible, no pair satisfies it. All four shapes, under `nnu` on the left operand |
+| `abduce_lt_sat_sound` | and if it tightens, no solution is lost — including across the shift back down, which is where the tagged order bites |
+| `flip_abduced_unsat_sound`, `flip_abduced_sat_sound` | the flip preserves both halves, so the dispatch's swapped calls come back in the caller's order |
+| `abduce_binop_constraints_unsat_sound`, `abduce_binop_constraints_sat_sound` | the dispatch over `Le`/`Lt`/`Ge`/`Gt` is sound in both halves, for **both** values of `negated` — all eight rows of the table that reach the ordered helpers |
+| `witness_ge_returns_the_refinements_in_the_callers_order` | the computation that distinguishes the flip from an identity |
+| four `sat_*_add_*_iff` results, `gamma_between_add_one_iff` | a bound and a value shifted by one together, in both directions, on the `nnu` fragment |
+| `witness_the_shift_down_needs_more_than_nnu` | why those four do not take the tidier hypothesis: a counterexample, failing in opposite directions on the two halves of membership |
+| `signed_literals_are_closed` | the half of "every reachable literal is `Signed`" that Rocq can see. The other half is `intlit-signed-invariant.sh` |
 | four `witness_*` results | the regression checks described under "The value model" |
 | `add_sound` | if `add` returns an interval, the real sum of any two admitted values is in it |
 | `minus_sound` | the same for negation, for **both** arms — `Between`, where the constructor swaps the endpoints, and `Outside`, where it swaps which disjunct holds |
@@ -176,12 +184,11 @@ production bug claim: whether Pulse ever builds an `Outside` interval over negat
 unsigned literals is a reachability question about IntLit's producers, and that has not
 been investigated here.
 
-### What the tagged order cost
+### What the tagged order cost, and how it was paid
 
-The previous round of this directory also claimed `abduce_lt` (both halves) and
-`abduce_binop_constraints` over the four ordered operators. Those theorems were proved
-against a model in which `IntLit.t` was plain `Z`, and they are **withdrawn**, not merely
-unported. The obstruction is concrete and is the same one as above:
+An earlier round of this directory claimed `abduce_lt` (both halves) and
+`abduce_binop_constraints` over the four ordered operators, proved against a model in which
+`IntLit.t` was plain `Z`. Those proofs were **withdrawn**, because the obstruction is real:
 
 - `abduce_lt` works by shifting the left operand up by one, calling `abduce_le`, and
   shifting the refinement back. Shifting is **not monotone** in IntLit's order:
@@ -190,10 +197,90 @@ unported. The obstruction is concrete and is the same one as above:
   `between` then raises `Assert_failure`; in the translation that assert is erased (see
   "What is NOT covered"), so the Rocq model silently continues.
 
-`abduce_binop_constraints` rests on `abduce_lt`, so it goes with it. Restoring them means
-either scoping them to an all-`Signed` invariant and justifying where in Infer that holds,
-or doing the area analysis for the shift. Neither is attempted here, and nothing in this
-directory claims them.
+**They are back, and not by assuming the problem away.** The note that withdrew them said
+restoring them meant "either scoping them to an all-`Signed` invariant and justifying where
+in Infer that holds, or doing the area analysis for the shift". What is in `Soundness.v`
+now is the second, scoped by the first:
+
+- `nnu x` — *not negative unsigned*, i.e. `area x <> 3`, equivalently "`x` is `Signed` **or**
+  its value is non-negative" — is the exact fragment on which `area` is decided by the sign
+  of the value, so the lexicographic `(area, i)` order collapses to the order on `i`. The
+  area analysis is `nnu_lex`, `nnu_lexlt`, `nnu_ile`, `nnu_ilt`, and `sgn_lex` and friends
+  are now derived from them rather than proved separately. The inclusion is strict:
+  `Unsigned 0` is `nnu` and is not `sgn`, so the hypothesis the ported theorems carry is
+  **weaker** than the one the arithmetic already carried.
+- `nnu` is closed under the shift **up** and not under the shift **down**, and that is not a
+  detail of the proof: `witness_the_shift_down_needs_more_than_nnu` is the computed
+  counterexample, and it fails in *opposite directions* on the two halves of membership — an
+  area-3 bound admits nothing as a lower bound and everything as an upper one. So
+  `sat_upper_shift_down` needs no side condition and there is deliberately no
+  `sat_lower_shift_down`.
+- The lower side is settled structurally instead, by `abduce_le_lhs_shape`: in the only two
+  arms where `abduce_le` returns a left refinement, its lower bound is either
+  `MinusInfinity` or the left operand's own lower bound **unchanged**. So the bound
+  `abduce_lt` shifts back down is one this very function had just shifted up, and
+  `add_one_then_minus_one` returns it exactly, in all three fields.
+- The premise that the hypothesis is free — every `IntLit` a Pulse analysis can build is
+  `Signed` — has a closure half that is machine-checked (`signed_literals_are_closed`) and a
+  base case that Rocq cannot see, because this development compiles a stand-in `IntLit`.
+  The base case is pinned by `intlit-signed-invariant.sh`; see "The IntLit premise" below.
+
+The ported statements are **stronger than the Lean ones they replace** on three axes, the
+same three on which the `abduce_le` theorems already were: they are about the translated
+real module rather than a hand copy, about `IntLit.t` under the module's own order rather
+than `Z`, and about all four operand shapes rather than `Between`/`Between` only. The
+dispatch theorems additionally cover both values of `negated`, so all eight rows of
+`abduce_binop_constraints` that reach the ordered helpers are covered rather than four.
+
+#### The mapping, Lean theorem to Rocq theorem
+
+`verification/citv/lean/Citv/Comparison.lean` proved twenty theorems; eight were already
+covered here and these are the other twelve.
+
+| Lean (`Comparison.lean`) | Rocq (`v/Soundness.v`) | hypothesis the port adds |
+|---|---|---|
+| `Bound.allowsBelow_succ` :125 | `sat_lower_add_one_iff` | `nnu` bound, `nnu` value |
+| `Bound.allowsAbove_succ` :129 | `sat_upper_add_one_iff` | `nnu` bound, `nnu` value |
+| `Bound.allowsBelow_pred` :133 | `sat_lower_add_minus_one_iff` | `nnu` of the **shifted** bound, `nnu` value |
+| `Bound.allowsAbove_pred` :137 | `sat_upper_add_minus_one_iff` | `nnu` of the **shifted** bound, `nnu` value |
+| `memBetween_succ` :226 | `gamma_between_add_one_iff` | `nnu` on both bounds and the value |
+| `abduceLt_unsat_sound` :232 | `abduce_lt_unsat_sound` | `nnu_itv` on the left operand, `nnu x` |
+| `abduceLt_sat_sound` :245 | `abduce_lt_sat_sound` | `nnu_itv` on the left operand, `nnu x` |
+| `Abduced.flip_unsat` :290 | `flip_abduced_unsat_sound` | none |
+| `Abduced.flip_sat` :293 | `flip_abduced_sat_sound` | none |
+| `abduceCmp_unsat_sound` :314 | `abduce_binop_constraints_unsat_sound` | `nnu_itv` on both operands, `nnu` on both values |
+| `abduceCmp_sat_sound` :328 | `abduce_binop_constraints_sat_sound` | `nnu_itv` on both operands, `nnu` on both values |
+| `abduceCmp_ge_puts_the_refinements_in_the_callers_order` :344 | `witness_ge_returns_the_refinements_in_the_callers_order` | none (a computation) |
+
+`sgn_itv_nnu_itv` and `sgn_nnu` discharge every one of those hypotheses on the `Signed`
+fragment, which is the fragment the analyser runs in.
+
+### The IntLit premise
+
+Every ported theorem is conditional on `nnu`. `intlit-signed-invariant.sh`, which `run.sh`
+executes, is what entitles anyone to call that hypothesis free. **Its load-bearing argument
+is not a grep:** `IntLit.mli` declares `type t` abstract and never mentions the type
+`signedness`, so no other module can even *name* the constructor `Unsigned` — that is the
+OCaml type system, not a pattern match on text. The five checks pin the premises of that
+argument: the places `IntLit.ml` mentions `Unsigned` (set equality, both directions), the
+record constructions that write the field (likewise — the only two are `of_z` and `null`,
+and both write the literal `Signed`), the interface staying abstract, the derived
+`t_of_sexp` — the one back door the interface does open — having no caller and no new
+derived chain reaching it, and a redundant canary over the rest of `infer/src`.
+
+Two things about how it is written are deliberate. Comments and string literals are
+**stripped before matching**, because a keyword gate that matches its own documentation
+fires on the comment explaining the keyword and then gets deleted instead of the comment;
+the scan over `infer/src` is two-stage for the same reason, an ordinary grep to narrow the
+candidates and the stripper to decide. And it carries `--self-test`, which plants one
+violation per check in a copy outside the tree and requires the refusal to **name** that
+check — plus two plants that put the keywords in a *comment* and require the checks to
+still pass. The first version of the script failed that second kind, which is how the raw
+grep in two of the checks was found.
+
+It is **not** a `sha256` pin like `expected/source.sha256`. `IntLit.ml` is edited for
+reasons that have nothing to do with signedness, and a check that refuses on every
+unrelated change is relaxed and then removed.
 
 ### The arm the real code dies in
 
@@ -354,9 +441,16 @@ markers.
 ## Mutants
 
 A green proof run means nothing unless an unsound module is rejected. `mutate.sh` breaks the
-translated module eleven ways, at least one per theorem family, and each must **compile**
+translated module sixteen ways, at least one per theorem family, and each must **compile**
 (so that a rejection means the proof talking, not a broken file) and then be **refused**.
-`MIN_MUTANTS` is 11; the floor has only ever gone up, 4 → 6 → 11.
+`MIN_MUTANTS` is 16; the floor has only ever gone up, 4 → 6 → 12 → 16.
+
+This paragraph said *eleven* while `mutants.txt` already held twelve — the twelfth,
+`abduce_le/outside-arm-adds-one-again`, was added with the fix to that arm and the prose
+was not moved with it. A table that can drift from the file it describes is worse than no
+table, so `mutate.sh` now **asserts** that the names in the table below are exactly the
+names in `mutants.txt` and that the count in the sentence above is `MIN_MUTANTS`. The
+drift that produced this note would now be a failing run.
 
 | mutant | what it breaks |
 |---|---|
@@ -371,17 +465,38 @@ translated module eleven ways, at least one per theorem family, and each must **
 | `minus/forget-to-swap-the-outside-arm` | the same on the `Outside` arm, which the Between mutant does not touch |
 | `binop/MinusA-forgets-the-negation` | computes `a_lhs + a_rhs` where the concrete operation is subtraction |
 | `binop/PlusA-subtracts-instead` | the mirror image, so neither operator can be satisfied by the other's implementation |
+| `abduce_le/outside-arm-adds-one-again` | puts the `+1` back into the `Outside`/`Between` arm's upper bound |
+| `abduce_lt/forget-the-shift-back` | returns the refinement still shifted up, so it excludes `x = lo1` |
+| `abduce_lt/shift-the-left-operand-twice` | decides `x + 2 <= y`, so `[0,0] < [1,1]` is called impossible |
+| `flip_abduced/make-it-the-identity` | returns the two refinements in the callee's order, not the caller's |
+| `abduce_binop_constraints/ge-without-the-swap` | `Ge` abduces `x <= y` instead of `y <= x` |
 
-The first four aim at `abduce_le`, which is what is still proved. The `abduce_lt` and
-`flip_abduced` mutants of an earlier round are gone because the theorems they attacked are
-withdrawn — no floor was lowered to make a run pass.
+Five aim at `abduce_le` — the first four plus `outside-arm-adds-one-again`, which guards
+the arm that was repaired after a counterexample.
 
-The next two aim at `IntLit.v`, which previously had no mutant at all: review found that a
-`lift1` which silently dropped the tags compiled and left every proof passing. It does not
-any more.
+Two aim at `IntLit.v`, which previously had no mutant at all: review found that a `lift1`
+which silently dropped the tags compiled and left every proof passing. It does not any
+more.
 
-The last five are R4's. Two of them exist as a pair on purpose: `MinusA-forgets-the-negation`
+Five are R4's. Two of them exist as a pair on purpose: `MinusA-forgets-the-negation`
 and `PlusA-subtracts-instead` are mirror images, so neither operator's theorem can be
 satisfied by the other operator's implementation. `minus` gets one mutant per arm, because
 a mutant of the `Between` arm leaves the `Outside` arm untested and that arm is where the
 negation has to swap which disjunct holds.
+
+The last four are the comparison fragment ported from Lean, and they *return* mutants an
+earlier round removed when those theorems were withdrawn. Each was checked to die in the
+theorem that attacks it rather than merely somewhere: `forget-the-shift-back` in
+`abduce_lt_sat_sound`, `shift-the-left-operand-twice` in `abduce_lt_unsat_sound`,
+`make-it-the-identity` in `flip_abduced_sat_sound`, and `ge-without-the-swap` in
+`abduce_binop_constraints_unsat_sound`. The witness
+`witness_ge_returns_the_refinements_in_the_callers_order` was separately run **on its own**
+against the flip mutant and rejects it there too, because the claim in its comment — that
+only a computation can tell a flip from an identity — deserved a run rather than an
+assertion.
+
+Two obvious mutants are deliberately **absent**, and the reason is about the code rather
+than the tests. Replacing `abduce_lt` by `abduce_le`, and dispatching `Lt` to `abduce_le`,
+are both *sound* — merely imprecise — so they would survive. A surviving mutant that is
+really an equivalent mutant teaches nothing and invites someone to weaken a theorem until
+it dies. A mutant belongs in `mutants.txt` only if the statement it attacks becomes false.

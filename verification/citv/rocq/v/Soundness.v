@@ -273,6 +273,86 @@ Proof.
   - apply slt_false in E. lia.
 Qed.
 
+(** * The fragment on which the tagged order IS the order on the value
+
+    [nnu x] - "not negative unsigned" - says x is not in area 3.  Equivalently (nnu_iff) x
+    is Signed OR its value is non-negative, which is how the premise reads when stated
+    about the module rather than about the ranking function.
+
+    On that fragment area is decided by the SIGN of the value alone - 1 below zero, 2 at or
+    above it, never 3 - so the lexicographic (area, i) order collapses to the order on i
+    and ordinary integer reasoning becomes valid.  That is the only property the shift
+    lemmas further down need, and it is strictly weaker than the [sgn] the arithmetic
+    carries: Unsigned 0 is nnu and is not sgn.  sgn_lex and sgn_lexlt are derived from
+    nnu_lex and nnu_lexlt at the bottom of the R4 section rather than proved a second time.
+
+    WHAT NNU IS NOT: closed downward.  [add one] preserves it, [add minus_one] does not -
+    Unsigned 0 is in area 2 and Unsigned (-1) is in area 3, the top one.  Every lemma below
+    that shifts DOWN therefore hypothesises nnu of the shifted literal rather than of the
+    original, and witness_the_shift_down_needs_more_than_nnu at the end of the file is the
+    executed counterexample to the version that does not. *)
+
+Definition nnu (x : IntLit.t) : Prop := IntLit.area x <> 3.
+
+Lemma nnu_iff : forall x,
+    nnu x <-> (x.(IntLit.t.signedness) = IntLit.Signed \/ 0 <= x.(IntLit.t.i)).
+Proof.
+  intros x. unfold nnu. split.
+  - intros H. destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx]; [ | right; exact Hx ].
+    left. destruct x.(IntLit.t.signedness) eqn:S; [ reflexivity | ].
+    exfalso. apply H. exact (area_neg_unsigned x Hx S).
+  - intros [S | H].
+    + destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx].
+      * rewrite (area_neg_signed x Hx S). discriminate.
+      * rewrite (area_nonneg x Hx). discriminate.
+    + rewrite (area_nonneg x H). discriminate.
+Qed.
+
+(** the only two areas an nnu literal can be in, together with the sign that selects it *)
+Lemma nnu_area : forall x, nnu x ->
+    (x.(IntLit.t.i) < 0 /\ IntLit.area x = 1) \/ (0 <= x.(IntLit.t.i) /\ IntLit.area x = 2).
+Proof.
+  intros x H. destruct (area_cases x) as [[A I] | [[A I] | [A I]]].
+  - left; split; assumption.
+  - right; split; assumption.
+  - exfalso. exact (H A).
+Qed.
+
+Lemma nnu_lex : forall x y, nnu x -> nnu y ->
+    (x.(IntLit.t.i) <= y.(IntLit.t.i) <-> lexle (irank x) (irank y)).
+Proof.
+  intros x y Hx Hy. unfold lexle, irank, fst, snd.
+  destruct (nnu_area x Hx) as [[Ix Ax] | [Ix Ax]];
+    destruct (nnu_area y Hy) as [[Iy Ay] | [Iy Ay]]; rewrite Ax, Ay; lia.
+Qed.
+
+Lemma nnu_lexlt : forall x y, nnu x -> nnu y ->
+    (x.(IntLit.t.i) < y.(IntLit.t.i) <-> lexlt (irank x) (irank y)).
+Proof.
+  intros x y Hx Hy. unfold lexlt, irank, fst, snd.
+  destruct (nnu_area x Hx) as [[Ix Ax] | [Ix Ax]];
+    destruct (nnu_area y Hy) as [[Iy Ay] | [Iy Ay]]; rewrite Ax, Ay; lia.
+Qed.
+
+Lemma nnu_ile : forall x y, nnu x -> nnu y ->
+    (ile x y <-> x.(IntLit.t.i) <= y.(IntLit.t.i)).
+Proof. intros x y Hx Hy. rewrite ile_iff. symmetry. exact (nnu_lex x y Hx Hy). Qed.
+
+Lemma nnu_ilt : forall x y, nnu x -> nnu y ->
+    (ilt x y <-> x.(IntLit.t.i) < y.(IntLit.t.i)).
+Proof. intros x y Hx Hy. rewrite ilt_iff. symmetry. exact (nnu_lexlt x y Hx Hy). Qed.
+
+(** An nnu literal is below every literal that is NOT nnu, because area 3 is the top one.
+    This is what makes the shift down sound on the UPPER side without any side condition:
+    a bound that falls into area 3 admits everything the analyser can reach. *)
+Lemma nnu_below_area3 : forall x b, nnu x -> ~ nnu b -> ilt x b.
+Proof.
+  intros x b Hx Hb. unfold nnu in Hb.
+  destruct (Z.eq_dec (IntLit.area b) 3) as [A | A]; [ | exfalso; exact (Hb A) ].
+  apply ilt_iff. left. unfold irank, fst. rewrite A.
+  destruct (nnu_area x Hx) as [[_ Ax] | [_ Ax]]; rewrite Ax; lia.
+Qed.
+
 (** u < y implies u+1 <= y, in IntLit's order.  True in every area combination, including
     the ones where the shift crosses a boundary - there the hypothesis turns out to be
     unsatisfiable, which is what makes it go through. *)
@@ -631,46 +711,29 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition sgn (x : IntLit.t) : Prop := x.(IntLit.t.signedness) = IntLit.Signed.
 
+(** Every Signed literal is in the nnu fragment, and the inclusion is STRICT: Unsigned 0
+    is nnu and is not sgn.  So the four bridge lemmas below are instances of the nnu ones
+    proved with the areas, not a second development.  They kept their names and statements
+    because the arithmetic proofs further down are stated in terms of them. *)
+Lemma sgn_nnu : forall x, sgn x -> nnu x.
+Proof. intros x Sx. apply nnu_iff. left. exact Sx. Qed.
+
 (** On Signed literals the tagged order and the order on the value agree. *)
 Lemma sgn_lex : forall x y, sgn x -> sgn y ->
     (x.(IntLit.t.i) <= y.(IntLit.t.i) <-> lexle (irank x) (irank y)).
-Proof.
-  intros x y Sx Sy. unfold lexle, irank, fst, snd.
-  destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx];
-    destruct (Z_lt_le_dec y.(IntLit.t.i) 0) as [Hy | Hy].
-  - rewrite (area_neg_signed x Hx Sx), (area_neg_signed y Hy Sy). lia.
-  - rewrite (area_neg_signed x Hx Sx), (area_nonneg y Hy). lia.
-  - rewrite (area_nonneg x Hx), (area_neg_signed y Hy Sy). lia.
-  - rewrite (area_nonneg x Hx), (area_nonneg y Hy). lia.
-Qed.
+Proof. intros x y Sx Sy. exact (nnu_lex x y (sgn_nnu x Sx) (sgn_nnu y Sy)). Qed.
 
 Lemma sgn_lexlt : forall x y, sgn x -> sgn y ->
     (x.(IntLit.t.i) < y.(IntLit.t.i) <-> lexlt (irank x) (irank y)).
-Proof.
-  intros x y Sx Sy. unfold lexlt, irank, fst, snd.
-  destruct (Z_lt_le_dec x.(IntLit.t.i) 0) as [Hx | Hx];
-    destruct (Z_lt_le_dec y.(IntLit.t.i) 0) as [Hy | Hy].
-  - rewrite (area_neg_signed x Hx Sx), (area_neg_signed y Hy Sy). lia.
-  - rewrite (area_neg_signed x Hx Sx), (area_nonneg y Hy). lia.
-  - rewrite (area_nonneg x Hx), (area_neg_signed y Hy Sy). lia.
-  - rewrite (area_nonneg x Hx), (area_nonneg y Hy). lia.
-Qed.
+Proof. intros x y Sx Sy. exact (nnu_lexlt x y (sgn_nnu x Sx) (sgn_nnu y Sy)). Qed.
 
 Lemma sgn_ile : forall x y, sgn x -> sgn y ->
     (ile x y <-> x.(IntLit.t.i) <= y.(IntLit.t.i)).
-Proof.
-  intros x y Sx Sy. rewrite ile_iff. split; intro H.
-  - apply (sgn_lex x y Sx Sy). exact H.
-  - apply (sgn_lex x y Sx Sy). exact H.
-Qed.
+Proof. intros x y Sx Sy. exact (nnu_ile x y (sgn_nnu x Sx) (sgn_nnu y Sy)). Qed.
 
 Lemma sgn_ilt : forall x y, sgn x -> sgn y ->
     (ilt x y <-> x.(IntLit.t.i) < y.(IntLit.t.i)).
-Proof.
-  intros x y Sx Sy. rewrite ilt_iff. split; intro H.
-  - apply (sgn_lexlt x y Sx Sy). exact H.
-  - apply (sgn_lexlt x y Sx Sy). exact H.
-Qed.
+Proof. intros x y Sx Sy. exact (nnu_ilt x y (sgn_nnu x Sx) (sgn_nnu y Sy)). Qed.
 
 (** The fragment is closed, and the value components are the obvious ones. *)
 Lemma add_i : forall x y,
@@ -973,3 +1036,585 @@ Proof.
   destruct C as [[-> ->] | [-> ->]]; destruct H as [[H1 H2] | [H1 H2]]; cbn in *;
     contradiction.
 Qed.
+
+(** * The ported fragment: abduce_lt, the flip, and the dispatch
+
+    Everything from here down replaces what verification/citv/lean proved against a
+    hand-written model in which IntLit.t was plain Z.  The Lean names are given against
+    each statement so the correspondence can be checked rather than taken on trust; the
+    mapping table is in README.md.
+
+    Three things are different, and all three are in the direction of saying more:
+
+      - these are about the rocq-of-ocaml translation of the real PulseCItv.ml, which
+        drift.sh regenerates byte-identically from the pinned source, not about a copy;
+      - the concrete values are IntLit.t under the module's own (area, i) order, not Z;
+      - where Lean restricted itself to two Between operands, the statements below quantify
+        over PulseCItv.t, so Outside operands are covered rather than excluded.
+
+    What they carry that Lean did not need is a hypothesis.  Over Z, adding one is
+    monotone; over the tagged order it is not, because the shift can move a literal between
+    AREAS.  [nnu] is the exact fragment where it is monotone, and the premise that every
+    IntLit a Pulse analysis can build is in that fragment is pinned OUTSIDE Rocq, by
+    intlit-signed-invariant.sh, for the reason given at signed_literals_are_closed. *)
+
+(** ** Shifting a literal by one, in components *)
+
+Lemma add_signedness : forall x k,
+    (IntLit.add x k).(IntLit.t.signedness)
+    = IntLit.join_signedness x.(IntLit.t.signedness) k.(IntLit.t.signedness).
+Proof. reflexivity. Qed.
+
+Lemma add_one_components : forall x,
+    (IntLit.add x IntLit.one).(IntLit.t.signedness) = x.(IntLit.t.signedness)
+    /\ (IntLit.add x IntLit.one).(IntLit.t.i) = x.(IntLit.t.i) + 1.
+Proof.
+  intros x. split; [ | reflexivity ].
+  rewrite add_signedness. destruct x.(IntLit.t.signedness); reflexivity.
+Qed.
+
+Lemma add_minus_one_components : forall x,
+    (IntLit.add x IntLit.minus_one).(IntLit.t.signedness) = x.(IntLit.t.signedness)
+    /\ (IntLit.add x IntLit.minus_one).(IntLit.t.i) = x.(IntLit.t.i) - 1.
+Proof.
+  intros x. split.
+  - rewrite add_signedness. destruct x.(IntLit.t.signedness); reflexivity.
+  - rewrite add_i. cbn. lia.
+Qed.
+
+(** add_int reaches IntLit.add with its arguments the other way round in the Outside arm
+    than in the Between arm, so the two have to be known equal. *)
+Lemma add_comm : forall x y, IntLit.add x y = IntLit.add y x.
+Proof.
+  intros x y. unfold IntLit.add, IntLit.lift2.
+  destruct x as [sx ix px]; destruct y as [sy iy py]; cbn. f_equal.
+  - destruct sx; destruct sy; reflexivity.
+  - lia.
+  - destruct px; destruct py; reflexivity.
+Qed.
+
+(** The shift up and back is the IDENTITY, in all three fields - the value returns, the
+    signedness join with two Signed operands is a no-op, and so is the pointerness join
+    with two NotPointer ones.  This is what makes the left refinement of abduce_lt come
+    back as the caller's own bound rather than as something computed, and it is why the
+    sat half below needs no hypothesis about the bound the code produced. *)
+Lemma add_one_then_minus_one : forall x,
+    IntLit.add (IntLit.add x IntLit.one) IntLit.minus_one = x.
+Proof.
+  intros x. unfold IntLit.add, IntLit.lift2.
+  destruct x as [s i p]; cbn. f_equal.
+  - destruct s; reflexivity.
+  - lia.
+  - destruct p; reflexivity.
+Qed.
+
+Lemma bound_add_int_round_trip : forall b,
+    Bound.add_int (Bound.add_int b IntLit.one) IntLit.minus_one = b.
+Proof.
+  intros b. destruct b as [i | |]; cbn; [ | reflexivity | reflexivity ].
+  f_equal. exact (add_one_then_minus_one i).
+Qed.
+
+(** ** The fragment is closed under the shift up, and only under that one *)
+
+Lemma nnu_add_one : forall x, nnu x -> nnu (IntLit.add x IntLit.one).
+Proof.
+  intros x H. apply nnu_iff in H. apply nnu_iff.
+  destruct (add_one_components x) as [Hs Hi]. rewrite Hs, Hi.
+  destruct H as [S | I]; [ left; exact S | right; lia ].
+Qed.
+
+(** The converse direction for the shift DOWN: nnu after the shift gives nnu before it.
+    There is no lemma the other way round, and there cannot be - see
+    witness_the_shift_down_needs_more_than_nnu. *)
+Lemma nnu_of_shift_down : forall x, nnu (IntLit.add x IntLit.minus_one) -> nnu x.
+Proof.
+  intros x H. apply nnu_iff in H. apply nnu_iff.
+  destruct (add_minus_one_components x) as [Hs Hi]. rewrite Hs, Hi in H.
+  destruct H as [S | I]; [ left; exact S | right; lia ].
+Qed.
+
+Lemma ile_shift_up : forall a b, nnu a -> nnu b ->
+    (ile (IntLit.add a IntLit.one) (IntLit.add b IntLit.one) <-> ile a b).
+Proof.
+  intros a b Ha Hb.
+  rewrite (nnu_ile _ _ (nnu_add_one a Ha) (nnu_add_one b Hb)), (nnu_ile _ _ Ha Hb).
+  destruct (add_one_components a) as [_ Ha1]. destruct (add_one_components b) as [_ Hb1].
+  rewrite Ha1, Hb1. lia.
+Qed.
+
+Lemma ilt_shift_up : forall a b, nnu a -> nnu b ->
+    (ilt (IntLit.add a IntLit.one) (IntLit.add b IntLit.one) <-> ilt a b).
+Proof.
+  intros a b Ha Hb.
+  rewrite (nnu_ilt _ _ (nnu_add_one a Ha) (nnu_add_one b Hb)), (nnu_ilt _ _ Ha Hb).
+  destruct (add_one_components a) as [_ Ha1]. destruct (add_one_components b) as [_ Hb1].
+  rewrite Ha1, Hb1. lia.
+Qed.
+
+(** ** The fragment, lifted to bounds and to abstract values *)
+
+Definition nnu_bound (b : Bound.t) : Prop :=
+  match b with
+  | Bound.Int i => nnu i
+  | Bound.MinusInfinity | Bound.PlusInfinity => True
+  end.
+
+Definition nnu_itv (a : PulseCItv.t) : Prop :=
+  match a with
+  | Unsafe.Between l u => nnu_bound l /\ nnu_bound u
+  | Unsafe.Outside i j => nnu i /\ nnu j
+  end.
+
+(** ** L9-L12: a bound shifted by one, against a value shifted with it
+
+    Lean: Bound.allowsBelow_succ, allowsAbove_succ, allowsBelow_pred, allowsAbove_pred
+    (Comparison.lean:125, 129, 133, 137), there with no hypothesis at all because there
+    the values were Z.
+
+    The two shifts DOWN hypothesise nnu of the ALREADY SHIFTED bound.  That is the weakest
+    true precondition, not a convenience: nnu of the unshifted bound does not imply it
+    (Unsigned 0 is in area 2, Unsigned (-1) is in area 3), and nnu_of_shift_down shows it
+    implies the unshifted one, so nothing is lost by stating it this way round. *)
+
+Theorem sat_lower_add_one_iff : forall l x, nnu_bound l -> nnu x ->
+    (sat_lower (Bound.add_int l IntLit.one) (IntLit.add x IntLit.one) <-> sat_lower l x).
+Proof.
+  intros l x Hl Hx. destruct l as [i | |]; cbn in Hl |- *; [ | tauto | tauto ].
+  exact (ile_shift_up i x Hl Hx).
+Qed.
+
+Theorem sat_upper_add_one_iff : forall u x, nnu_bound u -> nnu x ->
+    (sat_upper (Bound.add_int u IntLit.one) (IntLit.add x IntLit.one) <-> sat_upper u x).
+Proof.
+  intros u x Hu Hx. destruct u as [i | |]; cbn in Hu |- *; [ | tauto | tauto ].
+  exact (ile_shift_up x i Hx Hu).
+Qed.
+
+Theorem sat_lower_add_minus_one_iff : forall l x,
+    nnu_bound (Bound.add_int l IntLit.minus_one) -> nnu x ->
+    (sat_lower (Bound.add_int l IntLit.minus_one) x
+     <-> sat_lower l (IntLit.add x IntLit.one)).
+Proof.
+  intros l x Hl Hx. destruct l as [i | |]; cbn in Hl |- *; [ | tauto | tauto ].
+  pose proof (nnu_of_shift_down i Hl) as Hi.
+  rewrite (nnu_ile _ _ Hl Hx), (nnu_ile _ _ Hi (nnu_add_one x Hx)).
+  destruct (add_minus_one_components i) as [_ Hi1].
+  destruct (add_one_components x) as [_ Hx1]. rewrite Hi1, Hx1. lia.
+Qed.
+
+Theorem sat_upper_add_minus_one_iff : forall u x,
+    nnu_bound (Bound.add_int u IntLit.minus_one) -> nnu x ->
+    (sat_upper (Bound.add_int u IntLit.minus_one) x
+     <-> sat_upper u (IntLit.add x IntLit.one)).
+Proof.
+  intros u x Hu Hx. destruct u as [i | |]; cbn in Hu |- *; [ | tauto | tauto ].
+  pose proof (nnu_of_shift_down i Hu) as Hi.
+  rewrite (nnu_ile _ _ Hx Hu), (nnu_ile _ _ (nnu_add_one x Hx) Hi).
+  destruct (add_minus_one_components i) as [_ Hi1].
+  destruct (add_one_components x) as [_ Hx1]. rewrite Hi1, Hx1. lia.
+Qed.
+
+(** ** L13: membership of an interval shifted by one
+
+    Lean: memBetween_succ (Comparison.lean:226). *)
+Theorem gamma_between_add_one_iff : forall l u x,
+    nnu_bound l -> nnu_bound u -> nnu x ->
+    (gamma (Unsafe.Between (Bound.add_int l IntLit.one) (Bound.add_int u IntLit.one))
+           (IntLit.add x IntLit.one)
+     <-> gamma (Unsafe.Between l u) x).
+Proof.
+  intros l u x Hl Hu Hx. cbn [gamma].
+  rewrite (sat_lower_add_one_iff l x Hl Hx), (sat_upper_add_one_iff u x Hu Hx).
+  reflexivity.
+Qed.
+
+(** The same fact at the level of the whole abstract value, Outside arm included.  Only
+    the direction abduce_lt uses is stated for Outside, because that is the only one the
+    proof needs and an iff there would carry a hypothesis nothing can discharge. *)
+Lemma gamma_add_one : forall a x, nnu_itv a -> nnu x ->
+    gamma a x -> gamma (PulseCItv.add_int a IntLit.one) (IntLit.add x IntLit.one).
+Proof.
+  intros a x Na Nx G. destruct a as [l u | p q]; cbn [PulseCItv.add_int].
+  - destruct Na as [Nl Nu]. cbn [between].
+    apply (gamma_between_add_one_iff l u x Nl Nu Nx). exact G.
+  - destruct Na as [Np Nq]. cbn [outside gamma] in G |- *.
+    rewrite (add_comm IntLit.one p), (add_comm IntLit.one q).
+    destruct G as [G | G].
+    + left. apply (ilt_shift_up x p Nx Np). exact G.
+    + right. apply (ilt_shift_up q x Nq Nx). exact G.
+Qed.
+
+(** The shift DOWN on the upper side needs no side condition at all, and the reason is
+    worth stating: if the shifted bound falls into area 3 it is ABOVE every literal the
+    analyser can reach, so it admits x for free.  The lower side has no such escape -
+    an area-3 LOWER bound admits nothing - which is why abduce_lt's sat half goes through
+    the structural lemma below instead of hypothesising about a computed bound. *)
+Lemma sat_upper_shift_down : forall u x, nnu x ->
+    sat_upper u (IntLit.add x IntLit.one) ->
+    sat_upper (Bound.add_int u IntLit.minus_one) x.
+Proof.
+  intros u x Nx H. destruct u as [i | |]; cbn in H |- *; [ | exact H | exact I ].
+  destruct (Z.eq_dec (IntLit.area (IntLit.add i IntLit.minus_one)) 3) as [A | A].
+  - apply ilt_ile. apply (nnu_below_area3 x _ Nx). intro C. exact (C A).
+  - apply (sat_upper_add_minus_one_iff (Bound.Int i) x A Nx). exact H.
+Qed.
+
+(** ** Where abduce_le's left refinement comes from
+
+    The left refinement is never SOMETHING COMPUTED out of the right operand's bounds on
+    its lower side: in the only two arms that return [Some] on the left it is either
+    MinusInfinity or the left operand's own lower bound, unchanged.  abduce_lt shifts that
+    refinement back down by one, and this is what makes the shift exact rather than
+    hypothetical - after the round trip the literal is the caller's, not one the code
+    built by adding. *)
+Lemma abduce_le_lhs_shape : forall a1 a2 b o2,
+    PulseCItv.abduce_le a1 a2 = Satisfiable (Some b) o2 ->
+    (exists u, b = Unsafe.Between Bound.MinusInfinity u)
+    \/ (exists l1 u1 u, a1 = Unsafe.Between l1 u1 /\ b = Unsafe.Between l1 u).
+Proof.
+  intros a1 a2 b o2 H.
+  destruct a1 as [lower1 upper1 | l1 u1]; destruct a2 as [lower2 upper2 | l2 u2];
+    unfold PulseCItv.abduce_le in H.
+  - match type of H with
+    | (if ?c then _ else _) = _ => destruct c
+    end; [ discriminate | ].
+    cbn [between] in H. inversion H; subst. right.
+    exists lower1, upper1, (Bound.min upper1 upper2). split; reflexivity.
+  - destruct (Bound.lt lower1 (Bound.Int l2)); discriminate.
+  - destruct (Bound.ge (Bound.Int u1) upper2); [ | discriminate ].
+    cbn [between] in H. inversion H; subst. left.
+    exists (Bound.min (Bound.Int l1) upper2). reflexivity.
+  - discriminate.
+Qed.
+
+(** ** L14: the Unsatisfiable case of abduce_lt
+
+    Lean: abduceLt_unsat_sound (Comparison.lean:232), there for two Between operands over
+    Z.  Here over PulseCItv.abduce_lt, all four operand shapes, IntLit's own order.
+
+    Only the LEFT operand and the left-hand value need to be in the fragment: the right
+    operand is handed to abduce_le untouched, and [ilt x y -> ile (x+1) y] is add_one_le,
+    which holds in every area. *)
+Theorem abduce_lt_unsat_sound :
+  forall (a1 a2 : PulseCItv.t),
+    nnu_itv a1 ->
+    PulseCItv.abduce_lt a1 a2 = Unsatisfiable ->
+    forall x y : IntLit.t, nnu x -> gamma a1 x -> gamma a2 y -> ~ ilt x y.
+Proof.
+  intros a1 a2 N1 Hunsat x y Nx G1 G2 Hxy.
+  unfold PulseCItv.abduce_lt in Hunsat.
+  destruct (PulseCItv.abduce_le (PulseCItv.add_int a1 IntLit.one) a2)
+    as [| p1 p2] eqn:E.
+  - apply (abduce_le_unsat_sound _ _ E (IntLit.add x IntLit.one) y).
+    + exact (gamma_add_one _ _ N1 Nx G1).
+    + exact G2.
+    + rewrite (add_comm x IntLit.one). exact (add_one_le _ _ Hxy).
+  - destruct p1 as [b |]; cbn in Hunsat; discriminate.
+Qed.
+
+(** ** L15: the Satisfiable case of abduce_lt
+
+    Lean: abduceLt_sat_sound (Comparison.lean:245).
+
+    The left refinement is shifted back by one, and over the tagged order that is where a
+    port can go wrong: the shift down is not monotone.  It goes through here because of
+    abduce_le_lhs_shape - the only bound that is shifted back on the LOWER side is one the
+    caller supplied and this function had just shifted up, so add_one_then_minus_one
+    returns it exactly.  The upper side needs nothing, by sat_upper_shift_down. *)
+Theorem abduce_lt_sat_sound :
+  forall (a1 a2 : PulseCItv.t) (o1 o2 : option PulseCItv.t),
+    nnu_itv a1 ->
+    PulseCItv.abduce_lt a1 a2 = Satisfiable o1 o2 ->
+    forall x y : IntLit.t, nnu x -> gamma a1 x -> gamma a2 y -> ilt x y ->
+      refines o1 x /\ refines o2 y.
+Proof.
+  intros a1 a2 o1 o2 N1 Hsat x y Nx G1 G2 Hxy.
+  assert (Gs : gamma (PulseCItv.add_int a1 IntLit.one) (IntLit.add x IntLit.one))
+    by exact (gamma_add_one _ _ N1 Nx G1).
+  assert (Hle : ile (IntLit.add x IntLit.one) y)
+    by (rewrite (add_comm x IntLit.one); exact (add_one_le _ _ Hxy)).
+  unfold PulseCItv.abduce_lt in Hsat.
+  destruct (PulseCItv.abduce_le (PulseCItv.add_int a1 IntLit.one) a2)
+    as [| p1 p2] eqn:E; [ discriminate | ].
+  pose proof (abduce_le_sat_sound _ _ _ _ E _ _ Gs G2 Hle) as [R1 R2].
+  destruct p1 as [b |]; cbn in Hsat; inversion Hsat; subst; clear Hsat;
+    [ | split; [ exact I | exact R2 ] ].
+  split; [ | exact R2 ].
+  (* refines (Some (add_int b minus_one)) x, from gamma b (x+1) *)
+  cbn [refines] in R1 |- *.
+  destruct (abduce_le_lhs_shape _ _ _ _ E) as [[u ->] | [l1' [u1' [u [Ha1 ->]]]]].
+  - (* the left refinement is bounded below by MinusInfinity: nothing to shift back *)
+    destruct R1 as [_ Ru]. cbn [PulseCItv.add_int between gamma Bound.add_int].
+    split; [ exact I | exact (sat_upper_shift_down u x Nx Ru) ].
+  - (* and otherwise by the caller's own lower bound, shifted up by this very function *)
+    destruct R1 as [Rl Ru].
+    destruct a1 as [l1 u1 | p q]; cbn [PulseCItv.add_int] in Ha1;
+      [ cbn [between] in Ha1 | cbn [outside] in Ha1; discriminate ].
+    inversion Ha1; subst; clear Ha1. destruct N1 as [Nl1 Nu1].
+    cbn [PulseCItv.add_int between gamma]. rewrite bound_add_int_round_trip. split.
+    + apply (sat_lower_add_one_iff l1 x Nl1 Nx). exact Rl.
+    + exact (sat_upper_shift_down u x Nx Ru).
+Qed.
+
+(** ** L16 and L17: flip_abduced
+
+    Lean: Abduced.flip_unsat and Abduced.flip_sat (Comparison.lean:290, 293).
+
+    flip_abduced is one line and these are two more, so it is worth saying why they are
+    here at all.  The dispatch reaches abduce_le and abduce_lt with the operands SWAPPED
+    for Ge and Gt, and then puts the two refinements back in the caller's order.  Without
+    a statement about the flip, every theorem about the dispatch could be proved of a
+    version that dropped it and answered about the wrong operand; the Example at the end
+    of this section is the computation that would then differ. *)
+
+Theorem flip_abduced_unsat_sound : forall r,
+    PulseCItv.flip_abduced r = Unsatisfiable -> r = Unsatisfiable.
+Proof. intros r H. destruct r as [| o1 o2]; [ reflexivity | discriminate ]. Qed.
+
+Theorem flip_abduced_sat_sound : forall r o1 o2,
+    PulseCItv.flip_abduced r = Satisfiable o1 o2 -> r = Satisfiable o2 o1.
+Proof.
+  intros r o1 o2 H. destruct r as [| p1 p2]; [ discriminate | ].
+  cbn in H. inversion H; subst. reflexivity.
+Qed.
+
+(** ** L18 and L19: the dispatch over the four ordered operators
+
+    Lean: abduceCmp_unsat_sound and abduceCmp_sat_sound (Comparison.lean:314, 328), there
+    over a four-constructor model of the operator and with negated fixed to false.
+
+    Here over Binop.t and over BOTH values of [negated], because the real
+    abduce_binop_constraints reaches the four helpers from eight rows of its table and the
+    eight are not the four repeated: (Gt, true) goes to abduce_le, (Le, true) to the
+    flipped abduce_lt, and so on.  A transcription error in that table is exactly the kind
+    of defect a proof of the four unnegated rows would not see.
+
+    [negated] means the comparison is being assumed FALSE, so the negated rows state the
+    negation of the operator's meaning.  Turning that back into a positive comparison
+    needs the order to be total, which it is - the two lemmas below are the only place
+    that is used.
+
+    THE nnu HYPOTHESES ARE STATED ON BOTH OPERANDS, AND FOUR OF THE EIGHT ROWS DO NOT NEED
+    THEM: the rows that land on abduce_le carry no hypothesis at all, and the rows that
+    swap the operands need the fragment on a2 and y rather than on a1 and x.  Saying so
+    per row would mean a function from the operator to which side is constrained, which
+    buys nothing: sgn_itv_nnu_itv discharges all four at once on the fragment the analyser
+    runs in, so the uniform statement is weaker to prove with and no harder to use. *)
+
+Lemma not_ile_ilt : forall x y, ~ ile x y -> ilt y x.
+Proof.
+  intros x y H. apply ilt_iff.
+  destruct (compare_value_spec x y) as [[E K] | [[E [K1 K2]] | [E K]]].
+  - exfalso. apply H. apply ile_iff. unfold lexle, lexlt, irank, fst, snd in *. lia.
+  - exfalso. apply H. apply ile_iff. unfold lexle, irank, fst, snd in *. lia.
+  - unfold lexlt, irank, fst, snd in *. lia.
+Qed.
+
+Lemma not_ilt_ile : forall x y, ~ ilt x y -> ile y x.
+Proof.
+  intros x y H. apply ile_iff.
+  destruct (compare_value_spec x y) as [[E K] | [[E [K1 K2]] | [E K]]].
+  - exfalso. apply H. apply ilt_iff. exact K.
+  - unfold lexle, irank, fst, snd in *. lia.
+  - unfold lexle, lexlt, irank, fst, snd in *. lia.
+Qed.
+
+(** The meaning of the four ordered operators on concrete literals, and what the dispatch
+    is being asked to decide for a given [negated]. *)
+Definition ocmp (bop : Binop.t) (x y : IntLit.t) : Prop :=
+  match bop with
+  | Binop.Le => ile x y
+  | Binop.Lt => ilt x y
+  | Binop.Ge => ile y x
+  | Binop.Gt => ilt y x
+  | _ => True
+  end.
+
+Definition asserted (negated : bool) (bop : Binop.t) (x y : IntLit.t) : Prop :=
+  if negated then ~ ocmp bop x y else ocmp bop x y.
+
+Definition is_ordered (bop : Binop.t) : Prop :=
+  bop = Binop.Le \/ bop = Binop.Lt \/ bop = Binop.Ge \/ bop = Binop.Gt.
+
+Theorem abduce_binop_constraints_unsat_sound :
+  forall (negated : bool) (bop : Binop.t) (a1 a2 : PulseCItv.t),
+    is_ordered bop -> nnu_itv a1 -> nnu_itv a2 ->
+    PulseCItv.abduce_binop_constraints negated bop a1 a2 = Unsatisfiable ->
+    forall x y : IntLit.t, nnu x -> nnu y -> gamma a1 x -> gamma a2 y ->
+      ~ asserted negated bop x y.
+Proof.
+  intros negated bop a1 a2 Hord N1 N2 H x y Nx Ny G1 G2 A.
+  destruct Hord as [-> | [-> | [-> | ->]]]; destruct negated;
+    unfold PulseCItv.abduce_binop_constraints in H; cbn [asserted ocmp] in A.
+  (* Le, negated: flip_abduced (abduce_lt a2 a1) *)
+  - exact (abduce_lt_unsat_sound _ _ N2 (flip_abduced_unsat_sound _ H) y x Ny G2 G1
+             (not_ile_ilt _ _ A)).
+  (* Le: abduce_le a1 a2 *)
+  - exact (abduce_le_unsat_sound _ _ H x y G1 G2 A).
+  (* Lt, negated: flip_abduced (abduce_le a2 a1) *)
+  - exact (abduce_le_unsat_sound _ _ (flip_abduced_unsat_sound _ H) y x G2 G1
+             (not_ilt_ile _ _ A)).
+  (* Lt: abduce_lt a1 a2 *)
+  - exact (abduce_lt_unsat_sound _ _ N1 H x y Nx G1 G2 A).
+  (* Ge, negated: abduce_lt a1 a2 *)
+  - exact (abduce_lt_unsat_sound _ _ N1 H x y Nx G1 G2 (not_ile_ilt _ _ A)).
+  (* Ge: flip_abduced (abduce_le a2 a1) *)
+  - exact (abduce_le_unsat_sound _ _ (flip_abduced_unsat_sound _ H) y x G2 G1 A).
+  (* Gt, negated: abduce_le a1 a2 *)
+  - exact (abduce_le_unsat_sound _ _ H x y G1 G2 (not_ilt_ile _ _ A)).
+  (* Gt: flip_abduced (abduce_lt a2 a1) *)
+  - exact (abduce_lt_unsat_sound _ _ N2 (flip_abduced_unsat_sound _ H) y x Ny G2 G1 A).
+Qed.
+
+Theorem abduce_binop_constraints_sat_sound :
+  forall (negated : bool) (bop : Binop.t) (a1 a2 : PulseCItv.t)
+         (o1 o2 : option PulseCItv.t),
+    is_ordered bop -> nnu_itv a1 -> nnu_itv a2 ->
+    PulseCItv.abduce_binop_constraints negated bop a1 a2 = Satisfiable o1 o2 ->
+    forall x y : IntLit.t, nnu x -> nnu y -> gamma a1 x -> gamma a2 y ->
+      asserted negated bop x y ->
+      refines o1 x /\ refines o2 y.
+Proof.
+  intros negated bop a1 a2 o1 o2 Hord N1 N2 H x y Nx Ny G1 G2 A.
+  destruct Hord as [-> | [-> | [-> | ->]]]; destruct negated;
+    unfold PulseCItv.abduce_binop_constraints in H; cbn [asserted ocmp] in A.
+  - pose proof (abduce_lt_sat_sound _ _ _ _ N2 (flip_abduced_sat_sound _ _ _ H)
+                  y x Ny G2 G1 (not_ile_ilt _ _ A)) as [P Q]. split; assumption.
+  - exact (abduce_le_sat_sound _ _ _ _ H x y G1 G2 A).
+  - pose proof (abduce_le_sat_sound _ _ _ _ (flip_abduced_sat_sound _ _ _ H)
+                  y x G2 G1 (not_ilt_ile _ _ A)) as [P Q]. split; assumption.
+  - exact (abduce_lt_sat_sound _ _ _ _ N1 H x y Nx G1 G2 A).
+  - exact (abduce_lt_sat_sound _ _ _ _ N1 H x y Nx G1 G2 (not_ile_ilt _ _ A)).
+  - pose proof (abduce_le_sat_sound _ _ _ _ (flip_abduced_sat_sound _ _ _ H)
+                  y x G2 G1 A) as [P Q]. split; assumption.
+  - exact (abduce_le_sat_sound _ _ _ _ H x y G1 G2 (not_ilt_ile _ _ A)).
+  - pose proof (abduce_lt_sat_sound _ _ _ _ N2 (flip_abduced_sat_sound _ _ _ H)
+                  y x Ny G2 G1 A) as [P Q]. split; assumption.
+Qed.
+
+(** ** L20: the witness that pins the flip
+
+    Lean: abduceCmp_ge_puts_the_refinements_in_the_callers_order (Comparison.lean:344).
+
+    [2,2] >= [1,1] must come back with the LEFT refinement {2} and the right one {1}, in
+    that order.  The dispatch gets there by calling abduce_le with the operands swapped,
+    so without flip_abduced it would answer {1}, {2} - every theorem above would still
+    hold of that version, because each one is stated about whichever operand the code
+    names, and only a computation can tell the two apart.  Executed on the translated
+    code. *)
+
+Definition s2 : IntLit.t := IntLit.t.Build IntLit.Signed 2 IntLit.NotPointer.
+
+Example witness_ge_returns_the_refinements_in_the_callers_order :
+  PulseCItv.abduce_binop_constraints false Binop.Ge
+    (PulseCItv.equal_to s2) (PulseCItv.equal_to s1)
+  = Satisfiable (Some (Unsafe.Between (Bound.Int s2) (Bound.Int s2)))
+      (Some (Unsafe.Between (Bound.Int s1) (Bound.Int s1))).
+Proof. vm_compute. reflexivity. Qed.
+
+(** ** Why the shift lemmas hypothesise the SHIFTED bound
+
+    The tidier-looking statement - nnu of the bound and of the value, as in the two shift
+    UP lemmas - is false, and this is the instance, computed rather than argued.
+
+    u0 is Unsigned 0.  It is in area 2, so it is nnu; n5 is Signed 5, also nnu.  Shifting
+    u0 down keeps the Unsigned tag and lands on Unsigned (-1), which is in area 3 and
+    therefore ABOVE every literal in areas 1 and 2.  So the two sides of the iff come
+    apart, and they come apart in OPPOSITE directions on the two halves of membership:
+    as a lower bound the shifted literal admits nothing, as an upper bound it admits
+    everything.  That asymmetry is why sat_upper_shift_down needs no side condition and
+    there is no sat_lower_shift_down. *)
+Example witness_the_shift_down_needs_more_than_nnu :
+  nnu u0 /\ nnu n5
+  /\ sat_lower (Bound.Int u0) (IntLit.add n5 IntLit.one)
+  /\ ~ sat_lower (Bound.add_int (Bound.Int u0) IntLit.minus_one) n5
+  /\ sat_upper (Bound.add_int (Bound.Int u0) IntLit.minus_one) n5
+  /\ ~ sat_upper (Bound.Int u0) (IntLit.add n5 IntLit.one).
+Proof.
+  (* apply conj rather than split: split would close the two positive conjuncts by
+     conversion on the spot and silently leave four goals for six bullets *)
+  repeat apply conj; unfold nnu, sat_lower, sat_upper, ile.
+  - vm_compute. discriminate.
+  - vm_compute. discriminate.
+  - vm_compute. reflexivity.
+  - vm_compute. discriminate.
+  - vm_compute. reflexivity.
+  - vm_compute. discriminate.
+Qed.
+
+(** ** The premise, and the half of it that lives outside Rocq
+
+    Every theorem ported above is conditional on its literals being in the nnu fragment.
+    That hypothesis costs nothing in the analyser, because every IntLit a Pulse analysis
+    can build is Signed and sgn_nnu puts Signed inside nnu.  The claim has two halves and
+    they are established in two different places, which is the point of stating them
+    together here.
+
+    CLOSURE is machine-checked, below and at sgn_add / sgn_neg / sgn_itv_minus: the
+    constructors the translation has produce Signed, lift1 carries the tag through, and
+    lift2 joins two of them.
+
+    The BASE CASE is not, and cannot be: this development sees the translated PulseCItv
+    and a stand-in IntLit, not infer/src/IR/IntLit.ml, whose real constructors are [of_z]
+    and [null].  It is pinned instead by rocq/intlit-signed-invariant.sh, which run.sh
+    executes - it asserts that the only places the real module mentions Unsigned are the
+    type declaration, the join and a pattern, that the only two record constructions write
+    the literal Signed, that IntLit.mli exposes neither the type [signedness] nor the
+    fields (so no other module can even NAME the constructor - that half is enforced by
+    the OCaml type system, not by a grep), and that the derived t_of_sexp, the one
+    remaining way in, has no caller.  The day that check refuses, the hypotheses above
+    stop covering the reachable inputs and the theorems say less than they look like
+    they say. *)
+
+Theorem signed_literals_are_closed :
+  (forall k, sgn (IntLit.of_int k))
+  /\ sgn IntLit.zero /\ sgn IntLit.one /\ sgn IntLit.minus_one
+  /\ (forall f x, sgn x -> sgn (IntLit.lift1 f x))
+  /\ (forall f x y, sgn x -> sgn y -> sgn (IntLit.lift2 f x y)).
+Proof.
+  repeat apply conj.
+  - intros k. reflexivity.
+  - reflexivity.
+  - reflexivity.
+  - reflexivity.
+  - intros f x Sx. exact Sx.
+  - intros f x y Sx Sy. unfold sgn, IntLit.lift2. cbn.
+    unfold sgn in Sx, Sy. rewrite Sx, Sy. reflexivity.
+Qed.
+
+(** and so every hypothesis the ported theorems carry is discharged on the fragment the
+    arithmetic already runs in *)
+Lemma sgn_bound_nnu_bound : forall b, sgn_bound b -> nnu_bound b.
+Proof.
+  intros b Sb. destruct b as [i | |]; cbn in Sb |- *;
+    [ exact (sgn_nnu i Sb) | exact I | exact I ].
+Qed.
+
+Lemma sgn_itv_nnu_itv : forall a, sgn_itv a -> nnu_itv a.
+Proof.
+  intros a Sa. destruct a as [l u | p q]; cbn in Sa |- *; destruct Sa as [S1 S2].
+  - split; [ exact (sgn_bound_nnu_bound l S1) | exact (sgn_bound_nnu_bound u S2) ].
+  - split; [ exact (sgn_nnu p S1) | exact (sgn_nnu q S2) ].
+Qed.
+
+(** sgn_nnu gives one inclusion; this gives the other direction's FAILURE, so "strictly
+    weaker" is a checked fact rather than a claim in a comment.  u0 is Unsigned 0: its
+    value is non-negative so it is in area 2 and therefore nnu, and its tag is Unsigned so
+    it is not sgn.  That literal is the whole reason the shift lemmas above are stated with
+    nnu instead of sgn, and the reason sgn_lex and its siblings could be rederived from the
+    nnu versions rather than the other way round.
+
+    Each conjunct unfolds only what occurs in it: [unfold sgn] on the first goal, where sgn
+    does not appear, is an error rather than a no-op. *)
+Example nnu_is_strictly_weaker : nnu u0 /\ ~ sgn u0.
+Proof.
+  split.
+  - unfold nnu, u0. vm_compute. discriminate.
+  - unfold sgn, u0. vm_compute. discriminate.
+Qed.
+
+Print Assumptions abduce_lt_unsat_sound.
+Print Assumptions abduce_lt_sat_sound.
+Print Assumptions abduce_binop_constraints_unsat_sound.
+Print Assumptions abduce_binop_constraints_sat_sound.

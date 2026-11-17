@@ -70,6 +70,21 @@ echo; echo "=== drift"
 ./drift.sh; drift_rc=$?
 [ $drift_rc -eq 0 ] || exit $drift_rc
 
+echo; echo "=== the IntLit premise: no negative unsigned literal can be created"
+# Every theorem about abduce_lt and the dispatch carries an [nnu] hypothesis, and this is
+# the step that says the hypothesis is free in the analyser.  Rocq proves the closure half
+# and cannot prove the base case, because it compiles a stand-in IntLit rather than
+# infer/src/IR/IntLit.ml.  See the header of the script.
+./intlit-signed-invariant.sh; intlit_rc=$?
+[ $intlit_rc -eq 0 ] || exit $intlit_rc
+
+echo; echo "=== and that check must refuse a planted violation, by name"
+# A gate nobody has watched refuse is not a gate.  The self-test plants one violation per
+# check in a COPY outside the tree, requires the refusal to name the check it targeted,
+# and - the half that is easy to forget - requires the same keywords in a COMMENT to be
+# tolerated, so the gate cannot start firing on the prose that explains it.
+./intlit-signed-invariant.sh --self-test || exit 1
+
 echo; echo "=== mutants: each must be REJECTED"
 ./mutate.sh || exit 1
 
