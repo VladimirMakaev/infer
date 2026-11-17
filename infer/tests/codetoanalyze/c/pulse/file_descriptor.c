@@ -394,3 +394,112 @@ void FP_daemonize_close_std_fds_ok() {
   dup(fd);
   dup(fd);
 }
+
+// A descriptor the process keeps as one of its standard streams is not leaked. The daemonize
+// idiom moves a descriptor onto 0, 1 and 2 and then closes the source only when it is not
+// itself one of them: if a standard stream was already closed, open returns it and keeping it
+// is the whole point.
+void retain_standard_fd_ok(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  if (fd > 2) {
+    close(fd);
+    return;
+  }
+  // fd is 0, 1 or 2 here and is deliberately retained
+}
+
+// the mirror, and the control that keeps the rule honest: the descriptor is known NOT to be a
+// standard one and nothing closes it
+void retain_nonstandard_fd_bad(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  if (fd <= 2) {
+    close(fd);
+    return;
+  }
+  // fd > 2 here and is leaked
+}
+
+// the whole reported shape: onto all three standard streams, closing the source only when it
+// is not one of them
+void daemonize_standard_streams_ok(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  dup2(fd, STDIN_FILENO);
+  dup2(fd, STDOUT_FILENO);
+  dup2(fd, STDERR_FILENO);
+  if (fd > STDERR_FILENO) {
+    close(fd);
+  }
+}
+
+// the same without the guard, so the source is always closed
+void daemonize_always_closing_source_ok(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  dup2(fd, STDIN_FILENO);
+  dup2(fd, STDOUT_FILENO);
+  dup2(fd, STDERR_FILENO);
+  close(fd);
+}
+
+// dup2 leaves the SOURCE open. Nothing here says the source is a standard stream, so moving it
+// onto one does not excuse never closing it.
+void dup2_onto_standard_stream_source_left_open_bad(const char* path) {
+  int fd = open(path, O_RDONLY, 0);
+  if (fd < 0) {
+    return;
+  }
+  dup2(fd, STDOUT_FILENO);
+}
+
+// and the same source, closed
+void dup2_onto_standard_stream_source_closed_ok(const char* path) {
+  int fd = open(path, O_RDONLY, 0);
+  if (fd < 0) {
+    return;
+  }
+  dup2(fd, STDOUT_FILENO);
+  close(fd);
+}
+
+// The narrowing happens in a callee: the helper gives back anything that is already a standard
+// stream and closes everything else. Whether the caller still knows the descriptor it kept is
+// in range depends on the helper's summary carrying that constraint out with the return value.
+static int keep_only_standard(int fd) {
+  if (fd > 2) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+void B3_narrowed_in_callee_ok(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  keep_only_standard(fd);
+}
+
+// and the twin that makes the silence above readable: the same shape with a helper that
+// narrows nothing, so the caller knows no more about the descriptor than before the call and
+// it is reported exactly as any other unclosed one would be
+static int keep_anything(int fd) { return fd; }
+
+void B3_not_narrowed_in_callee_bad(void) {
+  int fd = open("/dev/null", O_RDWR, 0);
+  if (fd < 0) {
+    return;
+  }
+  keep_anything(fd);
+}
