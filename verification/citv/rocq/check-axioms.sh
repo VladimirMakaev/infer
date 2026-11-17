@@ -72,7 +72,38 @@ if ! diff -u "$CITV_TMP/expected.txt" "$CITV_TMP/actual.txt" > "$CITV_TMP/setdif
   cat "$CITV_TMP/setdiff.txt"
 fi
 N=$(wc -l < "$CITV_TMP/expected.txt")
-[ "$N" -ge 23 ] || bad "expected/theorems.txt lists only $N names; this milestone has 23"
+[ "$N" -ge 38 ] || bad "expected/theorems.txt lists only $N names; this milestone has 38"
+
+# ---------------------------------------------- the README must not name a dead theorem
+# README.md's "What is proved" table listed abduce_le_sat_is_unsound_on_outside_lhs long
+# after that theorem had been replaced, and said the Outside/Between arm was still
+# excluded by a hypothesis after the arm had been repaired.  Nothing noticed, because
+# nothing compared the table with the file.  ONE DIRECTION ONLY: every theorem-looking
+# name in the table must exist, but the table is allowed not to list everything, because
+# some of its rows group several results behind a wildcard ("four witness_* results").
+README=../README.md
+if [ -f "$README" ]; then
+  grep -oE '^(Theorem|Example|Lemma|Definition) [A-Za-z_0-9]+' Soundness.v | awk '{print $2}' \
+    | sort -u > "$CITV_TMP/defined.txt"
+  # Two tables, and the Rocq name is in a different column in each: the results table
+  # names it first, the Lean-to-Rocq mapping names it second.  Only that column is read.
+  # The surrounding prose is not: a backtick in prose is a word, not a claim that a
+  # theorem exists.  Rows that group several results behind a wildcard (`witness_*`) fall
+  # out by the same rule, since the wildcard is not an identifier.
+  readme_table () { # readme_table <heading> <column>
+    awk -v h="$1" '$0 == h {inside=1; next} /^#{2,4} /{inside=0} inside && /^\| /' "$README" \
+      | cut -d'|' -f"$2" | grep -oE '`[A-Za-z_][A-Za-z_0-9]*`' | tr -d '`' | sort -u
+  }
+  { readme_table '## What is proved' 2
+    readme_table '#### The mapping, Lean theorem to Rocq theorem' 3
+  } | sort -u > "$CITV_TMP/named.txt"
+  [ -s "$CITV_TMP/named.txt" ] || bad "no theorem names found in README.md's tables; the check is not reading them"
+  ghosts=$(comm -23 "$CITV_TMP/named.txt" "$CITV_TMP/defined.txt")
+  if [ -n "$ghosts" ]; then
+    bad "README.md's tables name results that Soundness.v does not define:"
+    sed 's/^/      /' <<<"$ghosts"
+  fi
+fi
 
 # ------------------------------------------------------------------- Print Assumptions
 # Produced by a FRESHLY compiled file, so the reports cannot come from a cache.

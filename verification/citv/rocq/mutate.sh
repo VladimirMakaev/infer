@@ -15,7 +15,42 @@ cd "$(dirname "$0")" || exit 2
 CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-mut.XXXXXXXX") || exit 2
 trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
 
-MIN_MUTANTS=12
+MIN_MUTANTS=16
+
+# ------------------------------------------------ the prose must match the file
+# README.md said "eleven ways" and "MIN_MUTANTS is 11" while this file already held twelve:
+# the twelfth was added with the fix to the arm it guards and the paragraph was not moved
+# with it.  Nothing failed, because nothing compared the two.  A table that can drift from
+# the file it describes is worse than no table, so both directions are checked here, by
+# set equality on the names and by reading the count out of the sentence.
+readme_consistency () {
+  local tmp rc=0
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/citv-readme.XXXXXXXX") || return 2
+  grep -vE '^[[:space:]]*#' mutants.txt | grep -E '\|' | cut -d'|' -f1 \
+    | sed 's/ *$//' | grep -E '.' | sort -u > "$tmp/from-mutants"
+  # Only the table under "## Mutants": README.md has several others, and a regex over the
+  # whole file picked up theorem names and directory listings from them.
+  awk '/^## Mutants$/{inside=1; next} /^## /{inside=0} inside' README.md > "$tmp/section"
+  [ -s "$tmp/section" ] || { echo "REFUSED: README.md has no '## Mutants' section to check"; rm -rf "$tmp"; return 1; }
+  # the table rows are "| `name` | prose |"; take the first backticked cell of each
+  grep -oE '^\| `[A-Za-z_0-9/-]+` \|' "$tmp/section" | tr -d '|` ' | sort -u > "$tmp/from-readme"
+  if ! diff -u "$tmp/from-mutants" "$tmp/from-readme" > "$tmp/d"; then
+    echo "REFUSED: README.md's mutant table does not match mutants.txt"
+    sed 's/^/    /' "$tmp/d"
+    rc=1
+  fi
+  local stated
+  stated=$(grep -oE '`MIN_MUTANTS` is [0-9]+' README.md | head -1 | grep -oE '[0-9]+')
+  if [ "${stated:-}" != "$MIN_MUTANTS" ]; then
+    echo "REFUSED: README.md says MIN_MUTANTS is '${stated:-<absent>}', mutate.sh says $MIN_MUTANTS"
+    rc=1
+  fi
+  rm -rf "$tmp"
+  [ $rc -eq 0 ] && echo "ok: README.md's table and count agree with mutants.txt"
+  return $rc
+}
+readme_consistency || exit 1
+
 total=0; ok=0
 while IFS= read -r line; do
   case "$line" in ''|'#'*) continue;; esac
