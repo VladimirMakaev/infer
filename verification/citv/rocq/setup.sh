@@ -20,6 +20,13 @@
 # CITV_TRANSLATOR is how drift.sh is told to run deliberately without one. '=' defaults
 # only when it is unset.
 : "${CITV_TRANSLATOR=$CITV_HOME/bin/rocqOfOCaml.exe}"
+# Where the Z3 python bindings live. Exported as its own variable and deliberately NOT
+# folded into PYTHONPATH: PYTHONPATH is inherited by every python a sourcing shell runs,
+# including Infer's own build scripts, and putting a 67 MB site-packages tree in front of
+# them to serve one oracle is a side effect nobody asked for. The arith runner sets
+# PYTHONPATH from this for the one command that needs it. The z3 BINARY needs nothing
+# here: it is linked into $CITV_HOME/bin, which is already prepended to PATH below.
+: "${CITV_Z3_PYTHONPATH=$CITV_HOME/python}"
 
 # Exact pins.  opam resolves rocq-core to 9.3.0/9.2.0 by default, which is OUTSIDE
 # rocq-of-ocaml's window (>= 9.0 & < 9.1), so the versions are asserted below rather than
@@ -54,7 +61,7 @@ esac
   PKG_CONFIG_PATH="$CITV_HOME/prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   export LD_LIBRARY_PATH LIBRARY_PATH C_INCLUDE_PATH PKG_CONFIG_PATH
 }
-export PATH CITV_HOME CITV_OPAMROOT CITV_TRANSLATOR
+export PATH CITV_HOME CITV_OPAMROOT CITV_TRANSLATOR CITV_Z3_PYTHONPATH
 export OPAMROOT="$CITV_OPAMROOT"
 export ROCQ_RUN="opam exec --switch=$CITV_SWITCH --"
 

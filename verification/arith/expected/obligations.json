@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Obligation categories the symbolic arithmetic oracle must cover.",
+    "",
+    "The oracle asks an SMT solver to confirm or refute what the buffer-overrun interval",
+    "domain and the Pulse formula engine concluded: that a join over-approximates both",
+    "arguments, that widening is inclusive, that pruning is both sound and deflationary,",
+    "and that a formula the engine calls unsatisfiable really is.",
+    "",
+    "This list is a COVERAGE pin, not a count. A run must emit exactly these keys: a",
+    "category that stops being generated is a silent loss of coverage, and a category that",
+    "appears without being pinned means the oracle grew and this file must grow with it in",
+    "the same commit. Both directions are enforced.",
+    "",
+    "Soundness and completeness are deliberately separate. A formula the solver proves",
+    "unsatisfiable while the engine did not refute it is imprecision, not unsoundness, and",
+    "the two must never be added together: one is a bug and the other is a known cost.",
+    "",
+    "The categories and controls below were derived from a recorded run rather than retyped.",
+    "That run reported 18 categories over 149 requests with no violations and two precision",
+    "gaps, and its nine protocol controls each require a refusal rather than a clean result."
+  ],
+  "schema_version": 2,
+  "solver": "z3",
+  "solver_version": "4.15.3",
+  "categories": [
+    "input_exact",
+    "join_inclusion",
+    "leq_not_proved",
+    "leq_sound",
+    "prune_eq_deflation",
+    "prune_eq_preservation",
+    "prune_le_deflation",
+    "prune_le_preservation",
+    "prune_lt_deflation",
+    "prune_lt_preservation",
+    "pulse_alias",
+    "pulse_difference",
+    "pulse_division",
+    "pulse_linear",
+    "pulse_nonlinear",
+    "pulse_remainder",
+    "pulse_restricted",
+    "widen_inclusion"
+  ],
+  "pulse_verdict_kinds": [
+    "pulse_not_unsat_z3_sat",
+    "pulse_not_unsat_z3_unsat",
+    "pulse_unsat_z3_unsat"
+  ],
+  "protocol_controls": [
+    "empty",
+    "malformed",
+    "unknown-group",
+    "unknown-op",
+    "invalid-bound",
+    "empty-formula",
+    "undeclared-var",
+    "unknown-mutant",
+    "zero-coverage"
+  ]
+}
