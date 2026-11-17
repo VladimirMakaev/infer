@@ -1,0 +1,97 @@
+{
+ "_comment": [
+  "Baseline for the Pulse formula property checks. Two kinds of number, judged differently.",
+  "",
+  "violations: matched EXACTLY and in BOTH directions. A count that rises is a regression;",
+  "a count that falls is a deliberate semantic change whose baseline must move in the same",
+  "commit as the change. The normtest entries are real, triaged residuals, not noise:",
+  "simplify_shallow is shallow by contract so non-idempotence is its expected shape and the",
+  "caller iterates, and the Atom.eval entries are the `x mod 1` family, which the Phi layer",
+  "absorbs end to end (x % 1 < 0 is correctly pruned by the full solver). They are pinned so",
+  "that a change to either is noticed rather than tolerated.",
+  "",
+  "reach_floors: a property that never reaches its condition reports a pass for the wrong",
+  "reason. These harnesses have produced four such false clean runs, so the floors are part",
+  "of the verdict. They sit well below the observed values at the pinned seed, because they",
+  "exist to catch a property going dead, not to track small movements.",
+  "",
+  "Observed at seed 20261116, pre-push sizes (20000/40000/30000), on the engine as of the",
+  "commit that added this file.",
+  "",
+  "PER TIER, because violation counts are matched exactly and scale with the iteration",
+  "count. The nightly sizes are ten times the pre-push ones and reach one shape the",
+  "smaller run never does (B2 Sat-then-UNSAT), so a single shared baseline would fail",
+  "every nightly run."
+ ],
+ "nightly": {
+  "linarith": {
+   "reach_floors": {
+    "abstained": 40000,
+    "iterations": 200000
+   },
+   "violations": {
+    "poisoned surviving forms": 0
+   }
+  },
+  "norm": {
+   "reach_floors": {
+    "B1 first eval CHANGED the term": 15000,
+    "B2 first simplify CHANGED the term": 10000,
+    "B3 first Atom.eval CHANGED the atom": 150000,
+    "E1 both sides folded to constants": 800000
+   },
+   "violations": {
+    "B2 simplify_shallow is not idempotent": 77,
+    "B2 simplify_shallow: Sat then UNSAT on its own output": 3,
+    "B3 Atom.eval is not idempotent": 71,
+    "B3 Atom.eval on its own output returned a different atom count": 10,
+    "B3 Atom.eval: Sat then UNSAT on its own output": 16
+   }
+  },
+  "term": {
+   "reach_floors": {
+    "Mod with a non-integer operand": 7000,
+    "bitwise operand outside int64": 30000,
+    "division by zero": 1500,
+    "left unfolded (sound abstention)": 7000,
+    "shift amount outside [0,63]": 15000
+   },
+   "violations": {}
+  }
+ },
+ "pre-push": {
+  "linarith": {
+   "reach_floors": {
+    "abstained": 4000,
+    "iterations": 20000
+   },
+   "violations": {
+    "poisoned surviving forms": 0
+   }
+  },
+  "norm": {
+   "reach_floors": {
+    "B1 first eval CHANGED the term": 1500,
+    "B2 first simplify CHANGED the term": 1000,
+    "B3 first Atom.eval CHANGED the atom": 15000,
+    "E1 both sides folded to constants": 80000
+   },
+   "violations": {
+    "B2 simplify_shallow is not idempotent": 10,
+    "B3 Atom.eval is not idempotent": 11,
+    "B3 Atom.eval on its own output returned a different atom count": 3,
+    "B3 Atom.eval: Sat then UNSAT on its own output": 1
+   }
+  },
+  "term": {
+   "reach_floors": {
+    "Mod with a non-integer operand": 700,
+    "bitwise operand outside int64": 3000,
+    "division by zero": 150,
+    "left unfolded (sound abstention)": 700,
+    "shift amount outside [0,63]": 1500
+   },
+   "violations": {}
+  }
+ }
+}
