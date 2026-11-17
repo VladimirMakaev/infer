@@ -41,6 +41,16 @@ CITV_SETUP_ALLOW_NO_OPAM=1 . ./rocq/setup.sh || exit 2
 # on.  A mismatch stops the install rather than building something unidentified.
 CITV_OPAM_SHA256=324e78e3f33efeba279aacf9f9610cfec7b2df7d7e0e1640f75f09de85f96cc9
 CITV_GMP_SHA256=a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898
+# Z3. The version is NOT a free choice: the symbolic arithmetic oracle records z3_version
+# in every result it writes, and the one surviving set of recorded results was produced by
+# 4.15.3, so a replay against a different Z3 compares two engines rather than two runs.
+# Shipped as the upstream z3-solver wheel because that is what the oracle used -- it builds
+# its queries through the Z3 PYTHON API, not by piping SMT-LIB to a binary -- and the wheel
+# carries libz3, the bindings and a z3 executable together, all matching by construction.
+: "${CITV_Z3_VERSION:=4.15.3.0}"
+CITV_Z3_SHA256=a9afd9ceb290482097474d43f08415bcc1874f433189d1449f6c1508e9c68384
+CITV_Z3_WHEEL=z3_solver-$CITV_Z3_VERSION-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+CITV_Z3_URL=https://files.pythonhosted.org/packages/b9/0b/f15168475e5493ea44fa3c5e642903f05d2b870db71ad05662ed87a06976/$CITV_Z3_WHEEL
 
 # Packages.  The Rocq switch carries the proofs' dependencies AND the translator's, since
 # the translator is built in it.  The oracle switch carries exactly what verification/citv's
@@ -80,6 +90,10 @@ if [ $CHECK_ONLY = 1 ]; then
   report -d "rocq switch"   "$CITV_OPAMROOT/$CITV_SWITCH"
   report -d "oracle switch" "$CITV_OPAMROOT/$CITV_ORACLE_SWITCH"
   report -x translator      "${CITV_TRANSLATOR:-<empty>}"
+  # Both halves of Z3, because they fail apart: the binary is a symlink into the wheel, so
+  # a half-extracted wheel leaves a dangling link, and the oracle needs the MODULE anyway.
+  report -x z3              "$CITV_HOME/bin/z3"
+  report -d "z3 python"     "$CITV_Z3_PYTHONPATH/z3"
   if command -v opam >/dev/null 2>&1 && [ -d "$CITV_OPAMROOT/$CITV_SWITCH" ]; then
     citv_assert_pins && echo "  ok      pins                   $CITV_PINS" || rc=1
   fi
@@ -111,7 +125,7 @@ fetch() {
 # ------------------------------------------------------------------- 1. opam itself
 # Into the home rather than relying on the host's, so that the home is the whole story
 # and a fresh shell needs no PATH of its own.  setup.sh prepends $CITV_HOME/bin.
-say "[1/8] opam $CITV_OPAM_VERSION"
+say "[1/9] opam $CITV_OPAM_VERSION"
 if [ -x "$CITV_HOME/bin/opam" ]; then skip "$CITV_HOME/bin/opam"
 else
   fetch "$CITV_HOME/dl/opam" "$CITV_OPAM_SHA256" \
@@ -125,7 +139,7 @@ opam --version || die "the opam binary does not run"
 # zarith needs gmp.h and a libgmp.so to link against.  A host with a gmp development
 # package needs none of this; this box has libgmp.so.10 but no headers, so GMP is built
 # user-locally under the home.  setup.sh puts it on the four paths a build needs.
-say "[2/8] GMP"
+say "[2/9] GMP"
 if [ -e "$CITV_HOME/prefix/lib/libgmp.so" ]; then skip "$CITV_HOME/prefix"
 elif [ -e /usr/include/gmp.h ] && { [ -e /usr/lib64/libgmp.so ] || [ -e /usr/lib/x86_64-linux-gnu/libgmp.so ]; }; then
   echo "   the host provides gmp headers and a link library; nothing to build"
@@ -153,7 +167,7 @@ else
 fi
 
 # ------------------------------------------------------------------- 3. the opam root
-say "[3/8] opam root at $CITV_OPAMROOT"
+say "[3/9] opam root at $CITV_OPAMROOT"
 if [ -d "$CITV_OPAMROOT/repo" ]; then skip "$CITV_OPAMROOT"
 else
   if [ -n "${CITV_SEED_ROOT:-}" ] && [ -d "$CITV_SEED_ROOT/download-cache" ]; then
@@ -191,15 +205,15 @@ make_switch() {  # make_switch NAME COMPILER PKGS...
 # ----------------------------------------------------------------- 4. the Rocq switch
 # The versions are asserted at the end, not merely requested: opam left to itself resolves
 # rocq-core to 9.2/9.3, outside rocq-of-ocaml's >= 9.0 & < 9.1 window.
-say "[4/8] switch $CITV_SWITCH ($CITV_ROCQ_COMPILER) and the Rocq packages"
+say "[4/9] switch $CITV_SWITCH ($CITV_ROCQ_COMPILER) and the Rocq packages"
 make_switch "$CITV_SWITCH" "$CITV_ROCQ_COMPILER" $ROCQ_PKGS
 
 # --------------------------------------------------------------- 5. the oracle switch
-say "[5/8] switch $CITV_ORACLE_SWITCH ($CITV_ORACLE_COMPILER) and the oracle packages"
+say "[5/9] switch $CITV_ORACLE_SWITCH ($CITV_ORACLE_COMPILER) and the oracle packages"
 make_switch "$CITV_ORACLE_SWITCH" "$CITV_ORACLE_COMPILER" $ORACLE_PKGS
 
 # ------------------------------------------------------- 6. the translator's source
-say "[6/8] rocq-of-ocaml at $CITV_TRANSLATOR_COMMIT"
+say "[6/9] rocq-of-ocaml at $CITV_TRANSLATOR_COMMIT"
 if [ -d "$TRANSLATOR_SRC/.git" ]; then skip "$TRANSLATOR_SRC"
 else
   git clone "$CITV_TRANSLATOR_REPO" "$TRANSLATOR_SRC" || die "clone failed"
@@ -213,7 +227,7 @@ case "$got" in "$CITV_TRANSLATOR_COMMIT"*) ;; *) die "HEAD is $got, not $CITV_TR
 # Only the executable, not the opam package: the package's build also compiles the Rocq
 # library in proofs/, which step 8 does separately so that a failure there is legible.
 # src/dune shows the executable itself needs merlin-lib, smart_print, angstrom and yojson.
-say "[7/8] rocqOfOCaml.exe"
+say "[7/9] rocqOfOCaml.exe"
 if [ -x "$CITV_TRANSLATOR" ]; then skip "$CITV_TRANSLATOR"
 else
   ( cd "$TRANSLATOR_SRC" && opam exec --switch="$CITV_SWITCH" -- dune build src/rocqOfOCaml.exe ) ||
@@ -226,7 +240,7 @@ fi
 # Every generated .v starts with "Require Import RocqOfOCaml.RocqOfOCaml", so without this
 # nothing under rocq/v compiles.  It is the library whose `assert` parameter is flatly
 # inconsistent; check-axioms.sh whitelists nothing because of it.
-say "[8/8] the RocqOfOCaml support library"
+say "[8/9] the RocqOfOCaml support library"
 SWPREFIX=$CITV_OPAMROOT/$CITV_SWITCH
 if [ -d "$SWPREFIX/lib/coq/user-contrib/RocqOfOCaml" ] ||
    [ -d "$SWPREFIX/lib/rocq/user-contrib/RocqOfOCaml" ]; then
@@ -240,9 +254,54 @@ else
       die "the support library failed to build, see $CITV_HOME/rocqofocaml-lib.log"; }
 fi
 
+# --------------------------------------------------------------------------- 9. Z3
+# Last because nothing above depends on it: it serves the symbolic arithmetic oracle, not
+# the Rocq proofs, so a box that only runs the proofs is complete without this step and a
+# failure here does not invalidate steps 1-8.
+#
+# A wheel is a zip, and it is unpacked with python's own zipfile rather than pip or unzip.
+# pip is not guaranteed on a box that has only ever built OCaml, and `pip install` would
+# also consult the network and the host's site-packages; here the sha256 is checked first
+# and the bytes that are extracted are exactly the bytes that were hashed.
+say "[9/9] Z3 $CITV_Z3_VERSION"
+if [ -x "$CITV_HOME/bin/z3" ] && [ -d "$CITV_Z3_PYTHONPATH/z3" ]; then
+  skip "z3 $CITV_Z3_VERSION in $CITV_Z3_PYTHONPATH"
+else
+  fetch "$CITV_HOME/dl/$CITV_Z3_WHEEL" "$CITV_Z3_SHA256" "$CITV_Z3_URL"
+  mkdir -p "$CITV_Z3_PYTHONPATH" || die "cannot create $CITV_Z3_PYTHONPATH"
+  python3 -I -c '
+import sys, zipfile
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+    "$CITV_HOME/dl/$CITV_Z3_WHEEL" "$CITV_Z3_PYTHONPATH" ||
+    die "could not unpack $CITV_Z3_WHEEL"
+  # The wheel does not mark its executables, so chmod rather than assume.
+  chmod +x "$CITV_Z3_PYTHONPATH/bin/z3" 2>/dev/null
+  ln -sf "$CITV_Z3_PYTHONPATH/bin/z3" "$CITV_HOME/bin/z3" ||
+    die "could not link z3 into $CITV_HOME/bin"
+fi
+
 # ------------------------------------------------------------------------- verify
 say "verifying"
 citv_assert_pins || die "the toolchain was built but does not match the pins"
+# Z3 is verified by SOLVING, not by --version: the failure this catches is a wheel whose
+# libz3.so does not load, which prints a perfectly good version string from the binary and
+# then dies on the first query from the module. Both halves, one assertion each.
+"$CITV_HOME/bin/z3" --version >/dev/null 2>&1 || die "z3 is installed but will not run"
+# -I keeps the script isolated from the invoking environment and the cwd, which also means
+# it IGNORES PYTHONPATH (-I implies -E). So the bindings are put on sys.path explicitly
+# rather than exported. Getting this wrong fails loudly -- it did, on the first run of this
+# step -- but a consumer that sets PYTHONPATH and then calls `python3 -I` would instead see
+# a confusing ModuleNotFoundError for a module that is demonstrably installed.
+python3 -I -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import z3
+x, y = z3.Ints("x y")
+s = z3.Solver(); s.add(x * y == 5, x == 2)
+assert s.check() == z3.unsat, "z3 did not refute a refutable system"
+sys.stderr.write("   z3 python API %s answers queries\n" % z3.get_version_string())' \
+  "$CITV_Z3_PYTHONPATH" ||
+  die "the z3 python bindings do not answer a query"
 "$CITV_TRANSLATOR" -help >/dev/null 2>&1 || "$CITV_TRANSLATOR" --help >/dev/null 2>&1 ||
   echo "   note: the translator does not answer --help; it is exercised by rocq/run.sh"
 echo
