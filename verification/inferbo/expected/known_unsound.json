@@ -1,0 +1,42 @@
+{
+ "s32": [],
+ "signed": [],
+ "u32": [
+  "probe_w_shl_117_0",
+  "probe_w_shl_117_1",
+  "probe_w_shl_127_0",
+  "probe_w_shl_131_0",
+  "probe_w_shl_131_1",
+  "probe_w_shl_141_0",
+  "probe_w_shl_141_1",
+  "probe_w_shl_145_0",
+  "probe_w_shl_145_1",
+  "probe_w_shl_169_0",
+  "probe_w_shl_169_1",
+  "probe_w_shl_173_0",
+  "probe_w_shl_173_1",
+  "probe_w_shl_183_0",
+  "probe_w_shl_187_0",
+  "probe_w_shl_47_0",
+  "probe_w_shl_47_1",
+  "probe_w_shl_61_0",
+  "probe_w_shl_61_1",
+  "probe_w_shl_75_0",
+  "probe_w_shl_89_0"
+ ],
+ "unsigned": [
+  "probe_u_shl_217_0",
+  "probe_u_shl_221_0",
+  "probe_u_shl_221_1",
+  "probe_u_shl_235_0",
+  "probe_u_shl_235_1",
+  "probe_u_shl_239_0",
+  "probe_u_shl_239_1",
+  "probe_u_shl_289_0",
+  "probe_u_shl_289_1",
+  "probe_u_shl_293_0",
+  "probe_u_shl_293_1",
+  "probe_u_shl_307_0",
+  "probe_u_shl_311_0"
+ ]
+}
