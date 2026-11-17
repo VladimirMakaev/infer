@@ -2307,6 +2307,60 @@ let mark_potential_leaks location ~dead_roots astate =
         potential_leaks astate
 
 
+(** A descriptor the path condition proves to be 0, 1 or 2 is one of the process's own standard
+    streams and is not leaked. THE RULE IS ABOUT THE VALUE AND NOTHING ELSE: it does not ask whether
+    the descriptor was ever placed on a standard stream, so a descriptor merely narrowed to that
+    range, by a guard and with no [dup2] anywhere, is exempt too. The idiom it exists for is
+    daemonize, which moves a descriptor onto 0, 1 and 2 and then closes the source only if it is not
+    itself one of them: when a standard stream was already closed, open returns its number back and
+    keeping it is the point. Ask the PATH CONDITION rather than the state, because there the
+    descriptor is an interval and not a constant, so there is nothing to look up: if placing it
+    outside 0..2 is unsatisfiable here, it is a standard descriptor here. A descriptor that is
+    merely unconstrained stays satisfiable outside the range and still reports, and so does one on a
+    path the solver can see is unsatisfiable. *)
+let is_retained_standard_fd (allocator : Attribute.allocator) addr astate =
+  match allocator with
+  | FileDescriptor _ ->
+      let v = downcast addr in
+      let assert_ op bound pc =
+        Formula.prune_binop ~negated:false op (AbstractValueOperand v)
+          (ConstOperand (Const.Cint (IntLit.of_int bound)))
+          pc
+      in
+      let cannot_be op bound =
+        assert_ op bound astate.path_condition |> SatUnsat.sat |> Option.is_none
+      in
+      (* Asking only what the descriptor cannot be is not enough: on a path whose condition is
+         already contradictory every question answers "cannot", and the descriptor would be
+         called a standard stream for a reason that has nothing to do with it. Such a path
+         should never reach a report, but an unreachable branch that silently drops reports is
+         a bad thing to leave resting on an expectation, so require that it CAN also be in the
+         range. That is false whenever the solver can SEE the path is unsatisfiable, which is
+         not the same as whenever it is: an unsatisfiability it cannot derive leaves the guard
+         as ineffective as if it were absent, and the first two questions carry the rule. *)
+      let can_be_in_range =
+        match assert_ Binop.Ge 0 astate.path_condition with
+        | Unsat _ ->
+            false
+        | Sat (pc, _) -> (
+          match assert_ Binop.Le 2 pc with Unsat _ -> false | Sat _ -> true )
+      in
+      cannot_be Binop.Lt 0 && cannot_be Binop.Gt 2 && can_be_in_range
+  | CMalloc
+  | CustomMalloc _
+  | CRealloc
+  | CustomRealloc _
+  | CppNew
+  | CppNewArray
+  | JavaResource _
+  | CSharpResource _
+  | ObjCAlloc
+  | SwiftAlloc
+  | Awaitable
+  | HackBuilderResource _ ->
+      false
+
+
 let check_memory_leaks ~live_addresses ~unreachable_addresses astate =
   let reaches_into addr addrs astate =
     CanonValue.Set.mem addr addrs
@@ -2339,6 +2393,11 @@ let check_memory_leaks ~live_addresses ~unreachable_addresses astate =
     let allocated_not_freed_opt = Attributes.get_allocated_not_freed attributes in
     match allocated_not_freed_opt with
     | None ->
+        Ok ()
+    | Some (allocator, _trace) when is_retained_standard_fd allocator addr astate ->
+        L.d_printfln ~color:Orange
+          "not a leak: %a is one of the process's standard descriptors on this path" CanonValue.pp
+          addr ;
         Ok ()
     | Some (allocator, trace) ->
         (* allocated but not freed => leak *)
