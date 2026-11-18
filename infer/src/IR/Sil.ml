@@ -69,6 +69,96 @@ type instr =
   | Call of ret_var * Exp.t * param list * Location.t * CallFlags.t
   | Metadata of instr_metadata
 [@@deriving compare, equal, hash, normalize]
+[@@normalize.export_hash]
+[@@normalize.hash
+  let template_name = function
+    | Typ.CppClass {template_spec_info= Typ.Template _} ->
+        true
+    | _ ->
+        false
+  in
+  let rec template_type typ =
+    match typ.Typ.desc with
+    | Typ.Tstruct name ->
+        template_name name
+    | Typ.Tptr (elt, _) | Typ.Tarray {elt} ->
+        template_type elt
+    | _ ->
+        false
+  in
+  let template_proc = function
+    | Procname.C {c_template_args= Typ.Template _} ->
+        true
+    | Procname.ObjC_Cpp {template_args= Typ.Template _} ->
+        true
+    | Procname.ObjC_Cpp {class_name} ->
+        template_name class_name
+    | _ ->
+        false
+  in
+  let rec template_exp = function
+    | Exp.Const (Const.Cfun pname) ->
+        template_proc pname
+    | Exp.Lvar pv ->
+        Option.exists (Pvar.get_declaring_function pv) ~f:template_proc
+    | Exp.Lfield ({exp}, field, typ) ->
+        template_name (Fieldname.get_class_name field) || template_type typ || template_exp exp
+    | Exp.Cast (typ, exp) | Exp.UnOp (_, exp, Some typ) ->
+        template_type typ || template_exp exp
+    | Exp.UnOp (_, exp, None) | Exp.Exn exp ->
+        template_exp exp
+    | Exp.BinOp (_, left, right) | Exp.Lindex (left, right) ->
+        template_exp left || template_exp right
+    | Exp.Sizeof {typ} ->
+        template_type typ
+    | Exp.Var _ | Exp.Const _ | Exp.Closure _ ->
+        false
+  in
+  let rec exp_hash = function
+    | Exp.Var id ->
+        Stdlib.Hashtbl.hash (0, Ident.hash id)
+    | Exp.Lvar pv ->
+        Stdlib.Hashtbl.hash (1, Pvar.normalizer_hash pv)
+    | Exp.Const (Const.Cfun pname) ->
+        Stdlib.Hashtbl.hash (2, Procname.normalizer_hash pname)
+    | Exp.Lfield ({exp; is_implicit}, field, typ) ->
+        Stdlib.Hashtbl.hash
+          ( 3
+          , exp_hash exp
+          , Typ.normalizer_hash_name (Fieldname.get_class_name field)
+          , String.hash (Fieldname.get_field_name field)
+          , Typ.normalizer_hash typ
+          , is_implicit )
+    | Exp.Cast (typ, exp) ->
+        Stdlib.Hashtbl.hash (4, Typ.normalizer_hash typ, exp_hash exp)
+    | Exp.Lindex (left, right) ->
+        Stdlib.Hashtbl.hash (5, exp_hash left, exp_hash right)
+    | exp ->
+        Exp.hash exp
+  in
+  function
+  | Load {id; e; typ; loc} when template_type typ || template_exp e ->
+      Stdlib.Hashtbl.hash (0, Ident.hash id, exp_hash e, Typ.normalizer_hash typ, Location.hash loc)
+  | Store {e1; typ; e2; loc} when template_type typ || template_exp e1 || template_exp e2 ->
+      Stdlib.Hashtbl.hash (1, exp_hash e1, Typ.normalizer_hash typ, exp_hash e2, Location.hash loc)
+  | Call ((id, ret_typ), callee, args, loc, flags)
+    when template_type ret_typ || template_exp callee
+         || List.exists args ~f:(fun (exp, typ) -> template_type typ || template_exp exp) ->
+      let count, args_digest =
+        List.fold args ~init:(0, 0) ~f:(fun (count, digest) (exp, typ) ->
+            (count + 1, Stdlib.Hashtbl.hash (digest, exp_hash exp, Typ.normalizer_hash typ)) )
+      in
+      Stdlib.Hashtbl.hash
+        ( 2
+        , Ident.hash id
+        , Typ.normalizer_hash ret_typ
+        , exp_hash callee
+        , count
+        , args_digest
+        , Location.hash loc
+        , CallFlags.hash flags )
+  | instr ->
+      hash_instr instr]
 
 let skip_instr = Metadata Skip
 

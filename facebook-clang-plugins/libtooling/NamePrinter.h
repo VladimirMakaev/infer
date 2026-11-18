@@ -8,6 +8,10 @@
 #pragma once
 #include <clang/AST/DeclVisitor.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/DenseMap.h>
+
+#include <algorithm>
+#include <limits>
 
 #include "atdlib/ATDWriter.h"
 namespace ASTLib {
@@ -23,8 +27,16 @@ class NamePrinter : public ConstDeclVisitor<NamePrinter<ATDWriter>> {
   const SourceManager &SM;
   ATDWriter &OF;
 
+  struct CachedTemplateArgs {
+    const TemplateArgument *Data;
+    size_t Size;
+    std::string Printed;
+  };
+  llvm::DenseMap<const NamedDecl *, CachedTemplateArgs> TemplateArgsCache;
+
   PrintingPolicy getPrintingPolicy();
   void printTemplateArgList(llvm::raw_ostream &OS,
+                            const NamedDecl &D,
                             const ArrayRef<TemplateArgument> Args);
 
  public:
@@ -53,24 +65,86 @@ uint64_t fnv64Hash(const char *s, int n) {
 }
 
 uint64_t fnv64Hash(llvm::raw_svector_ostream &OS) {
-  std::string s = OS.str().str();
+  llvm::StringRef s = OS.str();
   return fnv64Hash(s.data(), s.size());
 }
 
 const int templateLengthThreshold = 40;
+
+// Keep only the literal prefix while hashing the exact bytes Clang prints.
+class TemplateArgumentSpellingStream : public llvm::raw_ostream {
+  SmallString<64> Prefix;
+  uint64_t Hash = FNV64_hash_start;
+  uint64_t BytesWritten = 0;
+
+  void write_impl(const char *Data, size_t Size) override {
+    if (Prefix.size() < templateLengthThreshold) {
+      const size_t Keep = std::min(
+          Size, static_cast<size_t>(templateLengthThreshold) - Prefix.size());
+      Prefix.append(Data, Data + Keep);
+    }
+    for (size_t I = 0; I < Size; ++I) {
+      // Preserve the original char signedness, including non-ASCII bytes.
+      Hash ^= Data[I];
+      Hash *= FNV64_prime;
+    }
+    BytesWritten += Size;
+  }
+
+  uint64_t current_pos() const override {
+    return BytesWritten;
+  }
+
+ public:
+  TemplateArgumentSpellingStream() : llvm::raw_ostream(true) {}
+
+  uint64_t size() const {
+    return BytesWritten;
+  }
+
+  void print(llvm::raw_ostream &OS) const {
+    if (BytesWritten > templateLengthThreshold) {
+      OS << "<";
+      OS.write_hex(Hash);
+      OS << ">";
+    } else {
+      OS << llvm::StringRef(Prefix.data(), Prefix.size());
+    }
+  }
+};
+
 template <class ATDWriter>
 void NamePrinter<ATDWriter>::printTemplateArgList(
-    llvm::raw_ostream &OS, const ArrayRef<TemplateArgument> Args) {
-  SmallString<64> Buf;
-  llvm::raw_svector_ostream tmpOS(Buf);
-  clang::printTemplateArgumentList(tmpOS, Args, getPrintingPolicy());
-  if (tmpOS.str().size() > templateLengthThreshold) {
-    OS << "<";
-    OS.write_hex(fnv64Hash(tmpOS));
-    OS << ">";
-  } else {
-    OS << tmpOS.str();
+    llvm::raw_ostream &OS,
+    const NamedDecl &D,
+    const ArrayRef<TemplateArgument> Args) {
+  auto Cached = TemplateArgsCache.find(&D);
+  if (Cached != TemplateArgsCache.end() && Cached->second.Data == Args.data() &&
+      Cached->second.Size == Args.size()) {
+    OS << Cached->second.Printed;
+    return;
   }
+
+  TemplateArgumentSpellingStream Spelling;
+  clang::printTemplateArgumentList(Spelling, Args, getPrintingPolicy());
+  SmallString<64> Buf;
+  llvm::raw_svector_ostream Result(Buf);
+  if (Spelling.size() >
+      static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+    // The original hash helper narrows its length to int. Preserve that
+    // behavior for unusually large spellings, too.
+    SmallString<64> LegacyBuf;
+    llvm::raw_svector_ostream Legacy(LegacyBuf);
+    clang::printTemplateArgumentList(Legacy, Args, getPrintingPolicy());
+    Result << "<";
+    Result.write_hex(fnv64Hash(Legacy));
+    Result << ">";
+  } else {
+    Spelling.print(Result);
+  }
+  std::string Printed = Result.str().str();
+  OS << Printed;
+  TemplateArgsCache[&D] = {Args.data(), Args.size(), std::move(Printed)};
 }
 
 template <class ATDWriter>
@@ -153,7 +227,7 @@ void NamePrinter<ATDWriter>::VisitTagDecl(const TagDecl *D) {
     ArrayRef<TemplateArgument> Args;
     const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
     Args = TemplateArgs.asArray();
-    printTemplateArgList(StrOS, Args);
+    printTemplateArgList(StrOS, *D, Args);
   }
   OF.emitString(StrOS.str().str());
 }
@@ -166,7 +240,7 @@ void NamePrinter<ATDWriter>::VisitFunctionDecl(const FunctionDecl *FD) {
           FD->getTemplateSpecializationArgs()) {
     SmallString<64> Buf;
     llvm::raw_svector_ostream StrOS(Buf);
-    printTemplateArgList(StrOS, TemplateArgs->asArray());
+    printTemplateArgList(StrOS, *FD, TemplateArgs->asArray());
     template_str = StrOS.str().str();
   }
   OF.emitString(FD->getNameAsString() + template_str);

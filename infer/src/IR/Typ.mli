@@ -134,6 +134,11 @@ and template_spec_info =
                 template arguments is also needed for uniqueness. *)
       ; args: template_arg list }
 
+val normalizer_hash : t -> int
+
+val normalizer_hash_name : name -> int
+(** Digests for transient normalization lookup only, not persisted or public hashes. *)
+
 val pp_template_spec_info : Pp.env -> F.formatter -> template_spec_info -> unit
 [@@warning "-unused-value-declaration"]
 

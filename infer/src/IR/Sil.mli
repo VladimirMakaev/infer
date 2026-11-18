@@ -95,6 +95,9 @@ val equal_structural_instr : instr -> instr -> Exp.t Exp.Map.t -> bool * Exp.t E
 
 val skip_instr : instr
 
+val normalizer_hash_instr : instr -> int
+(** Digest for transient normalization lookup only, not a persisted or public hash. *)
+
 val instr_is_auxiliary : instr -> bool
 (** Check if an instruction is auxiliary, or if it comes from source instructions. *)
 

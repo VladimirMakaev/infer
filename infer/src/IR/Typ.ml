@@ -13,6 +13,32 @@ module Hashtbl = Stdlib.Hashtbl
 module L = Logging
 module F = Format
 
+(** Cache the original semantic hash of immutable values by physical identity. The cache-key hash is
+    bounded and does not decide semantic equality. Keeping the original bucket hash avoids putting
+    every unmangled specialization of a class into one bucket. Limit retained keys and clear them
+    with the normalizers. *)
+let memoize_template_hash (type a) (hash : a -> int) =
+  let module H = Hashtbl.Make (struct
+    type t = a
+
+    let equal = phys_equal
+
+    let hash = Hashtbl.hash
+  end) in
+  let cache = Domain.DLS.new_key (fun () -> H.create 16) in
+  HashNormalizer.register_reset (fun () -> H.reset @@ Domain.DLS.get cache) ;
+  fun value ->
+    let table = Domain.DLS.get cache in
+    match H.find_opt table value with
+    | Some digest ->
+        digest
+    | None ->
+        let digest = hash value in
+        if H.length table >= 2048 then H.reset table ;
+        H.add table value digest ;
+        digest
+
+
 (** Kinds of integers *)
 type ikind =
   | IChar  (** [char] *)
@@ -127,6 +153,20 @@ type type_quals =
 
 (** types for sil (structured) expressions *)
 type t = {desc: desc; quals: type_quals}
+[@@normalize.export_hash]
+[@@normalize.hash
+  let fallback_hash = memoize_template_hash hash in
+  fun typ ->
+    let rec template_hash nested_typ =
+      match nested_typ.desc with
+      | Tstruct (CppClass {template_spec_info= Template {mangled}}) ->
+          Some (match mangled with Some mangled -> String.hash mangled | None -> fallback_hash typ)
+      | Tptr (elt, _) | Tarray {elt} ->
+          template_hash elt
+      | _ ->
+          None
+    in
+    match template_hash typ with Some digest -> digest | None -> hash typ]
 
 and function_prototype = {params_type: t list; return_type: t}
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
@@ -148,6 +188,13 @@ and objc_block_sig = {class_name: name option; name: string; mangled: string}
 and c_function_sig =
   {c_name: QualifiedCppName.t; c_mangled: string option; c_template_args: template_spec_info}
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+[@@normalize.hash
+  fun signature ->
+    match signature.c_mangled with
+    | Some mangled ->
+        String.hash mangled
+    | None ->
+        hash_c_function_sig signature]
 
 and name =
   | CStruct of QualifiedCppName.t
@@ -166,6 +213,14 @@ and name =
   | CFunction of c_function_sig
   | SwiftClosure of Mangled.t
 [@@deriving hash, sexp, compare, equal, yojson_of]
+[@@normalize.export_hash]
+[@@normalize.hash
+  let fallback_hash = memoize_template_hash hash_name in
+  function
+  | CppClass {template_spec_info= Template {mangled}} as name -> (
+    match mangled with Some mangled -> String.hash mangled | None -> fallback_hash name )
+  | name ->
+      hash_name name]
 
 and template_arg =
   | TType of t
@@ -441,6 +496,27 @@ let is_template_spec_info_empty = function
 module Name = struct
   type t = name [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
+  let template_suffix_cache = Domain.DLS.new_key (fun () -> None)
+
+  let () = HashNormalizer.register_reset (fun () -> Domain.DLS.set template_suffix_cache None)
+
+  let template_suffix template_spec_info =
+    let render () = F.asprintf "%a" (pp_template_spec_info Pp.text) template_spec_info in
+    match template_spec_info with
+    | Template {mangled; args= _ :: _} -> (
+      match Domain.DLS.get template_suffix_cache with
+      | Some (cached_mangled, cached_info, suffix)
+        when Option.equal String.equal mangled cached_mangled
+             && phys_equal template_spec_info cached_info ->
+          suffix
+      | _ ->
+          let suffix = render () in
+          Domain.DLS.set template_suffix_cache (Some (mangled, template_spec_info, suffix)) ;
+          suffix )
+    | _ ->
+        render ()
+
+
   let compare_name x y =
     match (x, y) with
     | ( (CStruct name1 | CUnion name1 | CppClass {name= name1})
@@ -454,7 +530,7 @@ module Name = struct
     | CStruct name | CUnion name | ObjcProtocol name | ObjcClass name ->
         name
     | CppClass {name; template_spec_info} ->
-        let template_suffix = F.asprintf "%a" (pp_template_spec_info Pp.text) template_spec_info in
+        let template_suffix = template_suffix template_spec_info in
         QualifiedCppName.append_template_args_to_last name ~args:template_suffix
     | JavaClass _
     | CSharpClass _
