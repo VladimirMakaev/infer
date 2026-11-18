@@ -644,6 +644,10 @@ val pulse_max_cfg_size : int
 
 val pulse_max_disjuncts : int
 
+val pulse_opaque_max_size : int
+
+val pulse_opaque_max_depth : int
+
 val pulse_max_heap : int option
 
 val pulse_model_abort : string list

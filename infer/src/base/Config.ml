@@ -2554,6 +2554,21 @@ and pulse_max_disjuncts =
     "Stop exploring new paths after $(i,int) disjunctions in the domain"
 
 
+and pulse_opaque_max_size =
+  CLOpt.mk_int ~long:"pulse-opaque-max-size" ~default:256
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Maximum number of term nodes an opaque (uncomputable) value may carry. A larger payload is \
+     replaced by a fresh unconstrained value: the path stays feasible, but the term is neither \
+     retained nor re-traversed by substitution."
+
+
+and pulse_opaque_max_depth =
+  CLOpt.mk_int ~long:"pulse-opaque-max-depth" ~default:32
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Maximum nesting depth of the term an opaque (uncomputable) value may carry; see \
+     $(b,--pulse-opaque-max-size)."
+
+
 and pulse_max_heap =
   CLOpt.mk_int_opt ~long:"pulse-max-heap" ~meta:"int"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
@@ -4835,6 +4850,10 @@ and pulse_log_unknown_calls_sampled = !pulse_log_unknown_calls_sampled
 and pulse_max_cfg_size = !pulse_max_cfg_size
 
 and pulse_max_disjuncts = !pulse_max_disjuncts
+
+and pulse_opaque_max_size = !pulse_opaque_max_size
+
+and pulse_opaque_max_depth = !pulse_opaque_max_depth
 
 and pulse_max_heap = !pulse_max_heap
 
