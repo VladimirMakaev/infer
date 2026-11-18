@@ -207,6 +207,8 @@ and pp_no_paren pp_var fmt = function
 
 let pp = pp_paren ~needs_paren
 
+(* the payload here is always a [Const]: size 1, depth 1, so it is never over the cap
+   enforced by [mk_opaque] below *)
 let of_q q = if Q.is_rational q then Const q else Opaque (Const q)
 
 let of_intlit i = IntLit.to_big_int i |> Q.of_bigint |> of_q
@@ -457,11 +459,51 @@ let symbolic_linear l =
     ~f:(fun acc (v, coefficient) -> Add (acc, Mult (Const coefficient, Var v)))
 
 
+(* The payload of an [Opaque] term is bounded. [Opaque] exists to keep an execution that
+   capped arithmetic would otherwise turn Unsat, and the term it carries is uncomputable by
+   construction, so nothing downstream reads its shape -- but substitution does re-traverse it
+   and the heap does retain it. Left unbounded the payload grows through substitution: measured
+   on one real translation unit, payloads reached 46M nodes and depth 212 (median 5111/50),
+   against a maximum of 25 nodes and depth 8 across the whole numeric-abstain test file, for a
+   peak RSS of 12.8 GiB against 0.77 GiB and no change in findings.
+
+   Over the cap the payload is dropped and replaced by a FRESH unconstrained variable. That
+   keeps the meaning -- "some value we cannot compute" -- while making the term atomic: it is
+   not retained, and substitution walks one variable instead of a tree. The variable must be
+   fresh per construction: a shared stand-in would make two unrelated uncomputable values equal
+   to each other. It is left unconstrained, so nothing can later substitute it for a large term,
+   which is why the collapse converges instead of oscillating. *)
+let size_and_depth_within_cap t =
+  (* short-circuits as soon as either cap is exceeded, so this costs O(cap), not O(payload) *)
+  let max_size = Config.pulse_opaque_max_size in
+  let max_depth = Config.pulse_opaque_max_depth in
+  let exception TooBig in
+  let rec go t depth size =
+    if depth > max_depth then raise_notrace TooBig ;
+    let size = size + 1 in
+    if size > max_size then raise_notrace TooBig ;
+    match t with
+    | Opaque sub ->
+        (* [fold_map_direct_subterms] treats [Opaque] as having no sub-terms, but the
+           substitution walk this bound exists to shorten does descend into a nested payload.
+           Counting a nested [Opaque] as one node would make the cap compound: each level is
+           bounded on its own, so k levels of nesting would allow max_size ^ k nodes. Measure
+           what the walk actually visits. *)
+        go sub (depth + 1) size
+    | _ ->
+        fst
+          (fold_map_direct_subterms t ~init:size ~f:(fun size sub -> (go sub (depth + 1) size, sub)))
+  in
+  match go t 1 0 with _ -> true | exception TooBig -> false
+
+
+let mk_opaque t = if size_and_depth_within_cap t then Opaque t else Opaque (Var (Var.mk_fresh ()))
+
 let rec fold_subst_variables ~init ~f_subst ?(f_post = fun ~prev:_ acc t -> (acc, t)) t =
   match t with
   | Opaque source ->
       let acc, source' = fold_opaque_variables ~init ~f_subst source in
-      f_post ~prev:t acc (if phys_equal source source' then t else Opaque source')
+      f_post ~prev:t acc (if phys_equal source source' then t else mk_opaque source')
   | Var v ->
       let acc, op = f_subst init v in
       let t' = match op with VarSubst v' when Var.equal v v' -> t | _ -> of_subst_target op in
@@ -508,7 +550,7 @@ let rec fold_subst_variables ~init ~f_subst ?(f_post = fun ~prev:_ acc t -> (acc
                 | None ->
                     f_subst acc v )
           in
-          f_post ~prev:t acc (Opaque source) ) )
+          f_post ~prev:t acc (mk_opaque source) ) )
   | Const _
   | String _
   | Procname _
@@ -560,7 +602,7 @@ and fold_opaque_variables ~init ~f_subst t =
       (acc, if !changed then source else t)
   | Opaque source ->
       let acc, source' = fold_opaque_variables ~init ~f_subst source in
-      (acc, if phys_equal source source' then t else Opaque source')
+      (acc, if phys_equal source source' then t else mk_opaque source')
   | IsInstanceOf _ ->
       fold_subst_variables ~init ~f_subst t
   | _ ->
@@ -700,20 +742,20 @@ let eval_const_shallow_ t0 =
   in
   match eval_const_shallow_or_raise t0 with
   | Const q as t ->
-      if Q.is_rational q then Some t else Some (Opaque t0)
+      if Q.is_rational q then Some t else Some (mk_opaque t0)
   | t ->
       Some t
   | exception Undefined ->
       None
   | exception LinArith.NotRepresentable ->
-      Some (Opaque t0)
+      Some (mk_opaque t0)
 
 
 (* defend in depth against exceptions and debug *)
 let eval_const_shallow t =
   match Z.protect eval_const_shallow_ t with
   | None ->
-      Sat (Opaque t)
+      Sat (mk_opaque t)
   | Some None ->
       let reason () = F.asprintf "Undefined result when evaluating %a" (pp_no_paren Var.pp) t in
       Unsat {reason; source= __POS__}
@@ -909,11 +951,11 @@ let simplify_shallow t =
       let reason () = F.asprintf "Undefined result when simplifying %a" (pp_no_paren Var.pp) t in
       Unsat {reason; source= __POS__}
   | None | (exception LinArith.NotRepresentable) ->
-      Sat (Opaque t)
+      Sat (mk_opaque t)
   | exception UnsatExn unsat_info ->
       Unsat unsat_info
   | Some (Const q) when not (Q.is_rational q) ->
-      Sat (Opaque t)
+      Sat (mk_opaque t)
   | Some t' ->
       if not (phys_equal t t') then
         Debug.p "simplify_shallow: %a -> %a@\n" (pp_no_paren Var.pp) t (pp_no_paren Var.pp) t' ;
@@ -970,7 +1012,7 @@ let linearize t =
   in
   match aux_linearize t with
   | exception LinArith.NotRepresentable ->
-      Opaque t
+      mk_opaque t
   | None ->
       t
   | Some l ->
