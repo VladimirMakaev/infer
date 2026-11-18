@@ -8,9 +8,46 @@ open! IStd
 
 type record = {s: string; i: int} [@@deriving equal, hash, normalize]
 
+let custom_hash_calls = ref 0
+
+type custom_key = {key: string; ignored: int [@ignore]}
+[@@deriving equal, hash, normalize]
+[@@normalize.hash
+  fun _ ->
+    incr custom_hash_calls ;
+    0]
+
 (* always return ["foo"] (when [suffix] is not provided), but hopefully we
    fool the compiler to return something that's not physically equal *)
 let make_foo ?(suffix = "") () = "foo" ^ suffix
+
+let%test "custom_normalizer_hash_collisions_preserve_equality_and_public_hash" =
+  HashNormalizer.reset_all_normalizers () ;
+  custom_hash_calls := 0 ;
+  let a = {key= make_foo (); ignored= 0} in
+  let b = {key= make_foo (); ignored= 1} in
+  let c = {key= make_foo ~suffix:"bar" (); ignored= 0} in
+  let public_hash = hash_custom_key a in
+  let public_hash_unchanged = Int.equal !custom_hash_calls 0 in
+  let a' = hash_normalize_custom_key a in
+  let b' = hash_normalize_custom_key b in
+  let c' = hash_normalize_custom_key c in
+  public_hash_unchanged && !custom_hash_calls > 0
+  && Int.equal public_hash (hash_custom_key a)
+  && phys_equal a' b'
+  && (not (phys_equal a' c'))
+  && equal_custom_key a a' && equal_custom_key c c'
+
+
+let%test "custom_normalizer_hash_reset" =
+  HashNormalizer.reset_all_normalizers () ;
+  let a = {key= make_foo (); ignored= 0} in
+  let a' = hash_normalize_custom_key a in
+  HashNormalizer.reset_all_normalizers () ;
+  let b = {key= make_foo (); ignored= 1} in
+  let b' = hash_normalize_custom_key b in
+  equal_custom_key a' b' && (not (phys_equal a' b')) && phys_equal b b'
+
 
 let%test "first_normalize_phys_equal" =
   HashNormalizer.reset_all_normalizers () ;

@@ -204,6 +204,9 @@ type t =
   | Swift of SwiftProcname.t
 [@@deriving compare, yojson_of, sexp, hash, normalize]
 
+val normalizer_hash : t -> int
+(** Digest for transient normalization lookup only, not a persisted or public hash. *)
+
 val compare_name : t -> t -> int
 (** Similar to compare, but compares only names, except parameter types and template arguments. *)
 

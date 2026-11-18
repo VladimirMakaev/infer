@@ -309,6 +309,13 @@ module ObjC_Cpp = struct
     ; parameters: Parameter.clang_parameter list
     ; template_args: Typ.template_spec_info }
   [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+  [@@normalize.hash
+    fun signature ->
+      match signature.kind with
+      | CPPMethod (Some mangled) | CPPConstructor (Some mangled) | CPPDestructor (Some mangled) ->
+          String.hash mangled
+      | _ ->
+          hash signature]
 
   let make class_name method_name kind template_args parameters =
     {class_name; method_name; kind; template_args; parameters}
@@ -616,6 +623,19 @@ type t =
   | Rust of C.t (* we might want to refine that later *)
   | Swift of SwiftProcname.t
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+[@@normalize.export_hash]
+[@@normalize.hash
+  function
+  | ObjC_Cpp
+      { kind=
+          ( ObjC_Cpp.CPPMethod (Some mangled)
+          | ObjC_Cpp.CPPConstructor (Some mangled)
+          | ObjC_Cpp.CPPDestructor (Some mangled) ) } ->
+      String.hash mangled
+  | C {c_mangled= Some mangled} ->
+      String.hash mangled
+  | pname ->
+      hash pname]
 
 let is_c = function C _ -> true | _ -> false
 

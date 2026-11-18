@@ -45,6 +45,20 @@ type t =
   ; pv_tmp_id: Ident.t option [@ignore]
   ; pv_is_syntactic: bool [@ignore] }
 [@@deriving compare, equal, sexp, hash, normalize]
+[@@normalize.export_hash]
+[@@normalize.hash
+  fun pv ->
+    match pv.pv_kind with
+    | Local_var pname ->
+        Stdlib.Hashtbl.hash (0, pv.pv_hash, Procname.normalizer_hash pname)
+    | Callee_var pname ->
+        Stdlib.Hashtbl.hash (1, pv.pv_hash, Procname.normalizer_hash pname)
+    | Abduced_retvar (pname, loc) ->
+        Stdlib.Hashtbl.hash (2, pv.pv_hash, Procname.normalizer_hash pname, Location.hash loc)
+    | Abduced_ref_param (pname, index, loc) ->
+        Stdlib.Hashtbl.hash (3, pv.pv_hash, Procname.normalizer_hash pname, index, Location.hash loc)
+    | Global_var _ | Seed_var ->
+        hash pv]
 
 let yojson_of_t {pv_name} = [%yojson_of: Mangled.t] pv_name
 

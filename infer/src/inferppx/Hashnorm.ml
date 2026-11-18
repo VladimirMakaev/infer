@@ -240,34 +240,62 @@ let make_passthrough ~loc (td : type_declaration) =
       None
 
 
+let hash_attribute =
+  Attribute.declare "normalize.hash" Attribute.Context.type_declaration
+    Ast_pattern.(single_expr_payload __)
+    Fn.id
+
+
+let export_hash_attribute =
+  Attribute.declare "normalize.export_hash" Attribute.Context.type_declaration
+    Ast_pattern.(pstr nil)
+    ()
+
+
 let maybe_make_hashtable_api ~loc td =
   let hashtable_api ~loc (td : type_declaration) =
     let equal_name_expr =
       func_name_from_typename ~stem:"equal" td.ptype_name.txt |> Common.make_ident_exp ~loc
     in
     let hash_name_expr =
-      func_name_from_typename ~stem:"hash" td.ptype_name.txt |> Common.make_ident_exp ~loc
+      Option.value (Attribute.get hash_attribute td)
+        ~default:
+          (func_name_from_typename ~stem:"hash" td.ptype_name.txt |> Common.make_ident_exp ~loc)
     in
     let ct = Ast_helper.Typ.constr ~loc (Common.make_longident ~loc td.ptype_name.txt) [] in
+    let export_hash = Option.is_some (Attribute.get export_hash_attribute td) in
+    let api =
+      if export_hash then
+        [%expr
+          hash
+        , (fun t -> H.find_opt (Domain.DLS.get table) t)
+        , fun t -> H.add (Domain.DLS.get table) t t]
+      else
+        [%expr
+          (fun t -> H.find_opt (Domain.DLS.get table) t), fun t -> H.add (Domain.DLS.get table) t t]
+    in
     let body =
       [%expr
+        let hash = [%e hash_name_expr] in
         let module H = Stdlib.Hashtbl.Make (struct
           type nonrec t = [%t ct]
 
           let equal = [%e equal_name_expr]
 
-          let hash = [%e hash_name_expr]
+          let hash = hash
         end) in
         let table : [%t ct] H.t Domain.DLS.key = Domain.DLS.new_key (fun () -> H.create 16) in
         let () = HashNormalizer.register_reset (fun () -> H.reset @@ Domain.DLS.get table) in
-        ((fun t -> H.find_opt (Domain.DLS.get table) t), fun t -> H.add (Domain.DLS.get table) t t)]
+        [%e api]]
     in
     let make_pattern stem =
       Ast_helper.Pat.var ~loc @@ Loc.make ~loc @@ func_name_from_typename ~stem td.ptype_name.txt
     in
     let make_patterns ls = List.map ~f:make_pattern ls in
     let pattern =
-      Ast_helper.Pat.tuple ~loc (make_patterns [hashtable_find_opt_stem; hashtable_add_stem])
+      let stems = [hashtable_find_opt_stem; hashtable_add_stem] in
+      let stems = if export_hash then "normalizer_hash" :: stems else stems in
+      Ast_helper.Pat.tuple ~loc (make_patterns stems)
     in
     Ast_helper.Str.value ~loc Nonrecursive [Ast_helper.Vb.mk ~loc pattern body]
   in

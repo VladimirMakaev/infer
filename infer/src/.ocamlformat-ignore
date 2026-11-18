@@ -10,3 +10,5 @@ atd/clang_*.mli
 # generated
 base/Version.ml
 deadcode/all_infer_in_one_file.ml
+# exact deriving_inline PPX output, checked by inferppx-tests/runtest
+inferppx-tests/HashNormInlinedCode.ml
