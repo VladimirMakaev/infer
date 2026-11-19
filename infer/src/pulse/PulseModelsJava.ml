@@ -19,6 +19,8 @@ let mk_java_field pkg clazz field =
   Fieldname.make (Typ.JavaClass (JavaClassName.make ~package:(Some pkg) ~classname:clazz)) field
 
 
+let thread_runnable_field = Fieldname.make PulseOperations.pulse_model_type "thread_runnable"
+
 let load_field path field location obj astate =
   let* astate, field_addr =
     PulseOperations.eval_access path Read location obj (FieldAccess field) astate
@@ -213,6 +215,21 @@ module Resource = struct
             model_data astate )
     in
     normal @ null
+
+
+  (* A ZIP writer over a borrowed stream does not acquire ownership of that stream. The input
+     must be read from the precondition to establish borrowing: fresh memory streams do not
+     have a resource allocation attribute either. Keep tracking all other writers and their
+     underlying outputs, which finish does not close. *)
+  let zip_output_constructor this_obj ((resource, _) as resource_obj) : model_no_non_disj =
+   fun ({path; location} as model_data) astate ->
+    let field = mk_java_field "java.io" "FilterOutputStream" "out" in
+    match AddressAttributes.get_allocation_attr resource astate with
+    | None when AbductiveDomain.is_read_from_pre_cell astate resource_obj ->
+        delegate_constructor ~field this_obj resource_obj model_data astate
+    | _ ->
+        let<*> astate = write_field path field resource_obj location this_obj astate in
+        allocate_with_delegation () this_obj resource_obj model_data astate
 
 
   (* Static factories such as [java.nio.file.Files.newInputStream] return a fresh resource
@@ -991,6 +1008,17 @@ module KotlinIntrinsics = struct
     else Basic.ok_continue astate
 end
 
+(* Constructing a thread retains the task; it does not schedule it yet. *)
+let thread_constructor this runnable : model_no_non_disj =
+ fun {path; location} astate ->
+  let<+> astate = write_field path thread_runnable_field runnable location this astate in
+  astate
+
+
+let thread_start (this, _) : model_no_non_disj =
+ fun _ astate -> Basic.ok_continue (AddressAttributes.add_one this AlwaysReachable astate)
+
+
 module Preconditions = struct
   let check_not_null (address, hist) : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
@@ -1052,7 +1080,21 @@ let matchers : matcher list =
     Cplusplus.Vector.push_back vector ~desc:(Procname.to_string callee_procname) model_data astate
   in
   let map_context_tenv f (x, _) = f x in
-  [ +BuiltinDecl.(match_builtin __java_throw) <>--> throw |> with_non_disj
+  [ -"java.lang.Thread" &:: "<init>" <>$ capt_arg_payload
+    $+ capt_arg_payload_of_typ
+         (+map_context_tenv (PatternMatch.Java.implements "java.lang.Runnable"))
+    $+...$--> thread_constructor |> with_non_disj
+  ; -"java.lang.Thread" &:: "<init>" <>$ capt_arg_payload $+ any_arg
+    $+ capt_arg_payload_of_typ
+         (+map_context_tenv (PatternMatch.Java.implements "java.lang.Runnable"))
+    $+...$--> thread_constructor |> with_non_disj
+  ; -"java.lang.Thread" &:: "start" <>$ capt_arg_payload $--> thread_start |> with_non_disj
+    (* Reading a thread's name does not hand its retained task over. An opaque call would
+       otherwise forget resources captured by a thread that has not been started. *)
+  ; -"java.lang.Thread" &:: "getName" <>$ any_arg
+    $--> Basic.nondet ~desc:"Thread.getName()"
+    |> with_non_disj
+  ; +BuiltinDecl.(match_builtin __java_throw) <>--> throw |> with_non_disj
   ; +BuiltinDecl.(match_builtin __unwrap_exception)
     <>$ capt_arg_payload
     $--> Basic.id_first_arg ~desc:"unwrap_exception"
@@ -1191,6 +1233,8 @@ let matchers : matcher list =
     &:: "<init>" <>$ capt_arg_payload $+ capt_arg_payload
     $+...$--> Resource.allocate_with_delegation ~exn_class_name:"java.io.IOException" ()
     |> with_non_disj
+  ; -"java.util.zip.ZipOutputStream" &:: "<init>" <>$ capt_arg_payload $+ capt_arg_payload
+    $+...$--> Resource.zip_output_constructor |> with_non_disj
   ; +map_context_tenv (* <init> that does not throw exceptions *)
        (PatternMatch.Java.implements_one_of
           [ "java.io.BufferedInputStream"
