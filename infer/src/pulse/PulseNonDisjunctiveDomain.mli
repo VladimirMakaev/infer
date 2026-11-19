@@ -54,6 +54,10 @@ val astate_is_bottom : t -> bool
 
 val for_disjunct_exec_instr : t -> t
 
+val has_dropped_disjuncts : t -> bool
+(** the analysis abandoned states in this procedure, so what it did not see is not evidence of
+    absence *)
+
 val pp_with_kind : Pp.print_kind -> F.formatter -> t -> unit
 
 type summary

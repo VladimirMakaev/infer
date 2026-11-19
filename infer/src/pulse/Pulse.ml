@@ -459,7 +459,102 @@ let source_used_after_node node pvar =
   walk (Procdesc.Node.get_succs node) Procdesc.NodeSet.empty
 
 
-let report_unnecessary_copies ?(intermediates_only = false)
+(** Could this instruction write [var], as opposed to only reading it?
+
+    Asked of code the analysis never explored, so there is no state to consult and the answer has to
+    come from the instruction alone. A read cannot be what a dropped path was hiding: the point of
+    the guard is that a modification may have gone unseen, and a copy that an unexplored region only
+    reads is still a copy nothing modifies. Erring towards "could write" is the safe direction, so
+    an unresolvable callee counts as one.
+
+    Const-ness is what separates the two in practice: [str.length()] passes the copy to a const
+    member function, while an assignment operator takes it mutably. *)
+let instr_may_write_var var (instr : Sil.instr) =
+  let mentions_var exp =
+    Exp.program_vars exp |> Sequence.exists ~f:(fun pvar -> Var.equal var (Var.of_pvar pvar))
+  in
+  match instr with
+  | Store {e1} ->
+      mentions_var e1
+  | Call (_, Const (Cfun callee), args, _, {cf_injected_destructor}) ->
+      if cf_injected_destructor || Procname.is_destructor callee then
+        (* destroying the copy is not modifying it, and every by-value local has such a call at the
+           end of its scope: counting it would suppress every copy whose scope end the analysis did
+           not reach, which is most of them *)
+        false
+      else
+        let callee_attrs = IRAttributes.load callee in
+        let formal_is_const index =
+          match callee_attrs with
+          | None ->
+              (* the callee was not captured, so we cannot tell: assume it may write *)
+              false
+          | Some {ProcAttributes.formals; is_cpp_const_member_fun} ->
+              (Int.equal index 0 && is_cpp_const_member_fun)
+              || List.nth formals index
+                 |> Option.exists ~f:(fun (_, formal_typ, _) -> Typ.is_ptr_to_const formal_typ)
+        in
+        List.existsi args ~f:(fun index (actual, _) ->
+            mentions_var actual && not (formal_is_const index) )
+  | Call (_, _, args, _, _) ->
+      (* an indirect call we cannot resolve *)
+      List.exists args ~f:(fun (actual, _) -> mentions_var actual)
+  | Load _ | Prune _ | Metadata _ ->
+      false
+
+
+(** Is any node the copy's scope can reach one the analysis never explored?
+
+    "This copy is never modified" is a claim about every execution that continues past the copy, so
+    it can only be made from the parts of the procedure the analysis actually reached. Where the
+    paths through a region were lost, the checker finds no modification in it because it looked at
+    nothing there, and a copy that every real execution overwrites reads as untouched. Refusing to
+    report is the honest answer: we did not establish the claim, rather than established its
+    opposite.
+
+    This generalises the [has_0_continue_program] suppression below, which asks the same question at
+    the coarsest grain -- did ANY path reach the exit. A procedure can answer yes on one degenerate
+    path and still have left the code that uses the copy unexplored.
+
+    A node with no state because the analysis REFUTED it is not a gap, but it is indistinguishable
+    from a dropped one here; separating the two needs the procedure-wide abandoned-state flag, so
+    the caller checks that before consulting this. Dead code needs no such care:
+    [is_node_unexplored] is already false for nodes the control flow cannot reach, so a scope
+    containing unreachable code still reports. The walk also stops where the copy's scope does, so
+    an unexplored region the copy does not outlive cannot suppress it.
+
+    An unexplored node only counts if it could WRITE the copy. A region that merely reads it cannot
+    be hiding a modification, and the copies worth keeping are mostly of that shape: read once in a
+    loop the analysis gave up on, never assigned. Without this the guard takes them too. *)
+let scope_has_unexplored_node ~is_node_unexplored ~copied_var node =
+  let ends_scope n =
+    Procdesc.Node.get_instrs n
+    |> Instrs.exists ~f:(function
+      | Sil.Metadata (ExitScope (vars, _)) ->
+          List.mem vars copied_var ~equal:Var.equal
+      | _ ->
+          false )
+  in
+  let may_write_copy n =
+    Procdesc.Node.get_instrs n |> Instrs.exists ~f:(instr_may_write_var copied_var)
+  in
+  let rec walk to_visit visited =
+    match to_visit with
+    | [] ->
+        false
+    | n :: rest ->
+        if Procdesc.NodeSet.mem n visited then walk rest visited
+        else if is_node_unexplored n && may_write_copy n then true
+        else
+          let visited = Procdesc.NodeSet.add n visited in
+          (* a node that ends the scope is still checked, but nothing after it belongs to the copy *)
+          if ends_scope n then walk rest visited
+          else walk (Procdesc.Node.get_succs n @ rest) visited
+  in
+  walk (Procdesc.Node.get_succs node) Procdesc.NodeSet.empty
+
+
+let report_unnecessary_copies ?(intermediates_only = false) ~is_node_unexplored
     ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) non_disj_astate =
   let pname = Procdesc.get_proc_name proc_desc in
   let reported = ref [] in
@@ -471,6 +566,29 @@ let report_unnecessary_copies ?(intermediates_only = false)
       ~ptr_formals:(Procdesc.get_pointer_formals proc_desc)
       ~ref_captures:(Procdesc.get_captured_by_ref proc_desc)
       non_disj_astate
+    |> List.filter ~f:(fun (copied_into, _, _, node, _, _, _) ->
+        (* Only where the analysis abandoned states. A branch it refuted is not a gap: it proved
+           that code cannot run, which is a sound gain in precision and must not cost a report --
+           see [copy_scope_end_infeasible_bad]. Both look alike from one node (no surviving
+           disjunct), so the procedure-wide flag is what tells them apart. This is the per-copy
+           condition the scope-end gate was missing: that flag says some path was lost somewhere,
+           and the walk below says whether any of it was in this copy's scope. *)
+        (not (PulseNonDisjunctiveDomain.has_dropped_disjuncts non_disj_astate))
+        ||
+        match (copied_into : Attribute.CopiedInto.t) with
+        | IntoIntermediate _ ->
+            (* an intermediate dies with the full expression that creates it, so there is no
+               later statement for an unexplored region to be hiding *)
+            true
+        | IntoVar {copied_var} ->
+            not (scope_has_unexplored_node ~is_node_unexplored ~copied_var node)
+        | IntoField _ ->
+            (* A copy into a field names no variable, so there is nothing to look for in the
+               unexplored code and no scope end to stop at: the guard would degenerate into
+               "this procedure has an unexplored node anywhere after the copy", which suppresses
+               whole files of good reports. Not being able to show the region is dangerous is not
+               evidence that it is. *)
+            true )
     |> List.filter ~f:(fun (copied_into, _, source_opt, node, _, _, _) ->
         (not intermediates_only)
         ||
@@ -2982,8 +3100,17 @@ let log_summary_count proc_name summary =
   Out_channel.output_char (Lazy.force summary_count_channel) '\n'
 
 
-let log_number_of_unreachable_nodes proc_desc invariant_map =
-  let proc_name = Procdesc.get_proc_name proc_desc in
+(** Did the analysis fail to get a state for [node], although the control flow can reach it?
+
+    The two ways a node can have no state are not the same thing and must not be confused. Code the
+    CFG cannot reach -- the tail of a function after an unconditional return -- is dead, and the
+    analysis is right to have nothing for it. Code the CFG can reach but the analysis stopped short
+    of, because the paths through it were refuted by capped arithmetic or dropped by the disjunct
+    budget, is a gap in what we know. Only the second kind is reported here, which is why the
+    reachability test comes first.
+
+    Built once per procedure: the reachability walk is shared by every caller. *)
+let mk_is_node_unexplored proc_desc invariant_map =
   let add, mem =
     let open Procdesc in
     let set = NodeHashSet.create 32 in
@@ -2998,18 +3125,11 @@ let log_number_of_unreachable_nodes proc_desc invariant_map =
       Procdesc.Node.get_succs node |> List.iter ~f:visit )
   in
   Procdesc.get_start_node proc_desc |> visit ;
-  let node_is_a_return node =
-    let exit_node = Procdesc.get_exit_node proc_desc in
-    let exn_sink_node = Procdesc.get_exn_sink proc_desc in
-    let succs = Procdesc.Node.get_succs node in
-    List.mem succs exit_node ~equal:Procdesc.Node.equal
-    && not (Option.mem exn_sink_node node ~equal:Procdesc.Node.equal)
-  in
   let has_continue_program results =
     let f one_result = match one_result with ContinueProgram _astate, _ -> true | _ -> false in
     List.exists results ~f
   in
-  let has_node_0_disjunct node =
+  fun node ->
     let id = Procdesc.Node.get_id node in
     if not (mem node) then false
     else if not (DisjunctiveAnalyzer.InvariantMap.mem id invariant_map) then true
@@ -3022,12 +3142,22 @@ let log_number_of_unreachable_nodes proc_desc invariant_map =
         DisjunctiveAnalyzer.InvariantMap.find id invariant_map
       in
       (not (has_continue_program disjs)) && significant_node node
+
+
+let log_number_of_unreachable_nodes proc_desc ~is_node_unexplored =
+  let proc_name = Procdesc.get_proc_name proc_desc in
+  let node_is_a_return node =
+    let exit_node = Procdesc.get_exit_node proc_desc in
+    let exn_sink_node = Procdesc.get_exn_sink proc_desc in
+    let succs = Procdesc.Node.get_succs node in
+    List.mem succs exit_node ~equal:Procdesc.Node.equal
+    && not (Option.mem exn_sink_node node ~equal:Procdesc.Node.equal)
   in
   let nodes = Procdesc.get_nodes proc_desc in
   let exists_a_return_node_with_0_disjunct, exists_a_node_with_0_disjunct =
     List.fold_until nodes ~init:(false, false)
       ~f:(fun acc node ->
-        if has_node_0_disjunct node then
+        if is_node_unexplored node then
           let node_is_a_return = node_is_a_return node in
           if Config.log_pulse_coverage then (
             L.debug Analysis Quiet "[pulse-info]At %a, function %a, the %snode %a is unreachable@\n"
@@ -3093,7 +3223,8 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
   in
   let invariant_map = DisjunctiveAnalyzer.exec_pdesc analysis_data ~initial proc_desc in
   if Config.source_debug then python_register_info_per_source_lines proc_desc initial invariant_map ;
-  log_number_of_unreachable_nodes proc_desc invariant_map ;
+  let is_node_unexplored = mk_is_node_unexplored proc_desc invariant_map in
+  log_number_of_unreachable_nodes proc_desc ~is_node_unexplored ;
   if CallGlobalForStats.is_one_call_stuck () then Stats.incr_pulse_summaries_unsat_for_caller () ;
   let limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
   let has_0_continue_program {PulseSummary.pre_post_list} =
@@ -3147,8 +3278,8 @@ let analyze_body specialization ({InterproceduralAnalysis.tenv; proc_desc} as an
            and a parameter that could have been a reference both live on. Without the exception,
            resolving a callee that never returns -- which only happens when its own unit is in
            the same results directory -- silently deletes the report. *)
-        report_unnecessary_copies ~intermediates_only:has_0_continue_program analysis_data
-          non_disj_astate ;
+        report_unnecessary_copies ~intermediates_only:has_0_continue_program ~is_node_unexplored
+          analysis_data non_disj_astate ;
         if not has_0_continue_program then
           report_unnecessary_parameter_copies analysis_data non_disj_astate ;
         if move_operation_copies proc_desc (Procdesc.get_proc_name proc_desc) non_disj_astate then

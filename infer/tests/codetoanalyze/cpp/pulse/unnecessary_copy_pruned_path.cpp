@@ -15,6 +15,7 @@ struct SessionID {
 const SessionID& get_session();
 void sink(const std::string&);
 [[noreturn]] void always_throws();
+int scale(unsigned int);
 
 // The copy is read and never modified, and the end of its scope is reachable
 // only on a path the analyser proves infeasible. Nothing is abandoned here, so
@@ -42,6 +43,20 @@ int copy_scope_end_eq_infeasible_bad(int n) {
     always_throws();
   }
   return 0;
+}
+
+// Part of the copy's scope is unreachable because the control flow cannot get
+// there, not because the analysis gave up on it. Dead code is not a gap in what
+// we know -- the assignment below cannot run on any execution -- so the copy is
+// still unnecessary and still reports.
+int copy_with_dead_code_in_scope_bad(int n) {
+  std::string copied = get_session().getBeginString();
+  sink(copied);
+  if (n > 0) {
+    return copied.size();
+  }
+  return 0;
+  copied = "no execution reaches this"; // dead: no predecessor in the CFG
 }
 
 // The same shape, but with enough branching before the copy to exceed the
@@ -77,4 +92,43 @@ int copy_scope_end_with_dropped_disjuncts_ok(
     always_throws();
   }
   return acc;
+}
+
+// The shape of the production false positive this guard exists for: two loops
+// over the same unsigned bound, with the copy between them. Leaving the first
+// loop without iterating forces the bound to zero, which makes the second loop
+// -- the code that overwrites the copy -- unreachable on exactly the paths that
+// survive, while the paths that do iterate are abandoned above. The copy's
+// scope end is reached on the surviving path, so the scope-end gate stays
+// quiet; what says to say nothing is the unexplored region inside the scope.
+int copy_overwritten_in_unexplored_loop_ok(
+    unsigned int iterations, int a, int b, int c, int d, int e, int f) {
+  int acc = 0;
+  if (a) {
+    acc += 1;
+  }
+  if (b) {
+    acc += 2;
+  }
+  if (c) {
+    acc += 4;
+  }
+  if (d) {
+    acc += 8;
+  }
+  if (e) {
+    acc += 16;
+  }
+  if (f) {
+    acc += 32;
+  }
+  for (unsigned int i = 0; i < iterations; i++) {
+    acc += scale(i);
+  }
+  std::string copied = get_session().getBeginString();
+  sink(copied);
+  for (unsigned int j = 0; j < iterations; j++) {
+    copied = get_session().getBeginString();
+  }
+  return copied.size() + acc;
 }
