@@ -79,6 +79,12 @@ val address_of_field : Tenv.t -> t -> Fieldname.t -> t option
 val make : FormalMap.t -> HilExp.t -> t option
 (** convert an expression to a canonical form for an address *)
 
+val resolve_reference : t -> t
+(** Replace a lock taken through a reference-typed global by the address its referent's own locks
+    use, so that the two are the same lock. A reference cannot be rebound, so its initialiser
+    settles what it names; a POINTER can be, so pointers are returned unchanged, as is any address
+    whose binding is not a single unambiguous store. *)
+
 val is_class_object : t -> bool
 (** is the address a Java class object such as in [synchronized(MyClass.class){}] or
     [static synchronized void foo()] *)
