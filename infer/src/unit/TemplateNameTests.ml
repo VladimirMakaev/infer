@@ -19,9 +19,61 @@ let swift_info plain_name =
   Typ.Template {mangled= None; args= [TType (Typ.mk_struct (SwiftClass name))]}
 
 
+let qualified_class qualifiers info =
+  Typ.Name.Cpp.from_qual_name info ~is_union:false (QualifiedCppName.of_list qualifiers)
+
+
+let test_no_template_qualified_names _ =
+  List.iter
+    [[]; ["scope"]; ["scope"; "nested"]]
+    ~f:(fun scopes ->
+      List.iter ["Box"; "Box<int>"; "Box<8ae7f9c0f57e3130>"] ~f:(fun last ->
+          let qualifiers = scopes @ [last] in
+          let name = qualified_class qualifiers Typ.NoTemplate in
+          assert_equal (String.concat ~sep:"::" qualifiers) (qual_string name) ) )
+
+
+let test_no_template_attributes _ =
+  let class_name = qualified_class ["scope"; "Box<8ae7f9c0f57e3130>"] Typ.NoTemplate in
+  let proc_name =
+    Procname.ObjC_Cpp
+      (Procname.ObjC_Cpp.make class_name "entry_bad" (Procname.ObjC_Cpp.CPPMethod None)
+         Typ.NoTemplate [] )
+  in
+  let attrs = ProcAttributes.default (SourceFile.invalid __FILE__) proc_name in
+  let printed = Format.asprintf "%a" ProcAttributes.pp attrs in
+  assert_bool "qualified method name is retained in attributes"
+    (String.is_substring printed ~substring:"scope::Box<8ae7f9c0f57e3130>::entry_bad")
+
+
+let test_empty_template_metadata _ =
+  let name = qualified_class ["scope"; "Box"] (Typ.Template {mangled= None; args= []}) in
+  assert_equal "scope::Box<>" (qual_string name)
+
+
+let test_invalid_empty_qualified_name _ =
+  assert_raises (QualifiedCppName.ParseError "expected non-empty qualified name") (fun () ->
+      ignore (qual_string (qualified_class [] Typ.NoTemplate)) )
+
+
+let test_duplicate_template_metadata _ =
+  let name =
+    qualified_class ["scope"; "Box<int>"] (Typ.Template {mangled= None; args= [TInt 7L]})
+  in
+  assert_raises
+    (QualifiedCppName.ParseError
+       "expected qualified name without template args, but got Box<int>, the last qualifier of \
+        Box<int>, scope" ) (fun () -> ignore (qual_string name) )
+
+
 let tests =
   "template_names"
-  >::: [ ( "equal_but_differently_printed_arguments"
+  >::: [ "no_template_qualified_names" >:: test_no_template_qualified_names
+       ; "no_template_attributes" >:: test_no_template_attributes
+       ; "empty_template_metadata" >:: test_empty_template_metadata
+       ; "invalid_empty_qualified_name" >:: test_invalid_empty_qualified_name
+       ; "duplicate_template_metadata" >:: test_duplicate_template_metadata
+       ; ( "equal_but_differently_printed_arguments"
          >:: fun _ ->
          HashNormalizer.reset_all_normalizers () ;
          let a = swift_info "A" and b = swift_info "B" in
