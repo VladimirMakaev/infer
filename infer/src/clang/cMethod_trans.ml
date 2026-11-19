@@ -398,10 +398,36 @@ let get_procname_from_cpp_lambda context dec captured_vars =
             | _ ->
                 [] )
         in
-        match instantiated with
-        | [procname] ->
+        (* Name the closure after an instantiation whenever the lambda has one, not only when it
+           has exactly one. The fallback below cannot carry captures: [decl_ptr] is the
+           uninstantiated template pattern, [method_signature_of_pointer] has no signature for it,
+           and [create_procdesc_with_pointer] then builds a bare C-function procname out of the
+           string "operator()" and records nothing. A generic lambda called at two argument types
+           used to land there, so its call operator was translated expecting by-reference captures
+           as addresses while the closure still supplied their values -- writes through such a
+           capture went to the value's address, which reads as a null dereference when the variable
+           was initialised to 0, false or nullptr, and is silently lost otherwise.
+
+           Any instantiation will do as the closure's label. The captures belong to the lambda
+           expression rather than to a specialisation, so every instantiation shares them and any
+           one of them binds them correctly; and the label does not decide which body runs, since
+           clang translates each specialisation separately and a call resolves to the one its own
+           argument types select. Picking the smallest by full procname string only makes the
+           choice deterministic, so it cannot depend on the order clang happens to list
+           specialisations in. *)
+        let compare_by_full_name p1 p2 =
+          (* the string is the ordering key; the [Procname.compare] fallback breaks a tie between
+             two instantiations that print identically, so the order is total either way *)
+          match String.compare (Procname.to_string_verbose p1) (Procname.to_string_verbose p2) with
+          | 0 ->
+              Procname.compare p1 p2
+          | n ->
+              n
+        in
+        match List.sort instantiated ~compare:compare_by_full_name with
+        | procname :: _ ->
             procname
-        | _ ->
+        | [] ->
             create_procdesc_with_pointer ~is_cpp_lambda_call_operator:true context decl_ptr None
               name_info.ni_name ~captured_vars )
     | _ ->

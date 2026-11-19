@@ -542,3 +542,238 @@ int value_capture_ignores_later_assignment_ok() {
   p = nullptr;
   return read();
 }
+
+// Everything below needs generic lambdas, so it is compiled out of the C++11
+// run of this directory (see ../pulse-11, which rebuilds these same sources
+// with -std=c++11).
+#if __cplusplus >= 201402L
+
+// A generic lambda's by-reference captures must bind to the variable's address
+// at every instantiation, not only when the lambda is called at one argument
+// type. When it was called at two, the closure named a bare `operator()` that
+// carried no captures, while the call operator had already been translated
+// expecting addresses -- so a write through the capture went to the value's
+// address. With the variable initialised to 0 that reads as a null
+// dereference, and with any other value the write is simply lost.
+struct GenericV1 {
+  const char* name;
+  unsigned rank;
+};
+struct GenericV2 {
+  const char* name;
+  unsigned rank;
+};
+
+unsigned generic_lambda_two_instantiations_ok(const GenericV1& s1,
+                                              const GenericV2& s2,
+                                              bool c) {
+  const char* name = "init";
+  unsigned rank = 0;
+  auto fill = [&](const auto& v) {
+    name = v.name;
+    rank = v.rank;
+  };
+  if (c) {
+    fill(s2);
+  } else {
+    fill(s1);
+  }
+  return rank;
+}
+
+// The other half of the same defect, and the one a null-free initialiser hides:
+// the write has to REACH the caller. The next three go together and must be read
+// together -- the first is what stops the other two passing vacuously.
+//
+// Two constraints learned the hard way while reducing this. The values written
+// have to be ones Pulse can pin, so they are built locally rather than read from
+// a reference parameter: `rank = v.rank` on an unconstrained `unsigned` leaves
+// `rank == 7` satisfiable and both guards below report. And the lambda body must
+// not branch on anything it reads through its own formal: a lambda whose body
+// branches on a symbolic parameter silences downstream reports entirely (true on
+// a plain non-generic lambda too, and unrelated to this fix), which would make
+// every `_ok` here pass for the wrong reason.
+
+// Path-survival control for the two below: unconditional dereference after the
+// two-instantiation call. Before the fix this was silent -- the mis-bound store
+// destroyed the caller's disjuncts -- so the guarded cases could not have been
+// trusted on their own.
+int generic_lambda_write_path_survives_bad(bool c) {
+  GenericV1 s1;
+  s1.rank = 1;
+  GenericV2 s2;
+  s2.rank = 2;
+  unsigned rank = 7;
+  auto fill = [&](const auto& v) { rank = v.rank; };
+  if (c) {
+    fill(s2);
+  } else {
+    fill(s1);
+  }
+  int* p = nullptr;
+  return *p;
+}
+
+// The write reached on both arms => `rank` is 1 or 2 => the guard is refuted and
+// the dereference is unreachable. If the capture were bound by value on either
+// arm, `rank` would keep 7 there and this would report.
+int generic_lambda_write_reaches_caller_ok(bool c) {
+  GenericV1 s1;
+  s1.rank = 1;
+  GenericV2 s2;
+  s2.rank = 2;
+  unsigned rank = 7;
+  auto fill = [&](const auto& v) { rank = v.rank; };
+  if (c) {
+    fill(s2);
+  } else {
+    fill(s1);
+  }
+  int* p = nullptr;
+  if (rank == 7) {
+    return *p;
+  }
+  return 0;
+}
+
+// The mirror of the one above, under the opposite guard: the write reached, so
+// `rank != 7` holds and the dereference is reached. A silence here would mean
+// the path was lost rather than the guard refuted.
+int generic_lambda_write_reaches_caller_bad(bool c) {
+  GenericV1 s1;
+  s1.rank = 1;
+  GenericV2 s2;
+  s2.rank = 2;
+  unsigned rank = 7;
+  auto fill = [&](const auto& v) { rank = v.rank; };
+  if (c) {
+    fill(s2);
+  } else {
+    fill(s1);
+  }
+  int* p = nullptr;
+  if (rank != 7) {
+    return *p;
+  }
+  return 0;
+}
+
+// Control: one instantiation only. This already worked and must keep working.
+unsigned generic_lambda_one_instantiation_ok(const GenericV1& s) {
+  const char* name = nullptr;
+  unsigned rank = 0;
+  auto fill = [&](const auto& v) {
+    name = v.name;
+    rank = v.rank;
+  };
+  fill(s);
+  return rank;
+}
+
+// Control: two lambdas with written-out parameter types, so neither is generic.
+unsigned generic_lambda_typed_pair_ok(const GenericV1& s1,
+                                      const GenericV2& s2,
+                                      bool c) {
+  const char* name = nullptr;
+  unsigned rank = 0;
+  auto f1 = [&](const GenericV1& v) {
+    name = v.name;
+    rank = v.rank;
+  };
+  auto f2 = [&](const GenericV2& v) {
+    name = v.name;
+    rank = v.rank;
+  };
+  if (c) {
+    f2(s2);
+  } else {
+    f1(s1);
+  }
+  return rank;
+}
+
+// TP control: a real null dereference through a capture of a generic lambda is
+// still reported, so the fix suppresses nothing it should not.
+int generic_lambda_two_instantiations_null_bad(const GenericV1& s1,
+                                               const GenericV2& s2,
+                                               bool c) {
+  int* p = nullptr;
+  auto deref = [&](const auto& v) { return *p + static_cast<int>(v.rank); };
+  return c ? deref(s2) : deref(s1);
+}
+
+// Three instantiations of one lambda, each writing a value only its own
+// specialisation can produce, so "every call site kept its own write" is
+// checkable rather than assumed. The three `_bad` cases are what make the `_ok`
+// mean something: were the path lost at the call instead of the guard refuted,
+// all three would go silent and the `_ok` would still pass.
+struct TriA {
+  unsigned rank;
+};
+struct TriB {
+  unsigned rank;
+};
+struct TriC {
+  unsigned rank;
+};
+
+unsigned tri_pick(const TriA&) { return 10; }
+unsigned tri_pick(const TriB&) { return 20; }
+unsigned tri_pick(const TriC&) { return 30; }
+
+unsigned generic_lambda_three_instantiations_write(int c) {
+  TriA a;
+  TriB b;
+  TriC d;
+  unsigned rank = 7;
+  auto fill = [&](const auto& v) { rank = tri_pick(v); };
+  if (c == 0) {
+    fill(a);
+  } else if (c == 1) {
+    fill(b);
+  } else {
+    fill(d);
+  }
+  return rank;
+}
+
+// Each arm must stay reachable, i.e. each call site ran its own instantiation.
+int generic_lambda_three_instantiations_first_bad(int c) {
+  unsigned rank = generic_lambda_three_instantiations_write(c);
+  int* p = nullptr;
+  if (rank == 10) {
+    return *p;
+  }
+  return 0;
+}
+
+int generic_lambda_three_instantiations_second_bad(int c) {
+  unsigned rank = generic_lambda_three_instantiations_write(c);
+  int* p = nullptr;
+  if (rank == 20) {
+    return *p;
+  }
+  return 0;
+}
+
+int generic_lambda_three_instantiations_third_bad(int c) {
+  unsigned rank = generic_lambda_three_instantiations_write(c);
+  int* p = nullptr;
+  if (rank == 30) {
+    return *p;
+  }
+  return 0;
+}
+
+// No arm lost its write (none leaves `rank` at 7) and no arm borrowed another's
+// value, since nothing outside the three is producible.
+int generic_lambda_three_instantiations_ok(int c) {
+  unsigned rank = generic_lambda_three_instantiations_write(c);
+  int* p = nullptr;
+  if (rank != 10 && rank != 20 && rank != 30) {
+    return *p;
+  }
+  return 0;
+}
+
+#endif // __cplusplus >= 201402L
