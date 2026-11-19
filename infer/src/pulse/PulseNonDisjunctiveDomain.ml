@@ -1289,6 +1289,8 @@ let mark_parameter_as_modified ~is_modified ~var =
 
 let checked_via_destructor var = map_intra (IntraDom.checked_via_destructor var)
 
+let has_dropped_disjuncts {has_dropped_disjuncts} = has_dropped_disjuncts
+
 let get_copied ~ref_formals ~ptr_formals ~ref_captures {intra; has_dropped_disjuncts} =
   IntraDom.get_copied ~ref_formals ~ptr_formals ~ref_captures ~has_dropped_disjuncts intra
 
