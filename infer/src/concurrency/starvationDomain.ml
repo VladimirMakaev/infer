@@ -194,7 +194,9 @@ module Lock = struct
         exp
 
 
-  let make_normalised tenv formals exp = make formals (normalise_exp tenv exp)
+  let make_normalised tenv formals exp =
+    make formals (normalise_exp tenv exp) |> Option.map ~f:resolve_reference
+
 
   let make_normalised_subst tenv ?guard_lock formals actuals =
     make_subst ?guard_lock formals (List.map actuals ~f:(normalise_exp tenv))

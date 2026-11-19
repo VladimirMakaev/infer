@@ -390,6 +390,105 @@ let get_last_field_or_global = function
       None
 
 
+(** The object a reference-typed global was bound to, if its initialiser says so unambiguously.
+
+    A C++ reference cannot be rebound, so the store in the initialiser of a reference-typed global
+    names the object that reference denotes for the whole run. Without resolving it the reference
+    variable becomes a lock of its own -- [G{(rb:std::mutex&)}] for [std::mutex& rb = b] -- which
+    can never be equal to [G{&b}], so a lock order spelled through the reference is invisible and
+    the inversion is not reported.
+
+    A POINTER is deliberately left unresolved. [Typ.is_reference] holds only for
+    [Pk_lvalue_reference] and [Pk_rvalue_reference], not for [Pk_pointer], and that is the whole
+    distinction being relied on here: a pointer can be assigned again after its initialiser runs, so
+    what it points to where the lock is taken does not follow from how it was initialised.
+
+    Anything but a single store of one global's address gives up. Two stores of different objects,
+    or a store of something this does not read, leave the address alone rather than pick one: a
+    wrong resolution would merge two unrelated locks, which invents a deadlock. *)
+let referent_cache : Pvar.t option Procname.Cache.t =
+  Procname.Cache.create ~name:"starvation_reference_referent"
+
+
+let rec referent_of_reference_global ~visiting pvar =
+  let exception Ambiguous in
+  (* [std::mutex& r = other_ref] does not store an address directly: it LOADS the value of
+     [other_ref] and stores that, so the stored expression is an identifier. Following the load
+     back to the reference it came from, and resolving that in turn, is what lets a reference
+     bound to another reference reach the mutex at the end of the chain. *)
+  let scan ~visiting pname =
+    Procdesc.load pname
+    |> Option.bind ~f:(fun pdesc ->
+        let loads, stored =
+          Procdesc.fold_instrs pdesc ~init:(Ident.Map.empty, None)
+            ~f:(fun ((loads, stored) as acc) _ (instr : Sil.instr) ->
+              match instr with
+              | Load {id; e} ->
+                  (Ident.Map.add id e loads, stored)
+              | Store {e1= Lvar lhs; e2} when Pvar.equal lhs pvar -> (
+                match stored with
+                | None ->
+                    (loads, Some e2)
+                | Some previous when Exp.equal previous e2 ->
+                    acc
+                | Some _ ->
+                    (* bound in two different ways; naming one of them would be a guess *)
+                    raise Ambiguous )
+              | _ ->
+                  acc )
+        in
+        match (stored : Exp.t option) with
+        | Some (Lvar referent) ->
+            Some referent
+        | Some (Var id) -> (
+          match Ident.Map.find_opt id loads with
+          | Some (Exp.Lvar loaded_from) ->
+              referent_of_reference_global ~visiting loaded_from
+          | _ ->
+              None )
+        | _ ->
+            None )
+  in
+  if Pvar.Set.mem pvar visiting then None
+  else
+    let visiting = Pvar.Set.add pvar visiting in
+    Pvar.get_initializer_pname pvar
+    |> Option.bind ~f:(fun pname ->
+        (* A cycle cannot arise from valid C++ here, since each initialiser reads a reference
+           that is already bound, so the guard above is defensive only and caching its result
+           costs at worst a report. *)
+        match Procname.Cache.lookup referent_cache pname with
+        | Some referent ->
+            referent
+        | None ->
+            let referent = try scan ~visiting pname with Ambiguous -> None in
+            Procname.Cache.add referent_cache pname referent ;
+            referent )
+
+
+let referent_of_reference_global pvar = referent_of_reference_global ~visiting:Pvar.Set.empty pvar
+
+(** Rewrite a lock taken through a reference-typed global into the same address the referent's own
+    locks use, so the two compare equal.
+
+    [rb] carrying accesses [accesses] denotes the referent, while a lock on [b] directly is its
+    ADDRESS, [&b]. The rewritten path is therefore the referent with an address-of underneath the
+    accesses already there. This list is outermost-first, so underneath means at the end. *)
+let resolve_reference address =
+  match address with
+  | Global {path= (Var.ProgramVar pvar, typ), accesses} when Typ.is_reference typ ->
+      referent_of_reference_global pvar
+      |> Option.value_map ~default:address ~f:(fun referent ->
+          let address_of : access = MemoryAccess.TakeAddress in
+          (* [typ] is carried over rather than stripped to the pointee. Taking a lock on [b]
+             directly reaches here as [&b] with base type [std::mutex&] -- the type of the
+             argument, not of the object -- so the resolved path has to spell it the same way or
+             the two addresses still compare unequal and nothing is gained. *)
+          Global {path= ((Var.of_pvar referent, typ), accesses @ [address_of])} )
+  | Global _ | Parameter _ | Opaque _ | Class _ ->
+      address
+
+
 let rec make formal_map (hilexp : HilExp.t) =
   let make_from_acc_exp acc_exp =
     match HilExp.AccessExpression.to_accesses acc_exp with
@@ -506,7 +605,14 @@ let rec make_opaque (hilexp : HilExp.t) =
 let make_subst ?(guard_lock = fun _ -> None) formal_map actuals =
   { addresses=
       Array.of_list_map actuals ~f:(fun actual ->
-          match make formal_map actual with None -> make_opaque actual | address -> address )
+          (* an actual is resolved here as well as at a direct acquisition, so that one mutex does
+             not get two different addresses depending on whether it was locked here or passed to
+             a callee that locks it *)
+          match make formal_map actual |> Option.map ~f:resolve_reference with
+          | None ->
+              make_opaque actual
+          | address ->
+              address )
   ; guarded= Array.of_list_map actuals ~f:guard_lock }
 
 
