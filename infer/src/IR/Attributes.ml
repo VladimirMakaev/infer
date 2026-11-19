@@ -29,6 +29,49 @@ let find =
       (run_query select_statement_adb)
 
 
+let iter_procs_and_callees =
+  let select_statement db =
+    Database.register_statement db
+      "SELECT proc_uid, proc_attributes, callees FROM procedures WHERE cfg IS NOT NULL"
+  in
+  let select_statement_adb = select_statement AnalysisDatabase in
+  let select_statement_cdb = select_statement CaptureDatabase in
+  fun ?(filter_callees = fun _ -> true) f ->
+    (* Unlike {!SyntacticCallGraph.iter_captured_procs_and_callees}, which runs before the
+       analysis and so only needs the capture database, this one is callable during the analysis
+       and queries both, analysis database first, for the same reason {!find} does: the procedure
+       table can be updated in the analysis phase. *)
+    let seen = IString.Hash.create 1024 in
+    let iter_db select_stmt =
+      Database.with_registered_statement select_stmt ~f:(fun db stmt ->
+          SqliteUtils.result_fold_rows db ~log:"Attributes.iter_procs_and_callees" ~finalize:false
+            stmt ~init:() ~f:(fun () stmt ->
+              (* Ordered by what each column costs to decode. [callees] is a list of names;
+                 the attributes are a marshalled record of every formal, annotation and
+                 location, so they are decoded only for the rows [filter_callees] keeps.
+                 Decoding them for every row of the estate, which is what the obvious order
+                 does, is the whole cost of this scan for a caller after a handful of callees. *)
+              let callees : Procname.t list =
+                Sqlite3.column stmt 2 |> Procname.SQLiteList.deserialize
+              in
+              if filter_callees callees then
+                (* Deduplicated here rather than over every row: the second database's copy of a
+                   procedure must be dropped, but [callees] is written at capture and both tables
+                   carry the same list, so a uid that passes the filter in one passes in both and
+                   this sees every duplicate the whole-table version would. *)
+                let uid = Sqlite3.column_text stmt 0 in
+                if not (IString.Hash.mem seen uid) then (
+                  IString.Hash.add seen uid () ;
+                  let proc_name =
+                    Sqlite3.column stmt 1 |> ProcAttributes.SQLite.deserialize
+                    |> ProcAttributes.get_proc_name
+                  in
+                  f proc_name callees ) ) )
+    in
+    iter_db select_statement_adb ;
+    iter_db select_statement_cdb
+
+
 module Cache = Procname.Cache
 
 let load, clear_cache, store, set_lru_limit =

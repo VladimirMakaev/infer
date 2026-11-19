@@ -18,6 +18,17 @@ val store :
 (** Save .attr file for the procedure into the attributes database. [check_stored_definition]
     receives the attributes of the procedure already stored with a CFG under the same name. *)
 
+val iter_procs_and_callees :
+  ?filter_callees:(Procname.t list -> bool) -> (Procname.t -> Procname.t list -> unit) -> unit
+(** Run a function on every procedure that has a CFG, passing its syntactic callees. Reads the
+    procedure tables of both databases, analysis first, so it is usable during the analysis; it
+    analyses nothing. {!SyntacticCallGraph.iter_captured_procs_and_callees} is the pre-analysis
+    equivalent and reads the capture database only.
+
+    [filter_callees] is applied to a row's callees before its attributes are deserialised, which is
+    by far the dearer of the two. A caller interested in a few callees should pass it rather than
+    filter inside the function, especially when the scan is repeated. *)
+
 val load : Procname.t -> ProcAttributes.t option
 (** Load the attributes for the procedure from the attributes database. *)
 

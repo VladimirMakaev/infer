@@ -29,4 +29,66 @@ void SafeBase::set_locked_ok(int x) {
   x_ = x;
 }
 
+void SameClass::set(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  set_locked_bad(x);
+}
+
+void SameClass::set_locked_bad(int x) {
+  last_ = x_;
+  x_ = x;
+}
+
+void ChainedSameClass::set(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  outer_bad(x);
+}
+
+void ChainedSameClass::outer_bad(int x) { inner_bad(x); }
+
+void ChainedSameClass::inner_bad(int x) {
+  last_ = x_;
+  x_ = x;
+}
+
+void CreditedCrossTu::set(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  helper_ok(x);
+}
+
+void CreditedCrossTu::set_via_middle(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  middle_ok(x);
+}
+
+void CreditedCrossTu::helper_ok(int x) {
+  last_ = x_;
+  x_ = x;
+}
+
+void DeepCreditedCrossTu::set(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  helper_ok(x);
+}
+
+void DeepCreditedCrossTu::set_via_outer(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  outer_ok(x);
+}
+
+void DeepCreditedCrossTu::helper_ok(int x) {
+  last_ = x_;
+  x_ = x;
+}
+
+void CreditedOnlyCrossTu::set(int x) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  middle_ok(x);
+}
+
+void CreditedOnlyCrossTu::helper_ok(int x) {
+  last_ = x_;
+  x_ = x;
+}
+
 } // namespace protected_cross_tu
