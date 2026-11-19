@@ -529,6 +529,9 @@ module Name = struct
   let qual_name = function
     | CStruct name | CUnion name | ObjcProtocol name | ObjcClass name ->
         name
+    | CppClass {name; template_spec_info= NoTemplate}
+      when not (QualifiedCppName.equal name QualifiedCppName.empty) ->
+        name
     | CppClass {name; template_spec_info} ->
         let template_suffix = template_suffix template_spec_info in
         QualifiedCppName.append_template_args_to_last name ~args:template_suffix

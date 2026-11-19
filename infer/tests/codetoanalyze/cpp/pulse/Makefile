@@ -27,3 +27,9 @@ HEADERS = $(wildcard *.h)
 include $(TESTS_DIR)/clang.make
 
 infer-out/report.json: $(MAKEFILE_LIST)
+
+.PHONY: qualified-name-debug-test
+qualified-name-debug-test:
+	python3 check_qualified_name_debug.py --infer "$(INFER_BIN)" --clang clang
+
+test: qualified-name-debug-test
