@@ -738,6 +738,83 @@ let report_unsafe_accesses ~issue_log classname aggregated_access_map =
   |> ReportedSet.to_issue_log
 
 
+(** The properties a Java method could be the generated accessor of. A Kotlin property [clock]
+    generates [getClock]/[setClock] over a field [clock]; a [Boolean] property [isReady] generates
+    [isReady]/[setReady] over a field [isReady]. From a setter alone the two are indistinguishable,
+    so both are offered.
+
+    The name is not enough on its own: a production [isPrime(int)], [getClock(int)] or [setUp()] is
+    named like an accessor but cannot be one. The signature a generated accessor must have is
+    required first -- a getter takes no parameter and returns non-void, a setter takes exactly one
+    and returns void -- which rules all three out whatever they are named. *)
+let kotlin_properties_of_accessor java_pname =
+  let method_name = Procname.Java.get_method java_pname in
+  let takes_n_parameters n = Int.equal (List.length (Procname.Java.get_parameters java_pname)) n in
+  let returns_void = Typ.is_void (Procname.Java.get_return_typ java_pname) in
+  let has_getter_signature = takes_n_parameters 0 && not returns_void in
+  let has_setter_signature = takes_n_parameters 1 && returns_void in
+  if has_getter_signature && String.is_prefix method_name ~prefix:"is" then
+    (* the getter of a [Boolean] property *)
+    [method_name]
+  else if has_setter_signature then
+    match String.chop_prefix method_name ~prefix:"set" with
+    | Some suffix when not (String.is_empty suffix) ->
+        [String.uncapitalize suffix; "is" ^ suffix]
+    | _ ->
+        []
+  else if has_getter_signature then
+    match String.chop_prefix method_name ~prefix:"get" with
+    | Some suffix when not (String.is_empty suffix) ->
+        [String.uncapitalize suffix]
+    | _ ->
+        []
+  else []
+
+
+(** A Kotlin property's [@VisibleForTesting] does not reach its generated accessors, so the setter
+    counted as a production write and every read of a test-only property raced with it. Where the
+    annotation does land depends on the annotation's own targets: one that allows properties goes to
+    a synthetic [<getter>$annotations] method, one that allows fields but not properties -- such as
+    androidx's -- goes to the backing field. Neither is an accessor, and the two placements are
+    mutually exclusive, so both are checked.
+
+    The annotation describes the property's visibility, so it excuses both accessors, exactly as
+    annotating the two Java methods would. It says nothing about the field: a production method
+    touching the backing field directly is still reported, and so is any other property of the same
+    class. *)
+let is_kotlin_test_only_property_accessor tenv proc_name =
+  match (proc_name : Procname.t) with
+  | Java java_pname -> (
+    match kotlin_properties_of_accessor java_pname with
+    | [] ->
+        false
+    | property_names ->
+        let synthetic_names =
+          List.map property_names ~f:(fun property ->
+              if String.is_prefix property ~prefix:"is" then property ^ "$annotations"
+              else "get" ^ String.capitalize property ^ "$annotations" )
+        in
+        Tenv.lookup tenv (Procname.Java.get_class_type_name java_pname)
+        |> Option.exists ~f:(fun ({annots; fields; methods} : Struct.t) ->
+            (* Only a Kotlin class puts a property's annotation on the backing field. In Java the
+               same annotation says the field itself is visible for testing and says nothing about
+               a getter that happens to share its name, which stays a production method. *)
+            Annotations.ia_ends_with annots "kotlin.Metadata"
+            && List.exists fields ~f:(fun ({name; annot} : Struct.field) ->
+                List.mem property_names (Fieldname.get_field_name name) ~equal:String.equal
+                && Annotations.(ia_ends_with annot visibleForTesting) )
+            (* the synthetic is found in the class rather than built from this name: it takes
+                  no argument and returns void, so it shares no signature with either accessor *)
+            || List.exists methods ~f:(fun tenv_method ->
+                let synthetic = Struct.name_of_tenv_method tenv_method in
+                List.mem synthetic_names (Procname.get_method synthetic) ~equal:String.equal
+                && Attributes.load synthetic
+                   |> Option.exists ~f:(fun attrs ->
+                       Annotations.(attrs_return_annot_ends_with attrs visibleForTesting) ) ) ) )
+  | _ ->
+      false
+
+
 let should_report_on_proc proc_name =
   Attributes.load proc_name
   |> Option.exists ~f:(fun attrs ->
@@ -753,7 +830,8 @@ let should_report_on_proc proc_name =
           || is_not_private
              && (not (Procname.Java.is_class_initializer java_pname))
              && (not (Procname.Java.is_autogen_method java_pname))
-             && not Annotations.(attrs_return_annot_ends_with attrs visibleForTesting)
+             && (not Annotations.(attrs_return_annot_ends_with attrs visibleForTesting))
+             && not (is_kotlin_test_only_property_accessor tenv proc_name)
       | ObjC_Cpp _ when Procname.is_cpp_lambda proc_name ->
           (* do not report on lambdas; they are essentially private though do not appear as such *)
           false
