@@ -410,45 +410,74 @@ let referent_cache : Pvar.t option Procname.Cache.t =
   Procname.Cache.create ~name:"starvation_reference_referent"
 
 
-let rec referent_of_reference_global ~visiting pvar =
-  let exception Ambiguous in
-  (* [std::mutex& r = other_ref] does not store an address directly: it LOADS the value of
-     [other_ref] and stores that, so the stored expression is an identifier. Following the load
-     back to the reference it came from, and resolving that in turn, is what lets a reference
-     bound to another reference reach the mutex at the end of the chain. *)
-  let scan ~visiting pname =
-    Procdesc.load pname
-    |> Option.bind ~f:(fun pdesc ->
-        let loads, stored =
-          Procdesc.fold_instrs pdesc ~init:(Ident.Map.empty, None)
-            ~f:(fun ((loads, stored) as acc) _ (instr : Sil.instr) ->
-              match instr with
-              | Load {id; e} ->
-                  (Ident.Map.add id e loads, stored)
-              | Store {e1= Lvar lhs; e2} when Pvar.equal lhs pvar -> (
-                match stored with
+(** Read one procedure's instructions once: every load, and for each program variable the single
+    expression stored to it. A variable stored twice with different expressions maps to [None],
+    because naming one of the two would be a guess and a wrong one merges unrelated locks.
+
+    Both binding sites use this. A reference GLOBAL is bound in its own initialiser procedure, one
+    reference per procedure; a block-local reference is bound in the procedure that declares it,
+    which declares many, so the result has to be read per variable rather than per procedure. *)
+let read_bindings pname =
+  Procdesc.load pname
+  |> Option.map ~f:(fun pdesc ->
+      Procdesc.fold_instrs pdesc ~init:(Ident.Map.empty, Pvar.Map.empty)
+        ~f:(fun (loads, stores) _ (instr : Sil.instr) ->
+          match instr with
+          | Load {id; e} ->
+              (Ident.Map.add id e loads, stores)
+          | Store {e1= Lvar lhs; e2; typ} ->
+              let merge = function
                 | None ->
-                    (loads, Some e2)
-                | Some previous when Exp.equal previous e2 ->
-                    acc
+                    Some (Some (e2, typ))
+                | Some (Some (previous, _)) as unchanged when Exp.equal previous e2 ->
+                    unchanged
                 | Some _ ->
-                    (* bound in two different ways; naming one of them would be a guess *)
-                    raise Ambiguous )
-              | _ ->
-                  acc )
-        in
-        match (stored : Exp.t option) with
-        | Some (Lvar referent) ->
-            Some referent
-        | Some (Var id) -> (
-          match Ident.Map.find_opt id loads with
-          | Some (Exp.Lvar loaded_from) ->
-              referent_of_reference_global ~visiting loaded_from
+                    Some None
+              in
+              (loads, Pvar.Map.update lhs merge stores)
           | _ ->
-              None )
-        | _ ->
-            None )
-  in
+              (loads, stores) ) )
+
+
+(** the variable whose address was stored, following one load.
+
+    [std::mutex& r = other_ref] does not store an address directly: it LOADS the value of
+    [other_ref] and stores that, so the stored expression is an identifier. Following the load back
+    to the reference it came from, and resolving that in turn with [follow], is what lets a
+    reference bound to another reference reach the mutex at the end of the chain. *)
+let stored_referent ~loads ~follow stored =
+  match (stored : (Exp.t * Typ.t) option) with
+  | Some (Lvar referent, _) ->
+      Some referent
+  | Some (Var id, _) -> (
+    match Ident.Map.find_opt id loads with
+    | Some (Exp.Lvar loaded_from) ->
+        follow loaded_from
+    | _ ->
+        None )
+  | _ ->
+      None
+
+
+(* [Pvar.Map.find_opt] absent means no store at all and [Some None] means two conflicting ones;
+   both must give up, so they are collapsed here. *)
+let stored_in stores pvar = Pvar.Map.find_opt pvar stores |> Option.join
+
+(* Taking the address of a variable and taking the address of a pointer variable produce the same
+   [Lvar] in SIL, so the stored expression alone cannot tell [std::mutex& r = m] from
+   [std::mutex* p = &m]. The store's type can: it is the type of [*e1], which is a reference for
+   the first and [Pk_pointer] for the second. Only a reference may be followed -- a pointer can be
+   assigned again after its initialiser, so what it points to where the lock is taken does not
+   follow from how it was initialised. *)
+let binding_is_reference stored =
+  match (stored : (Exp.t * Typ.t) option) with
+  | Some (_, typ) ->
+      Typ.is_reference typ
+  | None ->
+      false
+
+
+let rec referent_of_reference_global ~visiting pvar =
   if Pvar.Set.mem pvar visiting then None
   else
     let visiting = Pvar.Set.add pvar visiting in
@@ -456,17 +485,83 @@ let rec referent_of_reference_global ~visiting pvar =
     |> Option.bind ~f:(fun pname ->
         (* A cycle cannot arise from valid C++ here, since each initialiser reads a reference
            that is already bound, so the guard above is defensive only and caching its result
-           costs at worst a report. *)
+           costs at worst a report. Keying on the initialiser procedure is sound because it
+           binds exactly this one reference. *)
         match Procname.Cache.lookup referent_cache pname with
         | Some referent ->
             referent
         | None ->
-            let referent = try scan ~visiting pname with Ambiguous -> None in
+            let referent =
+              read_bindings pname
+              |> Option.bind ~f:(fun (loads, stores) ->
+                  let stored = stored_in stores pvar in
+                  (* gated here rather than at the call site so that every caller, including the
+                     block-local chain below, inherits the pointer exclusion *)
+                  if binding_is_reference stored then
+                    stored_referent ~loads ~follow:(referent_of_reference_global ~visiting) stored
+                  else None )
+            in
             Procname.Cache.add referent_cache pname referent ;
             referent )
 
 
 let referent_of_reference_global pvar = referent_of_reference_global ~visiting:Pvar.Set.empty pvar
+
+let local_bindings_cache : Pvar.t Pvar.Map.t Procname.Cache.t =
+  Procname.Cache.create ~name:"starvation_reference_local_bindings"
+
+
+(** For every variable bound in [pname], the GLOBAL its chain of references ends at.
+
+    One procedure declares many references, so unlike [referent_of_reference_global] this cannot
+    cache a single answer per procedure: every reference in it would collide on that entry and take
+    whichever was resolved first, silently merging unrelated locks. The whole map is built in one
+    scan and cached instead, which also means a chain of block-local references resolves without
+    re-reading the procedure. *)
+let local_bindings pname =
+  match Procname.Cache.lookup local_bindings_cache pname with
+  | Some bindings ->
+      bindings
+  | None ->
+      let bindings =
+        read_bindings pname
+        |> Option.value_map ~default:Pvar.Map.empty ~f:(fun (loads, stores) ->
+            (* A global reached here may itself be a reference-typed global, which has its own
+               binding in its own initialiser. Stopping at the first global would name THAT
+               variable, and since its type is still a reference the later [resolve_reference]
+               would resolve it again and append a second address-of, giving [&(&(t))], which
+               matches nothing and silently drops the inversion. Following the chain to the end
+               here means exactly one address-of is ever taken. [referent_of_reference_global]
+               returns [None] for a global that is not a reference, which is what ends the loop
+               and what keeps pointer globals excluded. *)
+            let rec through_reference_globals ~visiting pvar =
+              if Pvar.Set.mem pvar visiting then Some pvar
+              else
+                match referent_of_reference_global pvar with
+                | Some referent ->
+                    through_reference_globals ~visiting:(Pvar.Set.add pvar visiting) referent
+                | None ->
+                    Some pvar
+            in
+            let rec resolve ~visiting pvar =
+              if Pvar.is_global pvar then through_reference_globals ~visiting:Pvar.Set.empty pvar
+              else if Pvar.Set.mem pvar visiting then None
+              else
+                let visiting = Pvar.Set.add pvar visiting in
+                stored_referent ~loads ~follow:(resolve ~visiting) (stored_in stores pvar)
+                |> Option.bind ~f:(resolve ~visiting)
+            in
+            Pvar.Map.filter_map (fun pvar _ -> resolve ~visiting:Pvar.Set.empty pvar) stores )
+      in
+      Procname.Cache.add local_bindings_cache pname bindings ;
+      bindings
+
+
+(** the global a block-local reference is bound to, if its binding settles on one *)
+let referent_of_local_reference pvar =
+  Pvar.get_declaring_function pvar
+  |> Option.bind ~f:(fun pname -> Pvar.Map.find_opt pvar (local_bindings pname))
+
 
 (** Rewrite a lock taken through a reference-typed global into the same address the referent's own
     locks use, so the two compare equal.
@@ -492,7 +587,7 @@ let resolve_reference address =
 let rec make formal_map (hilexp : HilExp.t) =
   let make_from_acc_exp acc_exp =
     match HilExp.AccessExpression.to_accesses acc_exp with
-    | HilExp.AccessExpression.Base ((var, _) as base), accesses -> (
+    | HilExp.AccessExpression.Base ((var, typ) as base), accesses -> (
       match normalise_access_list accesses with
       | Some accesses -> (
           let path = (base, accesses) in
@@ -502,10 +597,28 @@ let rec make formal_map (hilexp : HilExp.t) =
               None
           | Var.ProgramVar pvar when Pvar.is_global pvar ->
               Some (Global {path})
-          | Var.ProgramVar _ ->
-              FormalMap.get_formal_index base formal_map
-              (* ignores non-formals *)
-              |> Option.map ~f:(fun index -> Parameter {index; path}) )
+          | Var.ProgramVar pvar -> (
+            match FormalMap.get_formal_index base formal_map with
+            | Some index ->
+                Some (Parameter {index; path})
+            | None ->
+                (* Not a formal, so there is no address for it and the acquisition used to be
+                   dropped here. A block-local REFERENCE is still worth naming: it cannot be
+                   rebound, so the single store in its own procedure settles what it denotes, and
+                   when that is a global the lock is the global's own. The address is spelled the
+                   way [resolve_reference] spells a resolved global -- the referent carrying the
+                   reference type, with an address-of underneath the accesses -- so that locking
+                   the global directly and locking it through this reference compare equal.
+
+                   Anything else stays dropped: a non-reference local has no address to speak of,
+                   a pointer can be reassigned after its initialiser, and a reference bound to a
+                   field or to another local never reaches a global. *)
+                if Typ.is_reference typ then
+                  referent_of_local_reference pvar
+                  |> Option.map ~f:(fun referent ->
+                      let address_of : access = MemoryAccess.TakeAddress in
+                      Global {path= ((Var.of_pvar referent, typ), accesses @ [address_of])} )
+                else None ) )
       | _ ->
           None )
     | _ ->
