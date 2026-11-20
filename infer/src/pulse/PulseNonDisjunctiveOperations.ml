@@ -48,11 +48,27 @@ let is_thrift_field_copy_assignment =
     Option.is_some (dispatch () pname arg_payloads)
 
 
+let copies_rather_than_transfers (attrs : ProcAttributes.t) =
+  (* Keep compiler-generated assignments as copies. For user-declared assignments, a non-const
+     reference can transfer ownership. The declaration and signature avoid body dependence. *)
+  attrs.is_cpp_implicit
+  ||
+  match attrs.formals with
+  | _this :: (_, source_typ, _) :: _ ->
+      (* A record-valued return can append a synthetic output formal after the source. *)
+      (* By-value records are lowered to synthetic references. Inspect the source qualifier,
+         rather than the ABI reference kind, to retain copy-and-swap assignments. *)
+      (not (Typ.is_reference_on_source source_typ.Typ.quals))
+      || Typ.is_const_reference_on_source source_typ
+  | _ ->
+      true
+
+
 let get_copy_origin pname actuals =
   let open IOption.Let_syntax in
   let* attrs = IRAttributes.load pname in
   if attrs.ProcAttributes.is_cpp_copy_ctor then Some Attribute.CopyOrigin.CopyCtor
-  else if attrs.ProcAttributes.is_cpp_copy_assignment then
+  else if attrs.ProcAttributes.is_cpp_copy_assignment && copies_rather_than_transfers attrs then
     Some (Attribute.CopyOrigin.CopyAssignment Normal)
   else if is_thrift_field_copy_assignment pname actuals then
     Some (Attribute.CopyOrigin.CopyAssignment Thrift)
