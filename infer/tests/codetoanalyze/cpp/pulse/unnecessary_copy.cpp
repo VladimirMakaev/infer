@@ -1984,3 +1984,251 @@ int copy_modified_after_exit_branch_ok(bool b) {
   return a.arr[0];
 }
 } // namespace exiting_branch
+
+#include <cstdlib>
+#include <new>
+
+namespace assignment_signature {
+struct TransferData {
+  void* pointer;
+  int flags;
+};
+
+struct TransferValue {
+  TransferData data{nullptr, 0};
+  TransferValue() = default;
+  ~TransferValue() {
+    if (data.flags & 1)
+      std::free(data.pointer);
+  }
+  TransferValue& operator=(TransferValue& source) noexcept {
+    if (this != &source) {
+      this->~TransferValue();
+      new (this) TransferValue();
+      data = source.data;
+      source.data.flags = 0;
+    }
+    return *this;
+  }
+};
+
+struct TransferValue2 {
+  TransferData data{nullptr, 0};
+  TransferValue2() = default;
+  ~TransferValue2() {
+    if (data.flags & 1)
+      std::free(data.pointer);
+  }
+  TransferValue2& operator=(TransferValue2& source) noexcept {
+    if (this != &source) {
+      if (data.flags & 1)
+        std::free(data.pointer);
+      data = source.data;
+      source.data.flags = 0;
+    }
+    return *this;
+  }
+};
+
+struct TransferMember {
+  TransferValue value;
+};
+struct TransferMember2 {
+  TransferValue2 value;
+};
+TransferValue make_transfer_value();
+TransferValue2 make_transfer_value2();
+
+void transfer_field_ok(TransferMember* member) {
+  auto source = make_transfer_value();
+  member->value = source;
+}
+
+void transfer_field2_ok(TransferMember2* member) {
+  auto source = make_transfer_value2();
+  member->value = source;
+}
+
+struct ConstCopyValue {
+  std::string text;
+  ConstCopyValue& operator=(const ConstCopyValue& source) {
+    text = source.text;
+    return *this;
+  }
+};
+struct ConstCopyMember {
+  ConstCopyValue value;
+};
+ConstCopyValue make_const_copy_value();
+
+void copy_assign_const_ref_bad(ConstCopyMember* member) {
+  auto source = make_const_copy_value();
+  member->value = source;
+}
+
+struct CopyAndSwapValue {
+  std::string text;
+  CopyAndSwapValue& operator=(CopyAndSwapValue source) {
+    text.swap(source.text);
+    return *this;
+  }
+};
+struct CopyAndSwapMember {
+  CopyAndSwapValue value;
+};
+CopyAndSwapValue make_copy_and_swap_value();
+
+void copy_and_swap_assign_bad(CopyAndSwapMember* member) {
+  auto source = make_copy_and_swap_value();
+  member->value = source;
+}
+
+struct ImplicitCopyValue {
+  std::string text;
+};
+struct ImplicitCopyMember {
+  ImplicitCopyValue value;
+};
+ImplicitCopyValue make_implicit_copy_value();
+
+void implicit_copy_assign_bad(ImplicitCopyMember* member) {
+  auto source = make_implicit_copy_value();
+  member->value = source;
+}
+
+struct NonConstCopyValue {
+  std::string text;
+  NonConstCopyValue& operator=(NonConstCopyValue& source) {
+    text = source.text;
+    return *this;
+  }
+};
+struct NonConstCopyMember {
+  NonConstCopyValue value;
+};
+NonConstCopyValue make_nonconst_copy_value();
+
+// The signature rule deliberately gives up assignments that really copy through a non-const
+// reference. Their bodies still run normally, but unnecessary-copy tracking declines them.
+void FN_nonconst_ref_that_really_copies(NonConstCopyMember* member) {
+  auto source = make_nonconst_copy_value();
+  member->value = source;
+}
+
+struct DeclaredTransferValue {
+  std::string text;
+  DeclaredTransferValue& operator=(DeclaredTransferValue& source);
+};
+struct DeclaredTransferMember {
+  DeclaredTransferValue value;
+};
+DeclaredTransferValue make_declared_transfer_value();
+
+// The classification is the same when the non-const assignment body is unavailable.
+void declared_transfer_ok(DeclaredTransferMember* member) {
+  auto source = make_declared_transfer_value();
+  member->value = source;
+}
+
+struct DeclaredConstCopyValue {
+  std::string text;
+  DeclaredConstCopyValue& operator=(const DeclaredConstCopyValue& source);
+};
+struct DeclaredConstCopyMember {
+  DeclaredConstCopyValue value;
+};
+DeclaredConstCopyValue make_declared_const_copy_value();
+
+void declared_const_copy_bad(DeclaredConstCopyMember* member) {
+  auto source = make_declared_const_copy_value();
+  member->value = source;
+}
+} // namespace assignment_signature
+
+namespace implicit_assignment {
+struct NonConstCopyMember {
+  std::set<int> values;
+  NonConstCopyMember& operator=(NonConstCopyMember& source) {
+    values = source.values;
+    return *this;
+  }
+};
+
+// The member forces a non-const source reference for the enclosing implicit assignment.
+struct ImplicitNonConstCopy {
+  NonConstCopyMember member;
+};
+
+void implicit_nonconst_copy_assign_bad(ImplicitNonConstCopy source) {
+  ImplicitNonConstCopy local;
+  local = source;
+}
+
+struct TransferMember {
+  std::set<int> values;
+  TransferMember& operator=(TransferMember& source) {
+    values = std::move(source.values);
+    return *this;
+  }
+};
+
+struct ImplicitTransfer {
+  TransferMember member;
+};
+
+// Known limitation: the compiler-generated exception retains the base copy classification
+// although the member's assignment transfers ownership. This is not a new warning.
+void FP_implicit_transferring_member_assign(ImplicitTransfer source) {
+  ImplicitTransfer local;
+  local = source;
+}
+
+struct UserDefaultedNonConst {
+  NonConstCopyMember member;
+  UserDefaultedNonConst& operator=(UserDefaultedNonConst&) = default;
+};
+
+// A written '= default' declaration is user-declared, even though its body is generated.
+// The non-const signature therefore remains in the deliberately unreported copy family.
+void FN_user_defaulted_nonconst_assign(UserDefaultedNonConst source) {
+  UserDefaultedNonConst local;
+  local = source;
+}
+} // namespace implicit_assignment
+
+namespace record_return_assignment {
+struct TransferValue {
+  std::set<int> values;
+  TransferValue operator=(TransferValue& source) {
+    values = std::move(source.values);
+    return TransferValue{};
+  }
+};
+struct TransferHolder {
+  TransferValue value;
+};
+TransferValue make_transfer_value();
+
+// Returning a record adds an ABI output formal; the writable source is still user-declared.
+void record_return_transfer_assign_ok(TransferHolder* holder) {
+  auto source = make_transfer_value();
+  holder->value = source;
+}
+
+struct ConstCopyValue {
+  std::set<int> values;
+  ConstCopyValue operator=(const ConstCopyValue& source) {
+    values = source.values;
+    return ConstCopyValue{};
+  }
+};
+struct ConstCopyHolder {
+  ConstCopyValue value;
+};
+ConstCopyValue make_const_copy_value();
+
+void record_return_const_copy_assign_bad(ConstCopyHolder* holder) {
+  auto source = make_const_copy_value();
+  holder->value = source;
+}
+} // namespace record_return_assignment
