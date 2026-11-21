@@ -270,7 +270,21 @@ module Iterator = struct
     in
     (* We do not want to create internal array if iterator pointer has an invalid value *)
     let* astate = PulseOperations.check_addr_access path Read location index astate in
-    let+ astate, elem = element path location iterator (fst index) astate in
+    let+ astate, elem =
+      (* The position an iterator holds carries the integer index it was created at, recorded by
+         [record_vector_index] from [point_into] and kept up to date across ++ and pointer
+         arithmetic by [offset_vector_index]. Resolve the element by that integer, because it is
+         how [at], [front] and [push_back] key the backing array. Keyed by the position's own
+         address instead, as below, the lookup lands in a cell nothing else ever writes, so a
+         value stored in the vector is invisible to iteration even when the element is a scalar.
+         Positions with no recorded index, which is every container that does not track them,
+         keep the previous behaviour. *)
+      match vector_index (fst index) astate with
+      | Some tracked_index ->
+          element path location iterator (fst tracked_index) astate
+      | None ->
+          element path location iterator (fst index) astate
+    in
     (astate, pointer, index, elem)
 
 
