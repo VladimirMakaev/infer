@@ -33,6 +33,7 @@ let () =
       ( [ AbstractInterpreterTests.tests
         ; AccessTreeTests.tests
         ; AddressTakenTests.tests
+        ; CallerIndexTests.tests
         ; DifferentialFiltersTests.tests
         ; DifferentialTests.tests
         ; FileDiffTests.tests

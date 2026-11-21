@@ -3192,6 +3192,17 @@ and racerd_always_report_java =
     "Every Java class analysed is treated as if it were annotated as @ThreadSafe."
 
 
+(* No [~in_help]: this is an internal switch, so it shows up only in --help-full and stays out of
+   the man pages. It exists to turn off an optimisation, not to change what is reported -- both
+   settings answer from the same recorded call edges -- so there is nothing here for a user to
+   decide. *)
+and racerd_caller_index =
+  CLOpt.mk_bool ~long:"racerd-caller-index" ~default:true
+    "Build the callee-to-callers table once before the analysis and look callers up in it, instead \
+     of scanning every captured procedure once per file that defines a protected C++ method. \
+     Turning this off restores the scan, which is slower but answers from the same data."
+
+
 and racerd_guardedby =
   CLOpt.mk_bool ~long:"racerd-guardedby" ~default:false
     ~in_help:InferCommand.[(Analyze, manual_racerd)]
@@ -5102,6 +5113,8 @@ and qualified_cpp_name_block_list = RevList.to_list !qualified_cpp_name_block_li
 and quiet = !quiet
 
 and racerd_always_report_java = !racerd_always_report_java
+
+and racerd_caller_index = !racerd_caller_index
 
 and racerd_guardedby = !racerd_guardedby
 
