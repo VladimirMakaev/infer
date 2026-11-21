@@ -29,6 +29,10 @@ val iter_procs_and_callees :
     by far the dearer of the two. A caller interested in a few callees should pass it rather than
     filter inside the function, especially when the scan is repeated. *)
 
+val find : string -> ProcAttributes.t option
+(** the attributes stored under a procedure's unique id, for a reader that is holding the id rather
+    than the name -- as anything reading a column of the procedures table is *)
+
 val load : Procname.t -> ProcAttributes.t option
 (** Load the attributes for the procedure from the attributes database. *)
 

@@ -269,6 +269,12 @@ let main ~changed_files =
       IssueLog.invalidate_all ~procedures ;
       L.progress "Done@." )
     else if not Config.incremental_analysis then DBWriter.delete_all_specs () ;
+  if Config.racerd_caller_index && Config.is_checker_enabled RacerD then
+    (* Once, here, rather than once per analysed file inside the checker: the question "who calls
+       this?" is about the whole captured estate, and the estate does not change while the
+       analysis runs. It has to happen before the workers are created, since they are forked and
+       would otherwise each build their own copy. *)
+    RacerDFileAnalysis.build_caller_index () ;
   let no_file_means_all = Option.is_none Config.procs_to_analyze_index in
   let source_files = lazy (get_source_files_to_analyze ~no_file_means_all ~changed_files) in
   (* empty all caches to minimize the process heap to have less work to do when forking *)

@@ -854,32 +854,53 @@ let is_protected_cpp_method proc_name =
       false
 
 
-(** [callee -> the procedures that call it], for the callees given. One pass over the call edges
-    recorded at capture, so nothing is analysed here and the cost follows the size of the captured
-    code rather than its analysis time. The callee filter is given to the scan rather than applied
-    to its results so that the rows calling none of them, which are nearly all of them, cost one
-    call-edge decode and no attribute decode.
+(** Which callees are worth an edge in the caller table. Deliberately the syntactic test and not
+    {!is_protected_cpp_method}: deciding that a procedure is protected costs an attribute decode,
+    and doing one per callee of the whole estate would put back the cost the table removes. The
+    table is therefore wider than the rule needs, and the rule narrows it at lookup time. *)
+let may_be_protected_cpp_method proc_name =
+  match (proc_name : Procname.t) with ObjC_Cpp {kind= CPPMethod _} -> true | _ -> false
+
+
+let build_caller_index () = CallerIndex.build ~keep_callee:may_be_protected_cpp_method ()
+
+(** [callee -> the procedures that call it], for the callees given. An indexed lookup in the table
+    built once before the analysis, falling back to one pass over the call edges recorded at capture
+    when there is no table -- an older results directory, or a run that skipped the build. The
+    fallback answers from the same rows, only slower, so a missing table costs time and never an
+    answer.
+
+    In the fallback the callee filter is given to the scan rather than applied to its results, so
+    that the rows calling none of them, which are nearly all of them, cost one call-edge decode and
+    no attribute decode.
 
     A self-call is left out: a method cannot be the caller that establishes its own precondition. *)
 let callers_of callees =
-  let calls_one_of_them = List.exists ~f:(fun callee -> Procname.Set.mem callee callees) in
-  let callers = ref Procname.Map.empty in
-  Attributes.iter_procs_and_callees ~filter_callees:calls_one_of_them
-    (fun caller callees_of_caller ->
-      List.iter callees_of_caller ~f:(fun callee ->
-          if Procname.Set.mem callee callees && not (Procname.equal caller callee) then
-            callers :=
-              Procname.Map.update callee
-                (fun callers -> Some (caller :: Option.value callers ~default:[]))
-                !callers ) ) ;
-  !callers
+  let scan () =
+    Stats.incr_racerd_caller_table_scans () ;
+    let calls_one_of_them = List.exists ~f:(fun callee -> Procname.Set.mem callee callees) in
+    let callers = ref Procname.Map.empty in
+    Attributes.iter_procs_and_callees ~filter_callees:calls_one_of_them
+      (fun caller callees_of_caller ->
+        List.iter callees_of_caller ~f:(fun callee ->
+            if Procname.Set.mem callee callees && not (Procname.equal caller callee) then
+              callers :=
+                Procname.Map.update callee
+                  (fun callers -> Some (caller :: Option.value callers ~default:[]))
+                  !callers ) ) ;
+    !callers
+  in
+  if Config.racerd_caller_index then
+    match CallerIndex.callers_of callees with Some callers -> callers | None -> scan ()
+  else scan ()
 
 
-(** The transitive caller map over the recorded call edges, starting from [seed]. Each round is one
-    scan, and a round only asks about the protected C++ callers found in the previous one, so the
-    number of scans is the depth of the protected-helper chains rather than anything to do with the
-    size of the estate; a chain two deep costs two scans. Memoised by [resolved]: a method whose
-    callers have been looked up once is never queued again, so a cycle terminates.
+(** The transitive caller map over the recorded call edges, starting from [seed]. A round only asks
+    about the protected C++ callers found in the previous one, so the number of rounds is the depth
+    of the protected-helper chains rather than anything to do with the size of the estate. With the
+    caller table a round costs one lookup per method it asks about; without it, a round is a scan of
+    every captured procedure, which is what the table exists to stop. Memoised by [resolved]: a
+    method whose callers have been looked up once is never queued again, so a cycle terminates.
 
     The credit rule is a question about a method's callers, and those callers' own credit, so it
     cannot be answered from one file's summaries. This is the global call graph the rule needs. *)

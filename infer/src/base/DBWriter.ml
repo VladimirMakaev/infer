@@ -44,6 +44,8 @@ let shrink_analysis_db () = perform ShrinkAnalysisDB
 
 let start () = perform Start
 
+let store_caller_index ~rows = perform (StoreCallerIndex {rows})
+
 let store_issue_log ~checker ~source_file ~issue_log =
   perform (StoreIssueLog {checker; source_file; issue_log})
 

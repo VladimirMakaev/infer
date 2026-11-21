@@ -321,6 +321,27 @@ module Implementation : DBWriterS.S = struct
     SqliteUtils.exec db ~log:"checkpointing" ~stmt:"PRAGMA wal_checkpoint(TRUNCATE)"
 
 
+  let store_caller_index =
+    let store_statement =
+      Database.register_statement AnalysisDatabase
+        {|
+          INSERT OR REPLACE INTO callers
+          VALUES (:callee_uid, :caller_uids)
+        |}
+    in
+    fun ~rows ->
+      (* One transaction for the whole table: it is written once, before the analysis, and a
+         commit per callee would cost more than the scan it is replacing. *)
+      SqliteUtils.transaction (Database.get_database AnalysisDatabase) ~f:(fun () ->
+          List.iter rows ~f:(fun (callee_uid, caller_uids) ->
+              Database.with_registered_statement store_statement ~f:(fun db store_stmt ->
+                  Sqlite3.bind store_stmt 1 (Sqlite3.Data.TEXT callee_uid)
+                  |> SqliteUtils.check_result_code db ~log:"store caller index bind callee" ;
+                  Sqlite3.bind store_stmt 2 caller_uids
+                  |> SqliteUtils.check_result_code db ~log:"store caller index bind callers" ;
+                  SqliteUtils.result_unit ~finalize:false db ~log:"store caller index" store_stmt ) ) )
+
+
   let store_issue_log =
     let store_statement =
       Database.register_statement AnalysisDatabase
@@ -512,6 +533,7 @@ type t =
       ; check_stored_definition: (Sqlite3.Data.t -> unit) option }
   | ShrinkAnalysisDB
   | Start
+  | StoreCallerIndex of {rows: (string * Sqlite3.Data.t) list}
   | StoreIssueLog of {checker: string; source_file: Sqlite3.Data.t; issue_log: Sqlite3.Data.t}
   | StoreSpec of
       { transaction: bool
@@ -552,6 +574,8 @@ let to_string = function
       "ShrinkAnalysisDB"
   | Start ->
       "Start"
+  | StoreCallerIndex _ ->
+      "StoreCallerIndex"
   | StoreIssueLog _ ->
       "StoreIssueLog"
   | StoreSpec _ ->
@@ -591,6 +615,8 @@ let perform = function
       Implementation.shrink_analysis_db ()
   | Start ->
       Implementation.start ()
+  | StoreCallerIndex {rows} ->
+      Implementation.store_caller_index ~rows
   | StoreIssueLog {checker; source_file; issue_log} ->
       Implementation.store_issue_log ~checker ~source_file ~issue_log
   | StoreSpec

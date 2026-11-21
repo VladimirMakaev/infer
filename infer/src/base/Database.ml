@@ -58,6 +58,23 @@ let specs_schema prefix =
        PayloadId.database_fields )
 
 
+let callers_schema prefix =
+  (* The reverse of the [callees] column of [procedures], computed once before the analysis so that
+     asking which procedures call a given one costs an indexed lookup rather than a scan of every
+     captured procedure. One row per callee, holding the unique ids of its callers: the ids rather
+     than the names because the names are only needed for the handful of callers a query returns,
+     and decoding them for the whole estate at build time is the cost this table exists to remove.
+     [Marshal]ed values must never be used as keys, hence [callee_uid] being the text id. *)
+  Printf.sprintf
+    {|
+      CREATE TABLE IF NOT EXISTS %scallers
+        ( callee_uid TEXT PRIMARY KEY NOT NULL
+        , caller_uids BLOB NOT NULL
+        )
+    |}
+    prefix
+
+
 let issues_schema prefix =
   Printf.sprintf
     {|
@@ -73,7 +90,11 @@ let issues_schema prefix =
 
 let schema_hum =
   String.concat ~sep:";\n"
-    [procedures_schema ""; source_files_schema ""; specs_schema ""; issues_schema ""]
+    [ procedures_schema ""
+    ; source_files_schema ""
+    ; specs_schema ""
+    ; issues_schema ""
+    ; callers_schema "" ]
 
 
 let create_procedures_table ~prefix db =
@@ -89,6 +110,10 @@ let create_specs_tables ~prefix db =
   SqliteUtils.exec db ~log:"creating issue logs table" ~stmt:(issues_schema prefix)
 
 
+let create_callers_table ~prefix db =
+  SqliteUtils.exec db ~log:"creating callers table" ~stmt:(callers_schema prefix)
+
+
 type id = CaptureDatabase | AnalysisDatabase [@@deriving show {with_path= false}]
 
 let create_tables ?(prefix = "") db = function
@@ -97,7 +122,8 @@ let create_tables ?(prefix = "") db = function
       create_source_files_table ~prefix db
   | AnalysisDatabase ->
       create_procedures_table ~prefix db ;
-      create_specs_tables ~prefix db
+      create_specs_tables ~prefix db ;
+      create_callers_table ~prefix db
 
 
 let get_db_entry = function

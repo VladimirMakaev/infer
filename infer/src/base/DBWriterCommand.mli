@@ -34,6 +34,7 @@ type t =
       ; check_stored_definition: (Sqlite3.Data.t -> unit) option }
   | ShrinkAnalysisDB
   | Start
+  | StoreCallerIndex of {rows: (string * Sqlite3.Data.t) list}
   | StoreIssueLog of {checker: string; source_file: Sqlite3.Data.t; issue_log: Sqlite3.Data.t}
   | StoreSpec of
       { transaction: bool

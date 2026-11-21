@@ -50,6 +50,9 @@ module type S = sig
 
   val start : unit -> unit
 
+  val store_caller_index : rows:(string * Sqlite3.Data.t) list -> unit
+  (** write the callee-to-callers table, built once before the analysis *)
+
   val store_issue_log :
     checker:string -> source_file:Sqlite3.Data.t -> issue_log:Sqlite3.Data.t -> unit
 

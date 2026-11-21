@@ -29,6 +29,10 @@ val incr_ondemand_recursion_cycle_restart_limit_hit : unit -> unit
 
 val incr_ondemand_callchain_limit_hit : unit -> unit
 
+val incr_racerd_caller_table_scans : unit -> unit
+
+val add_racerd_caller_index_lookups : int -> unit
+
 val add_to_proc_locker_lock_time : ExecutionDuration.t -> unit
 
 val add_to_proc_locker_unlock_time : ExecutionDuration.t -> unit

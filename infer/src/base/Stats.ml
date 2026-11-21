@@ -234,6 +234,8 @@ type t =
   ; ondemand_double_analysis_prevented: IntCounter.t Atomic.t
   ; ondemand_recursion_cycle_restart_limit_hit: IntCounter.t Atomic.t
   ; ondemand_callchain_limit_hit: IntCounter.t Atomic.t
+  ; racerd_caller_table_scans: IntCounter.t Atomic.t
+  ; racerd_caller_index_lookups: IntCounter.t Atomic.t
   ; proc_locker_lock_time: TimeCounter.t Atomic.t
   ; proc_locker_unlock_time: TimeCounter.t Atomic.t
   ; restart_scheduler_useful_time: TimeCounter.t Atomic.t
@@ -313,7 +315,8 @@ let pp fmt stats =
     ~ondemand_procs_analyzed:(pp_int_field fmt) ~ondemand_procs_failed:(pp_int_field fmt)
     ~ondemand_double_analysis_prevented:(pp_int_field fmt)
     ~ondemand_recursion_cycle_restart_limit_hit:(pp_int_field fmt)
-    ~ondemand_callchain_limit_hit:(pp_int_field fmt)
+    ~ondemand_callchain_limit_hit:(pp_int_field fmt) ~racerd_caller_table_scans:(pp_int_field fmt)
+    ~racerd_caller_index_lookups:(pp_int_field fmt)
     ~proc_locker_lock_time:(pp_time_counter_field fmt)
     ~proc_locker_unlock_time:(pp_time_counter_field fmt) ~process_times:(pp_time_counter_field fmt)
     ~pulse_aliasing_contradictions:(pp_int_field fmt)
@@ -344,6 +347,8 @@ let pp fmt stats =
 let log_to_file
     { ondemand_procs_analyzed
     ; ondemand_procs_failed
+    ; racerd_caller_table_scans
+    ; racerd_caller_index_lookups
     ; pulse_aliasing_contradictions
     ; pulse_args_length_contradictions
     ; pulse_captured_vars_length_contradictions
@@ -368,6 +373,8 @@ let log_to_file
   F.fprintf fmt "=== global counters ===@\n" ;
   F.fprintf fmt "ondemand_procs_analyzed: %d@\n" (Atomic.get ondemand_procs_analyzed) ;
   F.fprintf fmt "ondemand_procs_failed: %d@\n" (Atomic.get ondemand_procs_failed) ;
+  F.fprintf fmt "racerd_caller_table_scans: %d@\n" (Atomic.get racerd_caller_table_scans) ;
+  F.fprintf fmt "racerd_caller_index_lookups: %d@\n" (Atomic.get racerd_caller_index_lookups) ;
   F.fprintf fmt "pulse_aliasing_contradictions: %d@\n" (Atomic.get pulse_aliasing_contradictions) ;
   F.fprintf fmt "pulse_args_length_contradictions: %d@\n"
     (Atomic.get pulse_args_length_contradictions) ;
@@ -476,6 +483,10 @@ let incr_ondemand_recursion_cycle_restart_limit_hit () =
 
 
 let incr_ondemand_callchain_limit_hit () = incr Fields.ondemand_callchain_limit_hit
+
+let incr_racerd_caller_table_scans () = incr Fields.racerd_caller_table_scans
+
+let add_racerd_caller_index_lookups n = add Fields.racerd_caller_index_lookups n
 
 let add_to_proc_locker_lock_time execution_duration =
   add_exe_duration Fields.proc_locker_lock_time execution_duration
