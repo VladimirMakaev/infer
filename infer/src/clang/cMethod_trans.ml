@@ -230,6 +230,7 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
   ; is_override= ms.CMethodSignature.is_override
   ; cpp_constructor_is_nothrow= ms.CMethodSignature.cpp_constructor_is_nothrow
   ; is_cpp_move_ctor= ms.CMethodSignature.is_cpp_move_ctor
+  ; is_cpp_empty_user_ctor= ms.CMethodSignature.is_cpp_empty_user_ctor
   ; is_static_ctor= ms.CMethodSignature.is_static_ctor
   ; is_cpp_copy_assignment= ms.CMethodSignature.is_cpp_copy_assignment
   ; is_cpp_deleted= ms.CMethodSignature.is_cpp_deleted

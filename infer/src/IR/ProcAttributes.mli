@@ -65,6 +65,9 @@ type t =
             overriding. Recorded here because the relation is not recoverable later -- it depends on
             declarations the translation unit need not have translated. *)
   ; is_cpp_move_ctor: bool  (** true if the procedure is a move constructor *)
+  ; is_cpp_empty_user_ctor: bool
+        (** an ordinary user-provided C++ constructor with an empty preprocessed body and no
+            state-writing initializer; copy and move constructors do not qualify *)
   ; is_static_ctor: bool  (** true if the procedure has the constructor attribute *)
   ; is_cpp_deleted: bool  (** true if the procedure is deleted *)
   ; is_cpp_implicit: bool

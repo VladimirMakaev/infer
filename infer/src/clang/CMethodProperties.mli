@@ -44,6 +44,9 @@ val is_cpp_copy_ctor : Clang_ast_t.decl -> bool
 
 val is_cpp_move_ctor : Clang_ast_t.decl -> bool
 
+val is_cpp_empty_user_ctor : Clang_ast_t.decl -> bool
+(** an ordinary user-provided constructor whose analyzed body and initializers write no state *)
+
 val cpp_constructor_is_nothrow : Clang_ast_t.decl -> bool option
 
 val is_static_ctor : Clang_ast_t.decl -> bool

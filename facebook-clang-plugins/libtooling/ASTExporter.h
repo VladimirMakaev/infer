@@ -2540,6 +2540,7 @@ int ASTExporter<ATDWriter>::CXXMethodDeclTupleSize() {
 //@atd   ~is_copy_assignment : bool;
 //@atd   ~is_copy_constructor : bool;
 //@atd   ~is_move_constructor : bool;
+//@atd   ~is_empty_user_provided_constructor : bool;
 //@atd   ?constructor_is_nothrow : bool option;
 //@atd   ~cxx_ctor_initializers : cxx_ctor_initializer list;
 //@atd   ~overriden_methods : decl_ref list;
@@ -2553,6 +2554,41 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   const CXXConstructorDecl *C = dyn_cast<CXXConstructorDecl>(D);
   bool isCopyConstructor = C && C->isCopyConstructor();
   bool isMoveConstructor = C && C->isMoveConstructor();
+  // A user-provided lifetime constructor can be intentional even when its
+  // preprocessed body is empty. Copies and moves remain value operations.
+  auto IsEmptyUserProvidedConstructor = [this](const CXXConstructorDecl *Ctor) {
+    if (!Ctor || !Ctor->isUserProvided() || Ctor->isCopyConstructor() ||
+        Ctor->isMoveConstructor() || Context.getDiagnostics().hasErrorOccurred()) {
+      return false;
+    }
+    const FunctionDecl *Definition = nullptr;
+    if (!Ctor->hasBody(Definition)) {
+      return false;
+    }
+    const auto *CtorDefinition = dyn_cast<CXXConstructorDecl>(Definition);
+    if (!CtorDefinition || shouldSkipBodyOf(CtorDefinition)) {
+      return false;
+    }
+    const auto *Body = dyn_cast_or_null<CompoundStmt>(CtorDefinition->getBody());
+    if (!Body || !Body->body_empty()) {
+      return false;
+    }
+    // Initializing a scalar or copying a member writes object state, even
+    // when the initializer expression has no external side effects. Only a
+    // trivial default construction with no zero-initialization is a no-op.
+    for (const auto *Initializer : CtorDefinition->inits()) {
+      const auto *Init = Initializer->getInit();
+      const auto *Construction = dyn_cast_or_null<CXXConstructExpr>(
+          Init ? Init->IgnoreParenImpCasts() : nullptr);
+      if (!Construction || !Construction->getConstructor()->isTrivial() ||
+          Construction->getNumArgs() != 0 ||
+          Construction->requiresZeroInitialization()) {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool IsEmptyUserConstructor = IsEmptyUserProvidedConstructor(C);
   bool HasConstructorExceptionSpec = false;
   bool ConstructorIsNothrow = false;
   if (isCopyConstructor || isMoveConstructor) {
@@ -2581,7 +2617,7 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   auto OE = D->end_overridden_methods();
   ObjectScope Scope(OF,
                     IsVirtual + IsStatic + isConst + isCopyAssignment +
-                        isCopyConstructor + isMoveConstructor +
+                        isCopyConstructor + isMoveConstructor + IsEmptyUserConstructor +
                         HasCtorInitializers + (OB != OE) +
                         HasConstructorExceptionSpec);
 
@@ -2591,6 +2627,7 @@ void ASTExporter<ATDWriter>::VisitCXXMethodDecl(const CXXMethodDecl *D) {
   OF.emitFlag("is_copy_assignment", isCopyAssignment);
   OF.emitFlag("is_copy_constructor", isCopyConstructor);
   OF.emitFlag("is_move_constructor", isMoveConstructor);
+  OF.emitFlag("is_empty_user_provided_constructor", IsEmptyUserConstructor);
   if (HasConstructorExceptionSpec) {
     OF.emitTag("constructor_is_nothrow");
     OF.emitBoolean(ConstructorIsNothrow);

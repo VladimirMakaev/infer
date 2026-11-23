@@ -977,7 +977,11 @@ let checker {IntraproceduralAnalysis.proc_desc; err_log} =
              && (not (is_reference_only_empty_default_construction pvar pname actuals))
              && ( Procname.is_objc_method pname
                 || is_copy_or_move_constructor_call actuals
-                || constructor_writes_only_to_this ~depth:3 pname ) ->
+                || (not
+                      ( Attributes.load pname
+                      |> Option.exists ~f:(fun attrs -> attrs.ProcAttributes.is_cpp_empty_user_ctor)
+                      ) )
+                   && constructor_writes_only_to_this ~depth:3 pname ) ->
           log_report pvar typ loc
       | _, _ ->
           () )

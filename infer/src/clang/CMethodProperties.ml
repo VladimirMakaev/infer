@@ -257,6 +257,13 @@ let is_cpp_move_ctor method_decl =
       false
 
 
+let is_cpp_empty_user_ctor = function
+  | Clang_ast_t.CXXConstructorDecl (_, _, _, _, {xmdi_is_empty_user_provided_constructor}) ->
+      xmdi_is_empty_user_provided_constructor
+  | _ ->
+      false
+
+
 let cpp_constructor_is_nothrow = function
   | Clang_ast_t.CXXConstructorDecl (_, _, _, _, {xmdi_constructor_is_nothrow}) ->
       xmdi_constructor_is_nothrow

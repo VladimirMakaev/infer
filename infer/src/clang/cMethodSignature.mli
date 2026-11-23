@@ -39,6 +39,7 @@ type t =
   ; is_cpp_coroutine: bool
   ; cpp_constructor_is_nothrow: bool option
   ; is_cpp_move_ctor: bool
+  ; is_cpp_empty_user_ctor: bool
   ; is_static_ctor: bool
   ; is_cpp_deleted: bool
   ; is_cpp_implicit: bool
@@ -73,6 +74,7 @@ val mk :
   -> ?is_cpp_coroutine:bool
   -> ?cpp_constructor_is_nothrow:bool option
   -> ?is_cpp_move_ctor:bool
+  -> ?is_cpp_empty_user_ctor:bool
   -> ?is_static_ctor:bool
   -> ?is_cpp_deleted:bool
   -> ?is_cpp_implicit:bool

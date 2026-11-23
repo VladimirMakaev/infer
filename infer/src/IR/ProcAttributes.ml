@@ -112,6 +112,9 @@ type t =
             overriding. Recorded here because the relation is not recoverable later -- it depends on
             declarations the translation unit need not have translated. *)
   ; is_cpp_move_ctor: bool  (** true if the procedure is a move constructor *)
+  ; is_cpp_empty_user_ctor: bool
+        (** an ordinary user-provided C++ constructor with an empty preprocessed body and no
+            state-writing initializer; copy and move constructors do not qualify *)
   ; is_static_ctor: bool  (** true if the procedure has the constructor attribute *)
   ; is_cpp_deleted: bool  (** true if the procedure is deleted *)
   ; is_cpp_implicit: bool
@@ -214,6 +217,7 @@ let default translation_unit proc_name =
   ; is_cpp_virtual= false
   ; is_override= false
   ; is_cpp_move_ctor= false
+  ; is_cpp_empty_user_ctor= false
   ; is_static_ctor= false
   ; is_cpp_deleted= false
   ; is_cpp_implicit= false
@@ -275,6 +279,7 @@ let pp f
      ; is_cpp_virtual
      ; is_override
      ; is_cpp_move_ctor
+     ; is_cpp_empty_user_ctor
      ; is_static_ctor
      ; is_cpp_deleted
      ; is_cpp_implicit
@@ -351,6 +356,8 @@ let pp f
   pp_bool_default ~default:default.is_cpp_virtual "is_cpp_virtual" is_cpp_virtual f () ;
   pp_bool_default ~default:default.is_override "is_override" is_override f () ;
   pp_bool_default ~default:default.is_cpp_move_ctor "is_cpp_move_ctor" is_cpp_move_ctor f () ;
+  pp_bool_default ~default:default.is_cpp_empty_user_ctor "is_cpp_empty_user_ctor"
+    is_cpp_empty_user_ctor f () ;
   pp_bool_default ~default:default.is_static_ctor "is_static_ctor" is_static_ctor f () ;
   pp_bool_default ~default:default.is_cpp_deleted "is_deleted" is_cpp_deleted f () ;
   pp_bool_default ~default:default.is_cpp_implicit "is_cpp_implicit" is_cpp_implicit f () ;

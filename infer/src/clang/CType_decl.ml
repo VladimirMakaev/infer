@@ -272,6 +272,7 @@ module BuildMethodSignature = struct
     let is_cpp_copy_ctor = CMethodProperties.is_cpp_copy_ctor method_decl in
     let is_cpp_coroutine = CMethodProperties.is_cpp_coroutine method_decl in
     let is_cpp_move_ctor = CMethodProperties.is_cpp_move_ctor method_decl in
+    let is_cpp_empty_user_ctor = CMethodProperties.is_cpp_empty_user_ctor method_decl in
     let is_static_ctor = CMethodProperties.is_static_ctor method_decl in
     let is_cpp_deleted = CMethodProperties.is_cpp_deleted method_decl in
     let is_cpp_implicit = CAst_utils.is_cpp_implicit_decl method_decl in
@@ -289,6 +290,7 @@ module BuildMethodSignature = struct
     ; is_cpp_coroutine
     ; cpp_constructor_is_nothrow= CMethodProperties.cpp_constructor_is_nothrow method_decl
     ; is_cpp_move_ctor
+    ; is_cpp_empty_user_ctor
     ; is_static_ctor
     ; is_cpp_deleted
     ; is_cpp_implicit
