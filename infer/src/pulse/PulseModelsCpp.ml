@@ -4084,6 +4084,73 @@ module GenericMapCollection = struct
 
   let pair_second_access key_t value_t = Access.FieldAccess (pair_second_field key_t value_t)
 
+  let standard_name name last =
+    List.exists ["std"; "std::__1"; "std::__2"; "std::__ndk1"; "std::__Cr"] ~f:(fun prefix ->
+        String.equal (QualifiedCppName.to_qual_string name) (prefix ^ "::" ^ last) )
+
+
+  let default_hash_or_equal expected key = function
+    | { Typ.desc=
+          Tstruct
+            (CppClass
+               {name; template_spec_info= Template {args= [TType hash_key; TType {desc= Tvoid}]}} )
+      } ->
+        String.equal (QualifiedCppName.to_qual_string name) expected && Typ.equal hash_key key
+    | _ ->
+        false
+
+
+  let default_allocator key value = function
+    | { Typ.desc=
+          Tstruct
+            (CppClass
+               { name
+               ; template_spec_info=
+                   Template
+                     { args=
+                         [ TType
+                             { desc=
+                                 Tstruct
+                                   (CppClass
+                                      { name= pair_name
+                                      ; template_spec_info=
+                                          Template
+                                            {args= [TType allocated_key; TType allocated_value]} }
+                                     ) } ] } } ) } ->
+        standard_name name "allocator" && standard_name pair_name "pair"
+        && Typ.equal allocated_key (Typ.set_to_const key)
+        && Typ.equal allocated_value value
+    | _ ->
+        false
+
+
+  let supports_pointer_destruction = function
+    | Typ.CppClass
+        { template_spec_info=
+            Template {args= [TType key; TType value; TType hash; TType equal; TType allocator]} } ->
+        let trivial_key = match key.Typ.desc with Tint _ | Tfloat _ -> true | _ -> false in
+        let raw_pointer =
+          match value.Typ.desc with
+          | Tptr ({desc= Tstruct (ObjcClass _)}, _) ->
+              false
+          | Tptr (_, Pk_pointer) ->
+              true
+          | _ ->
+              false
+        in
+        trivial_key && raw_pointer
+        && default_hash_or_equal "folly::HeterogeneousAccessHash" key hash
+        && default_hash_or_equal "folly::HeterogeneousAccessEqualTo" key equal
+        && default_allocator key value allocator
+    | _ ->
+        false
+
+
+  let bounded_destructor classname (_, procname) method_name =
+    String.equal method_name ("~" ^ classname)
+    && Option.exists (Procname.get_class_type_name procname) ~f:supports_pointer_destruction
+
+
   let extract_key_and_value_types {FuncArg.typ= map_typ} =
     let rec extract_helper {Typ.desc} =
       match desc with
@@ -4108,6 +4175,27 @@ module GenericMapCollection = struct
 
   let unwrap_pointer_to_struct_type (typ : Typ.t) =
     match typ.desc with Tptr ({desc= Tstruct pointee}, _) -> pointee | _ -> assert false
+
+
+  let destructor map_t classname {FuncArg.arg_payload} =
+    let open PulseModelsDSL.Syntax in
+    start_named_model ("folly::" ^ classname ^ "::~" ^ classname)
+    @@ fun () ->
+    let* {callee_procname} = get_data in
+    let key_t, value_t =
+      match Procname.get_class_type_name callee_procname with
+      | Some (CppClass {template_spec_info= Template {args= TType key :: TType value :: _}}) ->
+          (key, value)
+      | _ ->
+          L.die InternalError "F14 destructor matcher accepted missing template types"
+    in
+    let* pair = access NoAccess arg_payload pair_access in
+    let cause = Invalidation.CppMap (map_t, Destructor) in
+    (* Destroy the entry storage, not what its raw pointer reaches. Keep the original
+       allocation obligation for the leak check when the last real root disappears. *)
+    invalidate_access cause arg_payload pair_access
+    @@> invalidate_access cause pair (pair_first_access key_t value_t)
+    @@> invalidate_access cause pair (pair_second_access key_t value_t)
 
 
   let has_integral_key map =
@@ -5169,6 +5257,10 @@ let map_matchers =
         [ -"folly" <>:: map_s &:: map_s
           $ capt_arg_of_typ (-"folly" <>:: map_s)
           $++$--> GenericMapCollection.constructor map_t map_s
+        ; -"folly" <>:: map_s
+          &::+ GenericMapCollection.bounded_destructor map_s
+          <>$ capt_arg_of_typ (-"folly" <>:: map_s)
+          $--> GenericMapCollection.destructor map_t map_s
         ; -"folly" <>:: "f14" <>:: "detail" <>:: "F14BasicMap" &:: "operator="
           <>$ capt_arg_of_typ (-"folly" <>:: map_s)
           $+...$--> GenericMapCollection.invalidate_references map_t OperatorEqual

@@ -204,6 +204,7 @@ type map_function =
   | TryEmplaceToken
   | EmplaceHint
   | OperatorBracket
+  | Destructor
 [@@deriving compare, equal, yojson_of]
 
 let pp_map_type f = function
@@ -216,6 +217,8 @@ let pp_map_type f = function
 
 
 let pp_map_function f = function
+  | Destructor ->
+      F.fprintf f "destructor"
   | Clear ->
       F.fprintf f "clear"
   | Rehash ->

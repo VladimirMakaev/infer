@@ -91,6 +91,7 @@ type map_function =
   | TryEmplaceToken
   | EmplaceHint
   | OperatorBracket
+  | Destructor
 [@@deriving compare, equal, yojson_of]
 
 val pp_map_type : F.formatter -> map_type -> unit
