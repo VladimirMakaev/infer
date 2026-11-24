@@ -57,6 +57,18 @@ for f in $ENGINE; do
     die "$PULSE/$f does not exist; the property harness names an engine file that is no longer there, so update verification/pulse-formula in the same commit as the rename"
 done
 
+# SHIM COVERAGE, before the build and before the toolchain is even needed. The build already
+# refuses when a shim has fallen behind, but the compiler stops at the first unbound name, so
+# the operator fixes one symbol, re-runs, and meets the next. On 2026-11-24 the reported failure
+# was Config.pulse_opaque_max_size and behind it sat Config.pulse_opaque_max_depth and
+# Var.mk_fresh; two of the three were invisible until the first was fixed. This names the whole
+# set in one pass. It is a coverage check, not a type check -- the build still settles types,
+# and only a human settles values.
+[ -x "$HERE/shim-coverage.sh" ] ||
+  die "shim-coverage.sh is missing or not executable beside $HERE; it is part of this harness"
+"$HERE/shim-coverage.sh" "$PULSE" "$HERE/shims" $ENGINE ||
+  die "the shims have fallen behind the engine files in this tree (see the list above); update them in the same commit as the change that outgrew them"
+
 [ -d "$CITV_HOME/bin" ] && PATH="$CITV_HOME/bin:$PATH"
 export PATH
 command -v opam >/dev/null 2>&1 ||
