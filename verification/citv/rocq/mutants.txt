@@ -2,7 +2,7 @@
 # Each must (a) still COMPILE, so that a failure is the proof talking and not a broken
 # file, and (b) make the proofs be REJECTED.
 #
-# SIXTEEN mutants, and MIN_MUTANTS in mutate.sh is 16.  Four aim at abduce_le, two at
+# EIGHTEEN mutants, and MIN_MUTANTS in mutate.sh is 18.  Five aim at abduce_le, four at
 # IntLit.v, five at the R4 arithmetic (one per theorem that could otherwise be satisfied
 # by a weaker implementation: add, minus's two arms, and binop's two interpreted
 # operators), and four at the comparison fragment ported from Lean - abduce_lt's two
@@ -12,7 +12,7 @@
 # abduce_lt and abduce_binop_constraints were withdrawn for being proved against a model
 # in which IntLit.t was plain Z.  They are back because the theorems are back, over the
 # real order and under an explicit hypothesis.  The floor has only ever gone up:
-# 4 -> 6 -> 12 -> 16.
+# 4 -> 6 -> 12 -> 16 -> 18.
 #
 # TWO OBVIOUS MUTANTS ARE DELIBERATELY ABSENT, and the reason is about the code rather
 # than about the tests.  Replacing abduce_lt by abduce_le, and dispatching Lt to abduce_le,
@@ -35,3 +35,5 @@ abduce_lt/forget-the-shift-back | PulseCItv.v | Satisfiable (Some (add_int abduc
 abduce_lt/shift-the-left-operand-twice | PulseCItv.v | match abduce_le (add_int a1 IntLit.one) a2 with ||| match abduce_le (add_int (add_int a1 IntLit.one) IntLit.one) a2 with
 flip_abduced/make-it-the-identity | PulseCItv.v | | Satisfiable lhs rhs => Satisfiable rhs lhs ||| | Satisfiable lhs rhs => Satisfiable lhs rhs
 abduce_binop_constraints/ge-without-the-swap | PulseCItv.v | | ((Binop.Ge, false) | (Binop.Lt, true)) => flip_abduced (abduce_le a2 a1) ||| | ((Binop.Ge, false) | (Binop.Lt, true)) => abduce_le a1 a2
+IntLit/div-floors-again | IntLit.v | Z.quot a_value b_value ||| Z.div a_value b_value
+IntLit/rem-takes-the-divisors-sign | IntLit.v | Z.rem a_value b_value ||| Z.modulo a_value b_value

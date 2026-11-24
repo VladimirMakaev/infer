@@ -15,7 +15,7 @@ cd "$(dirname "$0")" || exit 2
 CITV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/citv-mut.XXXXXXXX") || exit 2
 trap 'if [ "${CITV_KEEP_TMP:-0}" = 1 ]; then echo "citv: kept $CITV_TMP" >&2; else rm -rf "$CITV_TMP"; fi' EXIT
 
-MIN_MUTANTS=16
+MIN_MUTANTS=18
 
 # ------------------------------------------------ the prose must match the file
 # README.md said "eleven ways" and "MIN_MUTANTS is 11" while this file already held twelve:

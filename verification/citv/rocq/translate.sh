@@ -32,6 +32,9 @@ ROOT=$(git rev-parse --show-toplevel) || exit 2
 # loop below would be "executed", fail, and have the shell's error land in the error list.
 citv_translator_ok || { echo "CITV_TRANSLATOR is not an executable file: $CITV_TRANSLATOR"; exit 2; }
 
+SEMANTICS="$PWD/integer-semantics.json"
+[ -f "$SEMANTICS" ] || { echo "integer semantics configuration is missing"; exit 2; }
+
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 mkdir -p "$BUILD/target"
@@ -55,7 +58,8 @@ ERRS="$BUILD/errors.txt"; : > "$ERRS"
 ( cd "$BUILD" || exit 2
   for m in iStd intLit binop unop logging PulseCItv; do
     V=$(python3 -I -c 'import sys;n=sys.argv[1];print(n[0].upper()+n[1:])' "$m")
-    "$CITV_TRANSLATOR" -output "$RAW/$V.v" "target/$m.ml" > "$BUILD/$m.out" 2>&1
+    "$CITV_TRANSLATOR" -config "$SEMANTICS" \
+      -output "$RAW/$V.v" "target/$m.ml" > "$BUILD/$m.out" 2>&1
     # The translator's ERROR headers are the only '---' lines carrying a category and an
     # (n/m) counter; plain source-context lines do not.  Reduce each to "file:line category".
     sed -e 's/\x1b\[[0-9;]*m//g' "$BUILD/$m.out" \

@@ -124,7 +124,11 @@ Definition sub (x_value : t) (y_value : t) : t :=
     x_value y_value.
 
 Definition div (x_value : t) (y_value : t) : t :=
-  lift2 (fun (a_value : int) => fun (b_value : int) => Z.div a_value b_value)
+  lift2 (fun (a_value : int) => fun (b_value : int) => Z.quot a_value b_value)
+    x_value y_value.
+
+Definition rem (x_value : t) (y_value : t) : t :=
+  lift2 (fun (a_value : int) => fun (b_value : int) => Z.rem a_value b_value)
     x_value y_value.
 
 Definition min (x_value : t) (y_value : t) : t :=

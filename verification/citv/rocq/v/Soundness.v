@@ -922,7 +922,7 @@ Proof.
   exact (minus_sound a2 m y S2 Sy Hm G2).
 Qed.
 
-(** Everything else declines.  Eighteen operators, which is most of binop's surface. *)
+(** These eighteen operators decline. DivI and Mod are implemented but not listed here. *)
 Lemma binop_unsupported_is_none : forall a1 a2,
     PulseCItv.binop Binop.PlusPI a1 a2 = None
     /\ PulseCItv.binop Binop.MinusPI a1 a2 = None
@@ -1613,6 +1613,60 @@ Proof.
   - unfold nnu, u0. vm_compute. discriminate.
   - unfold sgn, u0. vm_compute. discriminate.
 Qed.
+
+(** Integer division and remainder use truncation toward zero, as Zarith does. *)
+Example witness_div_negative_positive :
+  IntLit.div (IntLit.of_int (-3)) (IntLit.of_int 2) = IntLit.of_int (-1).
+Proof. reflexivity. Qed.
+
+Example witness_div_positive_negative :
+  IntLit.div (IntLit.of_int 3) (IntLit.of_int (-2)) = IntLit.of_int (-1).
+Proof. reflexivity. Qed.
+
+Example witness_div_negative_negative :
+  IntLit.div (IntLit.of_int (-3)) (IntLit.of_int (-2)) = IntLit.of_int 1.
+Proof. reflexivity. Qed.
+
+Example witness_div_positive_positive :
+  IntLit.div (IntLit.of_int 3) (IntLit.of_int 2) = IntLit.of_int 1.
+Proof. reflexivity. Qed.
+
+Example witness_rem_negative_positive :
+  IntLit.rem (IntLit.of_int (-3)) (IntLit.of_int 2) = IntLit.of_int (-1).
+Proof. reflexivity. Qed.
+
+Example witness_rem_positive_negative :
+  IntLit.rem (IntLit.of_int 3) (IntLit.of_int (-2)) = IntLit.of_int 1.
+Proof. reflexivity. Qed.
+
+Example witness_rem_negative_negative :
+  IntLit.rem (IntLit.of_int (-3)) (IntLit.of_int (-2)) = IntLit.of_int (-1).
+Proof. reflexivity. Qed.
+
+Example witness_rem_positive_positive :
+  IntLit.rem (IntLit.of_int 3) (IntLit.of_int 2) = IntLit.of_int 1.
+Proof. reflexivity. Qed.
+
+Example witness_binop_div_negative_numerator :
+  PulseCItv.binop Binop.DivI
+    (between (Bound.Int (IntLit.of_int (-3))) (Bound.Int (IntLit.of_int (-3))))
+    (between (Bound.Int (IntLit.of_int 2)) (Bound.Int (IntLit.of_int 2))) =
+  Some (between (Bound.Int (IntLit.of_int (-1))) (Bound.Int (IntLit.of_int (-1)))).
+Proof. reflexivity. Qed.
+
+Example witness_binop_div_negative_divisor :
+  PulseCItv.binop Binop.DivI
+    (between (Bound.Int (IntLit.of_int 3)) (Bound.Int (IntLit.of_int 3)))
+    (between (Bound.Int (IntLit.of_int (-2))) (Bound.Int (IntLit.of_int (-2)))) =
+  Some (between (Bound.Int (IntLit.of_int (-1))) (Bound.Int (IntLit.of_int (-1)))).
+Proof. reflexivity. Qed.
+
+Example witness_binop_rem_negative_numerator :
+  PulseCItv.binop Binop.Mod
+    (between (Bound.Int (IntLit.of_int (-3))) (Bound.Int (IntLit.of_int (-3))))
+    (between (Bound.Int (IntLit.of_int 2)) (Bound.Int (IntLit.of_int 2))) =
+  Some (between (Bound.Int (IntLit.of_int (-1))) (Bound.Int IntLit.zero)).
+Proof. reflexivity. Qed.
 
 Print Assumptions abduce_lt_unsat_sound.
 Print Assumptions abduce_lt_sat_sound.

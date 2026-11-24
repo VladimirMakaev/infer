@@ -1,0 +1,8 @@
+{
+  "renaming_rules": [
+    ["Stdlib.op_div", "Z.quot"],
+    ["Stdlib._mod", "Z.rem"],
+    ["Z.div", "Z.quot"],
+    ["Z.rem", "Z.rem"]
+  ]
+}

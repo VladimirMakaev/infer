@@ -96,6 +96,9 @@ let sub x y = lift2 (fun a b -> a - b) x y
 
 let div x y = lift2 (fun a b -> a / b) x y
 
+(* Zarith.rem has the dividend's sign, matching OCaml mod for nonzero divisors. *)
+let rem x y = lift2 (fun a b -> a mod b) x y
+
 let min x y = if leq x y then x else y
 
 let max x y = if geq x y then x else y

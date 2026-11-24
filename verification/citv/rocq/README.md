@@ -127,10 +127,34 @@ see "The value model" below for why that distinction is the whole point of this 
 | `add_sound` | if `add` returns an interval, the real sum of any two admitted values is in it |
 | `minus_sound` | the same for negation, for **both** arms — `Between`, where the constructor swaps the endpoints, and `Outside`, where it swaps which disjunct holds |
 | `unop_neg_sound` | `unop Neg` is `minus`, so it inherits that |
-| `binop_PlusA_sound`, `binop_MinusA_sound` | the two operators `binop` interprets arithmetically. `MinusA` is implemented as `minus a_rhs >>= add a_lhs` while the concrete operation is `IntLit.sub`, so the proof needs `sub_is_add_neg` to close the gap |
-| `binop_unsupported_is_none`, `unop_bnot_is_none`, `unop_lnot_is_none` | the other eighteen binary operators and the other two unary ones decline. That is most of `binop`'s surface and is stated rather than skipped: "returns `None`" is a soundness obligation too, just a trivial one |
+| `binop_PlusA_sound`, `binop_MinusA_sound` | the two operators with general arithmetic soundness proofs here. `MinusA` is implemented as `minus a_rhs >>= add a_lhs` while the concrete operation is `IntLit.sub`, so the proof needs `sub_is_add_neg` to close the gap |
+| `binop_unsupported_is_none`, `unop_bnot_is_none`, `unop_lnot_is_none` | the listed eighteen binary operators and the other two unary ones decline. DivI and Mod are implemented and are outside this general theorem |
 | `bound_add_die_arm_is_unreachable` | the arm where the real code dies cannot be selected once both operands have a concrete value |
 | four `*_off_the_signed_fragment` results | machine-checked **counterexamples** showing the `Signed` hypothesis on the five results above cannot be dropped |
+| eight `witness_div_*` / `witness_rem_*` results | all four operand-sign combinations use truncation toward zero and a remainder with the dividend's sign |
+| three `witness_binop_div_*` / `witness_binop_rem_*` results | signed singleton input regressions at the interval interpreter boundary |
+
+### Division and remainder mapping
+
+`integer-semantics.json` overrides the translator's native integer division and
+remainder mappings and its Zarith division binding: `Z.quot` and `Z.rem` implement
+truncation toward zero. The default translator used flooring `Z.div`, so `-3/2`
+became `-2` while Zarith and OCaml return `-1`. The configuration is passed during
+translation; generated arithmetic is not edited afterward.
+
+The earlier 38 theorems do not rely on flooring division. Their interpreted
+arithmetic fragment is addition/negation/PlusA/MinusA. Current `binop` additionally
+implements DivI and Mod, whose general transfer soundness is not proved here.
+The new eight witnesses pin the quotient/remainder signs. These value equations
+use nonzero divisors. Division-by-zero exception behavior is not modeled by
+these total Rocq integer functions, and the IntLit stub trust boundary remains.
+
+`check-integer-semantics.py` freshly compiles four bindings: native `/` and `mod`,
+and the real Zarith `div` and `rem`. For 190 nonzero operand pairs it compares
+OCaml/Zarith results with 760 freshly compiled, axiom-free Rocq equations. Two
+configuration controls restore flooring quotient or remainder; each must compile
+its bindings and fail the intended equation. The small native-int grid excludes
+machine overflow; the translated value domain remains arbitrary precision.
 
 ### The arithmetic, and the hypothesis it carries
 
@@ -441,9 +465,9 @@ markers.
 ## Mutants
 
 A green proof run means nothing unless an unsound module is rejected. `mutate.sh` breaks the
-translated module sixteen ways, at least one per theorem family, and each must **compile**
+translated module eighteen ways, at least one per theorem family, and each must **compile**
 (so that a rejection means the proof talking, not a broken file) and then be **refused**.
-`MIN_MUTANTS` is 16; the floor has only ever gone up, 4 → 6 → 12 → 16.
+`MIN_MUTANTS` is 18; the floor has only ever gone up, 4 → 6 → 12 → 16 → 18.
 
 This paragraph said *eleven* while `mutants.txt` already held twelve — the twelfth,
 `abduce_le/outside-arm-adds-one-again`, was added with the fix to that arm and the prose
@@ -470,6 +494,8 @@ drift that produced this note would now be a failing run.
 | `abduce_lt/shift-the-left-operand-twice` | decides `x + 2 <= y`, so `[0,0] < [1,1]` is called impossible |
 | `flip_abduced/make-it-the-identity` | returns the two refinements in the callee's order, not the caller's |
 | `abduce_binop_constraints/ge-without-the-swap` | `Ge` abduces `x <= y` instead of `y <= x` |
+| `IntLit/div-floors-again` | restores flooring division, so `-3/2` wrongly gives `-2` |
+| `IntLit/rem-takes-the-divisors-sign` | uses flooring remainder instead of the dividend's sign |
 
 Five aim at `abduce_le` — the first four plus `outside-arm-adds-one-again`, which guards
 the arm that was repaired after a counterexample.

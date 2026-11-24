@@ -38,6 +38,8 @@ echo "ok: $CITV_PINS, translator $CITV_TRANSLATOR_COMMIT"
 
 echo; echo "=== proofs, from clean"
 ./check-axioms.sh || exit 1
+echo; echo "=== native OCaml/Zarith integer semantics and configuration controls"
+python3 -I ./check-integer-semantics.py --self-test || exit 1
 [ "${1:-}" = --proofs ] && exit 0
 
 echo; echo "=== the freshness guard must refuse a clean that did not happen"
