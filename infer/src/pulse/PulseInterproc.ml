@@ -506,16 +506,92 @@ let visit call_state ~addr_callee cell_id ~addr_hist_caller path =
   let check_if_alias =
     match to_callee_addr call_state addr_caller with
     | Some (addr_callee', path') when not (AbstractValue.equal addr_callee addr_callee') ->
+        let in_pre v = UnsafeMemory.mem v call_state.callee_pre.BaseDomain.heap in
+        let in_post v = UnsafeMemory.mem v call_state.callee_post.BaseDomain.heap in
+        (* A value the callee invalidated is not in its heap -- [free] checks its argument with
+           [NoAccess] and records an attribute, deliberately, since freeing does not require
+           the pointer to be dereferenceable. It is nonetheless a value whose identity the
+           caller can observe, and the only reason the aliasing matters.
+
+           Only invalidations that END A LIFETIME count. The others are facts about what a
+           pointer's value is, not about something ceasing to exist, and they are attached to
+           perfectly live pointers throughout [PulseOperations]; counting them would make
+           almost every argument alias-relevant and cost precision at every call. The match is
+           exhaustive on purpose: under a wildcard a constructor added to [Invalidation.t] later
+           would join whichever side the wildcard is on without anyone deciding that it should. *)
+        let invalidated v =
+          match
+            UnsafeAttributes.find_opt v call_state.callee_post.BaseDomain.attrs
+            |> Option.bind ~f:Attributes.get_invalid
+          with
+          | None ->
+              false
+          | Some (invalidation, _) -> (
+            match (invalidation : Invalidation.t) with
+            | CFree ->
+                (* the allocation goes back to the allocator, which may reissue the address *)
+                true
+            | CppDelete ->
+                (* the destructor runs and the storage is released *)
+                true
+            | CppDeleteArray ->
+                (* as [CppDelete], for an array *)
+                true
+            | CppDestructedInPlace ->
+                (* an explicit [p->~T()] ends the lifetime, and it evaluates its receiver with
+                   [NoAccess] exactly as [free] does, so it is the very shape this test missed *)
+                true
+            | FClose _ ->
+                (* the descriptor goes back to the system, which may hand out the same number *)
+                true
+            | GoneOutOfScope _ ->
+                (* the stack slot is gone and the frame can be reused *)
+                true
+            | OptionalEmpty ->
+                (* the contained object was destroyed, e.g. by [reset] *)
+                true
+            | StdVector _ ->
+                (* the operation reallocated, so the old buffer was freed *)
+                true
+            | StdString _ ->
+                (* as [StdVector], for the character buffer *)
+                true
+            | StdContainer _ ->
+                (* the nodes the value pointed at were erased or freed *)
+                true
+            | CppMap _ ->
+                (* as [StdContainer], for the F14 maps *)
+                true
+            | ComparedToNullInThisProcedure _ ->
+                (* records that the pointer was compared to null; it is still live *)
+                false
+            | ConstantDereference _ ->
+                (* records that the pointer equals a constant; nothing's lifetime ended *)
+                false
+            | EndIterator ->
+                (* a position one past the last element, not the end of any storage *)
+                false
+            | HandedOverToStream _ ->
+                (* ownership moved to a stream, which will close it later; nothing yet has *)
+                false
+            | OutOfBounds _ ->
+                (* derived from a view by leaving its bounds: again where the value points,
+                   and both models invalidate a value they create rather than one passed in *)
+                false )
+        in
+        let observable v = in_pre v || in_post v || invalidated v in
         if
           (* [addr_caller] corresponds to several values in the callee, see if that's a problem for
-             applying the pre-condition, i.e. if both values are addresses in the callee's heap,
-             which means they must be disjoint. If so, raise a contradiction, but if not then
-             continue as it just means that the callee doesn't care about the value of these
-             variables, but record that they are equal. *)
-          UnsafeMemory.mem addr_callee call_state.callee_pre.BaseDomain.heap
-          && UnsafeMemory.mem addr_callee' call_state.callee_pre.BaseDomain.heap
-          || UnsafeMemory.mem addr_callee call_state.callee_post.BaseDomain.heap
-             && UnsafeMemory.mem addr_callee' call_state.callee_post.BaseDomain.heap
+             applying the pre-condition, i.e. if telling the two values apart can change the
+             answer. Being addresses in the callee's heap is the original reason -- then they must
+             be disjoint -- and being invalidated is the other: a formal that is only freed has no
+             heap cell, because [free] checks its argument with [NoAccess], so the heap test alone
+             missed the case where the caller passes the same pointer twice and the callee frees
+             one of the formals and uses the other. Either condition on either value is enough; a
+             value in the pre of one and the post of the other is still two observable values. If
+             neither is observable then continue, as it just means that the callee doesn't care
+             about the value of these variables, but record that they are equal. *)
+          observable addr_callee && observable addr_callee'
         then
           match (LazyHeapPath.force path, LazyHeapPath.force path') with
           | Some path, Some path' ->

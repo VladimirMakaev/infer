@@ -158,3 +158,120 @@ void call_test_global_alias_good(int* x) {
     *p = 42;
   };
 }
+
+// Aliased formals where the freed one is never accessed in the callee.
+//
+// `may_double_free_if_alias` above dereferences BOTH formals before freeing. These
+// cases differ only in which formals the callee touches: `free` alone does not put its
+// argument in the callee's heap, so the alias test has to recognise an invalidated
+// value as one whose identity matters. Every `_bad` here faults at run time.
+
+int free_first_formal_read_second(int* a, int* b) {
+  free(a);
+  return *b;
+}
+
+void call_free_first_formal_read_second_bad(void) {
+  int* p = (int*)malloc(sizeof(int));
+  if (p == NULL) {
+    return;
+  }
+  *p = 1;
+  free_first_formal_read_second(p, p);
+}
+
+// Same, reached through a second name for the pointer rather than the same
+// expression twice: the caller's aliasing must not depend on how it is spelled.
+void call_free_first_formal_read_second_via_copy_bad(void) {
+  int* p = (int*)malloc(sizeof(int));
+  if (p == NULL) {
+    return;
+  }
+  *p = 1;
+  int* q = p;
+  free_first_formal_read_second(p, q);
+}
+
+// The other formal is read BEFORE the free, so only the freed one is untouched. This
+// is the one-token difference from `read_freed_formal_first` below.
+int read_second_formal_then_free_first(int* a, int* b) {
+  int t = *b;
+  (void)t;
+  free(a);
+  return *b;
+}
+
+void call_read_second_formal_then_free_first_bad(void) {
+  int* p = (int*)malloc(sizeof(int));
+  if (p == NULL) {
+    return;
+  }
+  *p = 1;
+  read_second_formal_then_free_first(p, p);
+}
+
+// The access after the free is a write rather than a read.
+void free_first_formal_write_second(int* a, int* b) {
+  free(a);
+  *b = 7;
+}
+
+void call_free_first_formal_write_second_bad(void) {
+  int* p = (int*)malloc(sizeof(int));
+  if (p == NULL) {
+    return;
+  }
+  *p = 1;
+  free_first_formal_write_second(p, p);
+}
+
+// CONTROL, and the half of the one-token pair that already works: the freed formal is
+// dereferenced before it is freed, so it is in the callee's heap and the alias is
+// found. A fix must keep this reporting as well as make the four above report -- the
+// bug is the DIFFERENCE between this and
+// `read_second_formal_then_free_first`, which differ only in whether the dead read
+// touches `a` or `b`.
+int read_freed_formal_first(int* a, int* b) {
+  int t = *a;
+  (void)t;
+  free(a);
+  return *b;
+}
+
+void call_read_freed_formal_first_bad(void) {
+  int* p = (int*)malloc(sizeof(int));
+  if (p == NULL) {
+    return;
+  }
+  *p = 1;
+  read_freed_formal_first(p, p);
+}
+
+// CONTROL: distinct allocations, so there is no aliasing and nothing to report. If a
+// widened alias test started reporting here it would be inventing an alias the caller
+// does not have.
+void call_free_first_formal_read_second_distinct_ok(void) {
+  int* p = (int*)malloc(sizeof(int));
+  int* q = (int*)malloc(sizeof(int));
+  if (p == NULL || q == NULL) {
+    free(p);
+    free(q);
+    return;
+  }
+  *p = 1;
+  *q = 2;
+  free_first_formal_read_second(p, q);
+  free(q);
+}
+
+// CONTROL: the same callee, aliased formals, but the caller never let the pointer
+// become invalid -- it is a local's address, which is not freeable and not freed here.
+// Reporting here would mean the widened test fires on aliasing alone rather than on
+// aliasing plus invalidation.
+int read_both_formals(int* a, int* b) { return *a + *b; }
+
+void call_read_both_formals_aliased_ok(void) {
+  int v = 3;
+  int* p = &v;
+  read_both_formals(p, p);
+}
