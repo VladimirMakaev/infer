@@ -511,8 +511,15 @@ module TransferFunctions = struct
               in
               let represents_multiple_values = is_array_access_exp exp in
               let modeled_range = modeled_range_of_exp location exp mem in
-              BoUtils.Exec.load_locs ~represents_multiple_values ~modeled_range id typ
-                (Sem.eval_locs exp mem) mem )
+              let bool_conversion =
+                match Typ.get_ikind_opt typ with
+                | Some IBool ->
+                    analysis_data.oenv.bool_load_is_conversion exp
+                | _ ->
+                    false
+              in
+              BoUtils.Exec.load_locs ~bool_conversion ~represents_multiple_values ~modeled_range id
+                typ (Sem.eval_locs exp mem) mem )
       | Store {e2= Exn _} when Language.curr_language_is Java ->
           Dom.Mem.exc_raised
       | Store {e1= tgt_exp; e2= Const (Const.Cstr _) as src; loc= location}

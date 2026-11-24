@@ -550,6 +550,45 @@ module Val = struct
 
   let is_incr_of l {itv} = Option.exists (Loc.get_path l) ~f:(fun path -> Itv.is_incr_of path itv)
 
+  let is_plain_integer_value v =
+    PowLoc.is_bot (get_all_locs v)
+    && ArrayBlk.is_bot v.arrayblk
+    && not (Symb.SymbolSet.exists Symb.Symbol.is_non_int (Itv.get_symbols v.itv))
+
+
+  let integer_cast_is_identity ?source integer_type_widths ikind v =
+    (* Identity conversions also preserve integer values carried by iterator/size models. *)
+    Itv.cast_is_identity ?source integer_type_widths ikind Itv.top
+    || (is_plain_integer_value v && Itv.cast_is_identity ?source integer_type_widths ikind v.itv)
+
+
+  let cast_boolean v =
+    if
+      is_bot v
+      || (not (is_plain_integer_value v))
+      || (not (Itv.has_numeric_bounds v.itv))
+      || Itv.leq ~lhs:v.itv ~rhs:Itv.unknown_bool
+    then v
+    else
+      let itv = Itv.lnot v.itv |> Itv.of_bool |> Itv.lnot |> Itv.of_bool in
+      of_itv ~traces:v.traces itv
+
+
+  let cast_integer ?source integer_type_widths ikind v =
+    if
+      is_bot v
+      || integer_cast_is_identity ?source integer_type_widths ikind v
+      || not (Itv.has_numeric_bounds v.itv)
+    then v
+    else if not (is_plain_integer_value v) then (
+      (* Iterator/size models can carry a non-scalar value despite an integer SIL type.
+         An unrelated scalar range would destroy their storage and position relations. *)
+      if Config.bo_debug > 0 then
+        StatsLogging.log_count ~label:"inferbo_integer_cast_unknown_value" ~value:1 ;
+      v )
+    else of_itv ~traces:v.traces (Itv.cast_ikind integer_type_widths ikind v.itv)
+
+
   let cast typ v = {v with powloc= PowLoc.cast typ v.powloc}
 
   let of_path tenv ~may_last_field integer_type_widths location typ path =
@@ -683,7 +722,8 @@ module Val = struct
        ; typ_of_global_array
        ; may_last_field
        ; entry_location
-       ; integer_type_widths } l ->
+       ; integer_type_widths
+       ; _ } l ->
     let do_on_demand path typ =
       let may_last_field = may_last_field path in
       of_path tenv ~may_last_field integer_type_widths entry_location typ path
@@ -2174,6 +2214,11 @@ module MemReach = struct
         typ_of_param_path path )
 
 
+  let integer_source_of_exp exp m =
+    GOption.value_map m.oenv ~default:OndemandEnv.Unknown
+      ~f:(fun {OndemandEnv.integer_source_of_exp} -> integer_source_of_exp exp )
+
+
   let is_array_field : Typ.t -> Fieldname.t -> t -> bool =
    fun struct_typ fn m ->
     let {OndemandEnv.tenv} = GOption.value m.oenv in
@@ -2691,6 +2736,10 @@ module Mem = struct
 
   let typ_of_param_path : SPath.partial -> _ t0 -> Typ.t option =
    fun path -> f_lift_default ~default:None (MemReach.typ_of_param_path path)
+
+
+  let integer_source_of_exp exp =
+    f_lift_default ~default:OndemandEnv.Unknown (MemReach.integer_source_of_exp exp)
 
 
   let is_array_field : Typ.t -> Fieldname.t -> t -> bool =

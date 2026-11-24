@@ -35,7 +35,8 @@ end
 
 module Exec : sig
   val load_locs :
-       represents_multiple_values:bool
+       ?bool_conversion:bool
+    -> represents_multiple_values:bool
     -> modeled_range:Dom.ModeledRange.t option
     -> Ident.t
     -> Typ.t
@@ -45,9 +46,10 @@ module Exec : sig
   (** [load_locs id typ locs mem] loads the contents of the memory locations [locs] (which have type
       [typ]) into the identifier [id].
 
-      If [locs] represents a single location, also create an aliasing relation between this location
-      and [id]. This is useful, e.g., to constrain also the location when the identifier is
-      constrained. *)
+      If [locs] represents a single location and its loaded value is unchanged, also create an
+      aliasing relation between this location and [id]. This constrains the location when the
+      identifier is constrained. With [bool_conversion], an integer-to-Bool load normalizes the
+      identifier without changing source memory; a changed value cannot alias its source. *)
 
   val decl_local : ModelEnv.model_env -> Dom.Mem.t * int -> Loc.t * Typ.t -> Dom.Mem.t * int
 

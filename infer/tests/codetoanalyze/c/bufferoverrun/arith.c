@@ -414,8 +414,8 @@ void band_constant_Bad() {
 
 void band_positive_Good() {
   char a[9];
-  int x = unknown_nat();
-  int y = unknown_nat();
+  uint32_t x = unknown_nat();
+  uint32_t y = unknown_nat();
   if (x <= 10 && y <= 8) {
     int z = x & y; // z is [0, 8]
     a[z] = 0;
@@ -424,11 +424,23 @@ void band_positive_Good() {
 
 void band_positive_Bad() {
   char a[5];
-  int x = unknown_nat();
-  int y = unknown_nat();
+  uint32_t x = unknown_nat();
+  uint32_t y = unknown_nat();
   if (x <= 10 && y <= 8) {
     int z = x & y; // z is [0, 8]
     a[z] = 0;
+  }
+}
+
+void FN_band_signed_result_from_unsigned_bad() {
+  char a[9];
+  // UINT32_MAX narrows to -1 under the selected conversion contract. The upper
+  // guards don't exclude it, so the AND can be negative and access before a.
+  // The symbolic conversions are intentionally ignored, so this may be missed.
+  int x = unknown_nat();
+  int y = unknown_nat();
+  if (x <= 10 && y <= 8) {
+    a[x & y] = 0;
   }
 }
 

@@ -36,7 +36,7 @@ void cast_unsigned_to_signed_Good() {
   }
 }
 
-void cast_unsigned_to_signed_Bad_FN() {
+void cast_unsigned_to_signed_Bad() {
   char arr[10];
   uint32_t x = 4294967295;
   int32_t y = (int32_t)x; // y is -1.
@@ -63,7 +63,7 @@ void cast_signed_to_unsigned_Bad() {
   }
 }
 
-void cast_signed_to_unsigned2_Bad_FN() {
+void cast_signed_to_unsigned2_Bad() {
   char arr[10];
   int32_t x = -2;
   uint32_t y = (uint32_t)x;

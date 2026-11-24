@@ -11,10 +11,14 @@ module BoField = BufferOverrunField
 module SPath = Symb.SymbolPath
 module FormalTyps = Stdlib.Map.Make (Pvar)
 
+type integer_source = Integer of Typ.ikind option | NonInteger | Unknown [@@deriving equal]
+
 type t =
   { tenv: Tenv.t
   ; typ_of_param_path: SPath.partial -> Typ.t option
   ; typ_of_global_array: Pvar.t -> Typ.t option
+  ; integer_source_of_exp: Exp.t -> integer_source
+  ; bool_load_is_conversion: Exp.t -> bool
   ; may_last_field: SPath.partial -> bool
   ; entry_location: Location.t
   ; integer_type_widths: IntegerWidths.t
@@ -22,8 +26,75 @@ type t =
 
 let rec strip_array (typ : Typ.t) = match typ.desc with Tarray {elt} -> strip_array elt | _ -> typ
 
+let integer_source_of_exp pdesc =
+  let of_typ typ =
+    match Typ.get_ikind_opt typ with Some ikind -> Integer (Some ikind) | None -> NonInteger
+  in
+  let ids =
+    Procdesc.fold_instrs pdesc ~init:Ident.Map.empty ~f:(fun acc _node instr ->
+        let add id typ =
+          let kind = of_typ typ in
+          let result =
+            match Ident.Map.find_opt id acc with
+            | None ->
+                kind
+            | Some previous when equal_integer_source previous kind ->
+                kind
+            | Some _ ->
+                Unknown
+          in
+          Ident.Map.add id result acc
+        in
+        match (instr : Sil.instr) with
+        | Load {id; typ} ->
+            add id typ
+        | Call ((id, typ), _, _, _, _) ->
+            add id typ
+        | _ ->
+            acc )
+  in
+  let rec classify = function
+    | Exp.Var id ->
+        Option.value (Ident.Map.find_opt id ids) ~default:Unknown
+    | Exp.Const (Const.Cint _) | Exp.Sizeof _ ->
+        Integer None
+    | Exp.Const _ | Exp.Closure _ | Exp.Exn _ ->
+        NonInteger
+    | Exp.Cast (typ, _) ->
+        of_typ typ
+    | Exp.UnOp (Unop.LNot, _, _) ->
+        Integer None
+    | Exp.UnOp (_, _, Some typ) ->
+        of_typ typ
+    | Exp.UnOp (_, exp, None) ->
+        classify exp
+    | Exp.BinOp ((Binop.Lt | Gt | Le | Ge | Eq | Ne | LAnd | LOr | MinusPP), _, _) ->
+        Integer None
+    | Exp.BinOp ((Binop.DivF | PlusPI | MinusPI), _, _) ->
+        NonInteger
+    | Exp.BinOp ((Binop.PlusA (Some k) | MinusA (Some k) | Mult (Some k)), _, _) ->
+        Integer (Some k)
+    | Exp.BinOp (_, left, right) -> (
+      match (classify left, classify right) with
+      | Integer k1, Integer k2 ->
+          Integer (if Option.equal Typ.equal_ikind k1 k2 then k1 else None)
+      | NonInteger, _ | _, NonInteger ->
+          NonInteger
+      | _ ->
+          Unknown )
+    | Exp.Lvar _ | Exp.Lfield _ | Exp.Lindex _ ->
+        Unknown
+  in
+  classify
+
+
 let mk pdesc =
   let pname = Procdesc.get_proc_name pdesc in
+  let local_typs =
+    lazy
+      (List.fold (Procdesc.get_locals pdesc) ~init:FormalTyps.empty
+         ~f:(fun acc {ProcAttributes.name; typ} -> FormalTyps.add (Pvar.mk name pname) typ acc ) )
+  in
   let formal_typs =
     List.fold (Procdesc.get_pvar_formals pdesc) ~init:FormalTyps.empty ~f:(fun acc (formal, typ) ->
         FormalTyps.add formal typ acc )
@@ -39,6 +110,34 @@ let mk pdesc =
     |> Pvar.Map.filter_map (fun _ typ_opt -> typ_opt)
   in
   fun tenv integer_type_widths ->
+    let typ_of_lvar pvar =
+      match FormalTyps.find_opt pvar (Lazy.force local_typs) with
+      | Some _ as typ ->
+          typ
+      | None -> (
+        match FormalTyps.find_opt pvar formal_typs with
+        | Some _ as typ ->
+            typ
+        | None ->
+            Pvar.Map.find_opt pvar global_typs )
+    in
+    let bool_load_is_conversion exp =
+      let storage_typ =
+        match exp with
+        | Exp.Lvar pvar ->
+            typ_of_lvar pvar
+        | Exp.Lfield (_, fn, typ) ->
+            Struct.fld_typ_opt ~lookup:(Tenv.lookup tenv) fn typ
+        | _ ->
+            None
+      in
+      Option.exists storage_typ ~f:(fun typ ->
+          match Typ.get_ikind_opt typ with
+          | Some ikind ->
+              not (Typ.equal_ikind ikind Typ.IBool)
+          | None ->
+              false )
+    in
     let c_array_model_element_typ (typ : Typ.t) =
       match typ.desc with
       | Tstruct typename -> (
@@ -150,6 +249,8 @@ let mk pdesc =
     { tenv
     ; typ_of_param_path
     ; typ_of_global_array
+    ; integer_source_of_exp= integer_source_of_exp pdesc
+    ; bool_load_is_conversion
     ; may_last_field
     ; entry_location
     ; integer_type_widths

@@ -15,6 +15,13 @@ module BoField = BufferOverrunField
 module L = Logging
 module TraceSet = BufferOverrunTrace.Set
 
+let record_unknown_integer_cast ikind exp =
+  if Config.bo_debug > 0 then (
+    StatsLogging.log_count ~label:"inferbo_integer_cast_unknown_source" ~value:1 ;
+    L.debug BufferOverrun Verbose "Unchanged integer cast with unknown source: (%s) %a@."
+      (Typ.ikind_to_string ikind) Exp.pp exp )
+
+
 let eval_const : IntegerWidths.t -> Const.t -> Val.t =
  fun integer_type_widths -> function
   | Const.Cint intlit ->
@@ -197,15 +204,22 @@ let rec eval : ?typ:Typ.t -> IntegerWidths.t -> Exp.t -> Mem.t -> Val.t =
             Val.set_itv_updated_by_unknown v )
     | Exp.Const c ->
         eval_const integer_type_widths c
-    | Exp.Cast (t, e) ->
+    | Exp.Cast (t, e) -> (
         let v = eval ~typ:t integer_type_widths e mem in
         let v = set_array_stride integer_type_widths t v in
-        if Typ.is_unsigned_int t && Val.is_mone v then
-          (* We treat "(unsigned int)-1" case specially, because programmers often exploit it to get
-             the max number of the type. *)
-          let ikind = Option.value_exn (Typ.get_ikind_opt t) in
-          Val.of_itv ~traces:(Val.get_traces v) (Itv.max_of_ikind integer_type_widths ikind)
-        else v
+        if Val.is_bot v then v
+        else
+          match (Typ.get_ikind_opt t, Mem.integer_source_of_exp e mem) with
+          | Some ikind, BufferOverrunOndemandEnv.Integer source ->
+              Val.cast_integer ?source integer_type_widths ikind v
+          | Some ikind, BufferOverrunOndemandEnv.Unknown ->
+              record_unknown_integer_cast ikind e ;
+              v
+          | _ ->
+              if Typ.is_unsigned_int t && Val.is_mone v then
+                let ikind = Option.value_exn (Typ.get_ikind_opt t) in
+                Val.of_itv ~traces:(Val.get_traces v) (Itv.max_of_ikind integer_type_widths ikind)
+              else v )
     | Exp.Lfield ({exp= e}, fn, _) ->
         let v = eval integer_type_widths e mem in
         let locs = Val.get_all_locs v |> PowLoc.append_field ~fn in
@@ -884,8 +898,20 @@ module Prune = struct
   let rec prune_binop_left : Location.t -> IntegerWidths.t -> Exp.t -> t -> t =
    fun location integer_type_widths e astate ->
     match e with
-    | Exp.BinOp (comp, Exp.Cast (_, e1), e2) ->
-        prune_binop_left location integer_type_widths (Exp.BinOp (comp, e1, e2)) astate
+    | Exp.BinOp (comp, Exp.Cast (typ, e1), e2) ->
+        let source = eval ~typ integer_type_widths e1 astate.mem in
+        let can_project =
+          match (Typ.get_ikind_opt typ, Mem.integer_source_of_exp e1 astate.mem) with
+          | None, _ ->
+              true
+          | Some ikind, BufferOverrunOndemandEnv.Integer source_kind ->
+              Val.integer_cast_is_identity ?source:source_kind integer_type_widths ikind source
+          | Some _, _ ->
+              false
+        in
+        if can_project then
+          prune_binop_left location integer_type_widths (Exp.BinOp (comp, e1, e2)) astate
+        else astate
     | Exp.BinOp
         (((Binop.Lt | Binop.Gt | Binop.Le | Binop.Ge | Binop.Eq | Binop.Ne) as comp), Exp.Var x, e')
       ->

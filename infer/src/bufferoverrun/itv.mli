@@ -150,6 +150,9 @@ val of_int_lit : IntLit.t -> t
 
 val get_const : t -> Z.t option
 
+val has_numeric_bounds : t -> bool
+(** Both endpoints are finite numeric constants, rather than symbolic or infinite bounds. *)
+
 val is_zero : t -> bool
 
 val is_one : t -> bool
@@ -245,6 +248,10 @@ val prune_lt : t -> t -> t
 val prune_le : t -> t -> t
 
 val subst : t -> Bound.eval_sym -> t
+
+val cast_is_identity : ?source:Typ.ikind -> IntegerWidths.t -> Typ.ikind -> t -> bool
+
+val cast_ikind : IntegerWidths.t -> Typ.ikind -> t -> t
 
 val max_of_ikind : IntegerWidths.t -> Typ.ikind -> t
 

@@ -7,6 +7,8 @@
 
 open! IStd
 
+type integer_source = Integer of Typ.ikind option | NonInteger | Unknown [@@deriving equal]
+
 (** Environment for on-demand symbol evaluation *)
 type t =
   { tenv: Tenv.t  (** type environment *)
@@ -14,6 +16,10 @@ type t =
   ; typ_of_global_array: Pvar.t -> Typ.t option
         (** declared type of a global variable referenced in the procedure, if it is an array or a
             modeled C array such as [std::array] *)
+  ; integer_source_of_exp: Exp.t -> integer_source
+        (** Transient source kind from captured instruction types; never serialized in summaries. *)
+  ; bool_load_is_conversion: Exp.t -> bool
+        (** A consumer-typed Bool load from a known non-Bool integer storage location. *)
   ; may_last_field: Symb.SymbolPath.partial -> bool
         (** if the path is a last field of a class in C++ *)
   ; entry_location: Location.t  (** location of entry node *)

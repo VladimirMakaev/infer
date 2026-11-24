@@ -267,6 +267,12 @@ module Val : sig
   val add_assign_trace_elem : Location.t -> AbsLoc.PowLoc.t -> t -> t
   (** Add assign trace for given abstract locations *)
 
+  val integer_cast_is_identity : ?source:Typ.ikind -> IntegerWidths.t -> Typ.ikind -> t -> bool
+
+  val cast_integer : ?source:Typ.ikind -> IntegerWidths.t -> Typ.ikind -> t -> t
+
+  val cast_boolean : t -> t
+
   val cast : Typ.t -> t -> t
   (** Semantics of cast. This updates type information in pointer values, rather than re-calculating
       sizes of array blocks. *)
@@ -503,6 +509,9 @@ module Mem : sig
 
   val typ_of_param_path : Symb.SymbolPath.partial -> _ t0 -> Typ.t option
   (** The original type of a parameter or a path rooted at one, before integer promotions. *)
+
+  val integer_source_of_exp : Exp.t -> _ t0 -> BufferOverrunOndemandEnv.integer_source
+  (** Captured integer kind, known non-integer, or unknown; never inferred from a numeric value. *)
 
   val is_array_field : Typ.t -> Fieldname.t -> t -> bool
   (** [is_array_field struct_typ fn mem] checks if the field [fn] of [struct_typ] is a C array or a

@@ -34,19 +34,30 @@ end
 module Exec = struct
   open ModelEnv
 
-  let load_locs ~represents_multiple_values ~modeled_range id typ locs mem =
+  let load_locs ?(bool_conversion = false) ~represents_multiple_values ~modeled_range id typ locs
+      mem =
     let set_modeled_range v =
       Option.value_map modeled_range ~default:v ~f:(fun modeled_range ->
           Dom.Val.set_modeled_range modeled_range v )
     in
-    let v = Dom.Mem.find_set ~typ locs mem |> set_modeled_range in
+    let original = Dom.Mem.find_set ~typ locs mem |> set_modeled_range in
+    (* Integral-to-Bool conversion can be encoded as a consumer-typed load, with no Cast.
+       A changed Boolean value is not equal to the integer storage it was read from. *)
+    let v =
+      match (bool_conversion, Typ.get_ikind_opt typ) with
+      | true, Some IBool ->
+          Dom.Val.cast_boolean original
+      | _ ->
+          original
+    in
     let mem = Dom.Mem.add_stack (Loc.of_id id) v mem in
     let mem =
-      if represents_multiple_values then Dom.Mem.add_heap_set ~represents_multiple_values locs v mem
+      if represents_multiple_values then
+        Dom.Mem.add_heap_set ~represents_multiple_values locs original mem
       else mem
     in
-    match PowLoc.is_singleton_or_more locs with
-    | IContainer.Singleton loc ->
+    match (phys_equal original v, PowLoc.is_singleton_or_more locs) with
+    | true, IContainer.Singleton loc ->
         Dom.Mem.load_simple_alias id loc mem
     | _ ->
         mem

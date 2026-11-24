@@ -112,6 +112,16 @@ void call_memcpy_len1_Good() { memcpy_len_Good(40); }
 extern size_t unknown_uint();
 
 void call_memcpy_len2_Good() {
+  int input = unknown();
+  if (input <= 0 || input > 100)
+    return;
+  memcpy_len_Good((size_t)input);
+}
+
+void FN_symbolic_signed_size_bad() {
+  // A negative signed result becomes a huge size_t. Equal copy lengths don't
+  // make these VLAs safe to allocate.
+  // Ignoring the symbolic conversion can hide the large allocation risk.
   size_t x = unknown();
   memcpy_len_Good(x);
 }

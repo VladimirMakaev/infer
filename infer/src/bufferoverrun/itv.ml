@@ -525,6 +525,62 @@ module ItvPure = struct
     fun (l, u) -> (max_zero l, max_zero u)
 
 
+  let integer_cast_range integer_type_widths = function
+    | Typ.IBool ->
+        (Z.zero, Z.one)
+    | ikind ->
+        IntegerWidths.range_of_ikind integer_type_widths ikind
+
+
+  let cast_is_identity ?source integer_type_widths ikind (l, u) =
+    let lower, upper = integer_cast_range integer_type_widths ikind in
+    let source_range = Option.map source ~f:(integer_cast_range integer_type_widths) in
+    let lower_fits =
+      Bound.le (Bound.of_big_int lower) l
+      || Option.exists source_range ~f:(fun (source_lower, _) -> Z.leq lower source_lower)
+    in
+    let upper_fits =
+      Bound.le u (Bound.of_big_int upper)
+      || Option.exists source_range ~f:(fun (_, source_upper) -> Z.leq source_upper upper)
+    in
+    lower_fits && upper_fits
+
+
+  let has_numeric_bounds (l, u) =
+    Option.is_some (Bound.get_const l) && Option.is_some (Bound.get_const u)
+
+
+  let cast_integer_range ~lower ~upper ((l, u) as x) =
+    let target = (Bound.of_big_int lower, Bound.of_big_int upper) in
+    if Bound.le (fst target) l && Bound.le u (snd target) then x
+    else
+      match (Bound.get_const l, Bound.get_const u) with
+      | Some l, Some u ->
+          let modulus = Z.succ (Z.sub upper lower) in
+          let cycle value = Z.ediv (Z.sub value lower) modulus in
+          if Z.equal (cycle l) (cycle u) then
+            let convert value = Z.add lower (Z.erem (Z.sub value lower) modulus) in
+            (Bound.of_big_int (convert l), Bound.of_big_int (convert u))
+          else target
+      | _ ->
+          (* Keep symbolic dependencies rather than replacing them with a type-wide hull.
+             Ignoring a symbolic conversion can miss feasible paths when it would wrap. *)
+          x
+
+
+  let cast_ikind integer_type_widths ikind ((l, u) as x) =
+    match (has_numeric_bounds x, (ikind : Typ.ikind)) with
+    | false, _ ->
+        x
+    | true, IBool ->
+        if is_zero x then zero
+        else if Bound.lt u Bound.zero || Bound.lt Bound.zero l then one
+        else unknown_bool
+    | true, _ ->
+        let lower, upper = IntegerWidths.range_of_ikind integer_type_widths ikind in
+        cast_integer_range ~lower ~upper x
+
+
   let max_of_ikind integer_type_widths ikind =
     let _, max = IntegerWidths.range_of_ikind integer_type_widths ikind in
     of_big_int max
@@ -782,6 +838,14 @@ let get_symbols : t -> SymbolSet.t = function
 
 
 let normalize : t -> t = bind1 ItvPure.normalize
+
+let cast_is_identity ?source integer_type_widths ikind =
+  bind1bool (ItvPure.cast_is_identity ?source integer_type_widths ikind)
+
+
+let has_numeric_bounds = bind1bool ItvPure.has_numeric_bounds
+
+let cast_ikind integer_type_widths ikind = lift1 (ItvPure.cast_ikind integer_type_widths ikind)
 
 let max_of_ikind integer_type_widths ikind =
   NonBottom (ItvPure.max_of_ikind integer_type_widths ikind)
