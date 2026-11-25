@@ -18,7 +18,7 @@ module TraceSet = BufferOverrunTrace.Set
 let record_unknown_integer_cast ikind exp =
   if Config.bo_debug > 0 then (
     StatsLogging.log_count ~label:"inferbo_integer_cast_unknown_source" ~value:1 ;
-    L.debug BufferOverrun Verbose "Unchanged integer cast with unknown source: (%s) %a@."
+    L.debug BufferOverrun Verbose "Top-for-width integer cast with unknown source: (%s) %a@."
       (Typ.ikind_to_string ikind) Exp.pp exp )
 
 
@@ -214,7 +214,12 @@ let rec eval : ?typ:Typ.t -> IntegerWidths.t -> Exp.t -> Mem.t -> Val.t =
               Val.cast_integer ?source integer_type_widths ikind v
           | Some ikind, BufferOverrunOndemandEnv.Unknown ->
               record_unknown_integer_cast ikind e ;
-              v
+              let lower, upper =
+                if Typ.equal_ikind ikind Typ.IBool then (Z.zero, Z.one)
+                else IntegerWidths.range_of_ikind integer_type_widths ikind
+              in
+              Val.of_itv ~traces:(Val.get_traces v)
+                (Itv.join (Itv.of_big_int lower) (Itv.of_big_int upper))
           | _ ->
               if Typ.is_unsigned_int t && Val.is_mone v then
                 let ikind = Option.value_exn (Typ.get_ikind_opt t) in

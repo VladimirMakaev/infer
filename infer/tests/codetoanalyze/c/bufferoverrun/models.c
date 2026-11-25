@@ -112,10 +112,8 @@ void call_memcpy_len1_Good() { memcpy_len_Good(40); }
 extern size_t unknown_uint();
 
 void call_memcpy_len2_Good() {
-  int input = unknown();
-  if (input <= 0 || input > 100)
-    return;
-  memcpy_len_Good((size_t)input);
+  size_t x = unknown();
+  memcpy_len_Good(x);
 }
 
 void FN_symbolic_signed_size_bad() {

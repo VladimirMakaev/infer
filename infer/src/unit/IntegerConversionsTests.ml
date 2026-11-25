@@ -127,8 +127,24 @@ let test_5 _ =
   let mem = add known mem |> add unknown in
   let cast id = Exp.Cast (Typ.mk (Typ.Tint Typ.IUChar), Exp.Var id) in
   assert_interval (Itv.of_int 44) (Dom.Val.get_itv (Sem.eval widths (cast known) mem)) ;
-  assert_interval (Itv.of_int 300) (Dom.Val.get_itv (Sem.eval widths (cast unknown) mem)) ;
-  assert_interval (Itv.of_int 300) (Dom.Val.get_itv (Sem.eval widths (Exp.Var known) mem))
+  assert_interval (interval 0 255) (Dom.Val.get_itv (Sem.eval widths (cast unknown) mem)) ;
+  assert_interval (Itv.of_int 300) (Dom.Val.get_itv (Sem.eval widths (Exp.Var known) mem)) ;
+  assert_bool "fixture must exercise the unknown-source branch"
+    (Env.equal_integer_source (env.Env.integer_source_of_exp (Exp.Var unknown)) Env.Unknown) ;
+  List.iter
+    [ (Typ.ISChar, "-128", "127")
+    ; (Typ.IUChar, "0", "255")
+    ; (Typ.IInt, "-2147483648", "2147483647")
+    ; (Typ.IUInt, "0", "4294967295")
+    ; (Typ.IULongLong, "0", "18446744073709551615")
+    ; (Typ.IBool, "0", "1") ]
+    ~f:(fun (kind, lower, upper) ->
+      let expected =
+        Itv.join (Itv.of_big_int (Z.of_string lower)) (Itv.of_big_int (Z.of_string upper))
+      in
+      let cast = Exp.Cast (Typ.mk (Typ.Tint kind), Exp.Var unknown) in
+      assert_interval expected (Dom.Val.get_itv (Sem.eval widths cast mem)) ) ;
+  assert_interval (Itv.of_int 300) (Dom.Val.get_itv (Sem.eval widths (Exp.Var unknown) mem))
 
 
 let test_6 _ =
@@ -242,7 +258,7 @@ let tests =
        ; "convex hull and one wrap segment" >:: test_2
        ; "independent eight-bit oracle" >:: test_3
        ; "source kinds are captured types, not observed numeric values" >:: test_4
-       ; "unknown source remains un-narrowed; known source converts" >:: test_5
+       ; "unknown source is top for width; known source converts" >:: test_5
        ; "value-preserving widening keeps symbolic values" >:: test_6
        ; "non-negative value plus source type" >:: test_nonnegative_type_bound
        ; "Boolean identity and consumer-typed loads" >:: test_boolean_identity

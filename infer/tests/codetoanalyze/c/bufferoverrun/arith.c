@@ -414,8 +414,8 @@ void band_constant_Bad() {
 
 void band_positive_Good() {
   char a[9];
-  uint32_t x = unknown_nat();
-  uint32_t y = unknown_nat();
+  int x = unknown_nat();
+  int y = unknown_nat();
   if (x <= 10 && y <= 8) {
     int z = x & y; // z is [0, 8]
     a[z] = 0;
@@ -424,8 +424,8 @@ void band_positive_Good() {
 
 void band_positive_Bad() {
   char a[5];
-  uint32_t x = unknown_nat();
-  uint32_t y = unknown_nat();
+  int x = unknown_nat();
+  int y = unknown_nat();
   if (x <= 10 && y <= 8) {
     int z = x & y; // z is [0, 8]
     a[z] = 0;
