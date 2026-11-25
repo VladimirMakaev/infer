@@ -1007,8 +1007,12 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           CLocation.location_of_stmt_info
             trans_state.context.CContext.translation_unit_context.source_file stmt_info
         in
-        (* Traverse structure of a type and initialize int/float/ptr fields with zero *)
-        let rec fill_typ_with_zero ((exp, typ) as exp_typ) =
+        (* Traverse structure of a type and initialize int/float/ptr fields with zero.
+           [visited] holds the struct names on the current field path. In valid C++ a type cannot
+           contain itself by value, so re-entering one means the tenv is wrong -- typically two
+           specializations that collapsed onto one [Typ.Name]. Give up on this procedure loudly
+           instead of recursing until the stack overflows and the whole file is lost. *)
+        let rec fill_typ_with_zero ?(visited = Typ.Name.Set.empty) ((exp, typ) as exp_typ) =
           let init_with_builtin =
             match typ.Typ.desc with
             | Tstruct tn -> (
@@ -1037,7 +1041,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             mk_trans_result exp_typ {empty_control with instrs= [call_instr]}
           else
             match typ.Typ.desc with
+            | Tstruct tn when Typ.Name.Set.mem tn visited ->
+                CFrontend_errors.incorrect_assumption __POS__ stmt_info.Clang_ast_t.si_source_range
+                  "fill_typ_with_zero: type %a contains itself by value, so its fields cannot be \
+                   enumerated. The type environment is wrong: distinct types most likely share one \
+                   name."
+                  Typ.Name.pp tn
             | Tstruct tn ->
+                let visited = Typ.Name.Set.add tn visited in
                 let field_exp_typs =
                   match Tenv.lookup tenv tn with
                   | Some {fields} ->
@@ -1046,7 +1057,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                   | None ->
                       assert false
                 in
-                List.map field_exp_typs ~f:(fun exp_typ -> (fill_typ_with_zero exp_typ).control)
+                List.map field_exp_typs ~f:(fun exp_typ ->
+                    (fill_typ_with_zero ~visited exp_typ).control )
                 |> collect_controls trans_state.context.procdesc
                 |> mk_trans_result exp_typ
             | Tarray {elt= field_typ; length= Some n} ->
@@ -1055,7 +1067,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                 List.map indices ~f:(fun i ->
                     let idx_exp = Exp.Const (Const.Cint (IntLit.of_int i)) in
                     let field_exp = Exp.Lindex (exp, idx_exp) in
-                    (fill_typ_with_zero (field_exp, field_typ)).control )
+                    (fill_typ_with_zero ~visited (field_exp, field_typ)).control )
                 |> collect_controls trans_state.context.procdesc
                 |> mk_trans_result exp_typ
             | Tint _ | Tfloat _ | Tptr _ ->

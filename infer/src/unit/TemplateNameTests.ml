@@ -23,6 +23,15 @@ let qualified_class qualifiers info =
   Typ.Name.Cpp.from_qual_name info ~is_union:false (QualifiedCppName.of_list qualifiers)
 
 
+(** A class template specialized on a function type, as [Fn<void(params)>]. *)
+let function_type_info params_type =
+  let prototype = {Typ.params_type; return_type= StdTyp.void} in
+  Typ.Template {mangled= None; args= [TType (Typ.mk (Tfun (Some prototype)))]}
+
+
+(** The same, translated as the frontend used to: a function type with no signature. *)
+let opaque_function_type_info () = Typ.Template {mangled= None; args= [TType (Typ.mk (Tfun None))]}
+
 let test_no_template_qualified_names _ =
   List.iter
     [[]; ["scope"]; ["scope"; "nested"]]
@@ -73,6 +82,28 @@ let tests =
        ; "empty_template_metadata" >:: test_empty_template_metadata
        ; "invalid_empty_qualified_name" >:: test_invalid_empty_qualified_name
        ; "duplicate_template_metadata" >:: test_duplicate_template_metadata
+       ; ( "function_type_arguments_are_distinct_specializations"
+         >:: fun _ ->
+         HashNormalizer.reset_all_normalizers () ;
+         (* Two specializations that differ only in the signature of a function-type argument
+            must not share a name: when they did, they shared one tenv entry, and a
+            specialization holding another one by value became its own field type. *)
+         let nullary = class_name (function_type_info []) ~is_union:false in
+         let unary = class_name (function_type_info [StdTyp.int]) ~is_union:false in
+         assert_bool "signatures give distinct names" (not (Typ.Name.equal nullary unary)) ;
+         assert_bool "the two names print differently"
+           (not (String.equal (qual_string nullary) (qual_string unary))) ;
+         let nullary' = Typ.Name.hash_normalize nullary in
+         let unary' = Typ.Name.hash_normalize unary in
+         assert_bool "normalization keeps them apart" (not (Typ.Name.equal nullary' unary')) ;
+         (* Guard the regression itself: a signature-less function type is what made every
+            specialization collapse onto one name. *)
+         let opaque_a = class_name (opaque_function_type_info ()) ~is_union:false in
+         let opaque_b = class_name (opaque_function_type_info ()) ~is_union:false in
+         assert_bool "signature-less function types are indistinguishable"
+           (Typ.Name.equal opaque_a opaque_b) ;
+         assert_bool "so a real signature must differ from them"
+           (not (Typ.Name.equal nullary opaque_a)) )
        ; ( "equal_but_differently_printed_arguments"
          >:: fun _ ->
          HashNormalizer.reset_all_normalizers () ;

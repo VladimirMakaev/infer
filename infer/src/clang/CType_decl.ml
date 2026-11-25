@@ -605,7 +605,11 @@ and add_types_from_decl_to_tenv tenv decl =
 and get_template_args tenv (template_args : Clang_ast_t.template_instantiation_arg_info list) =
   let rec aux = function
     | `Type qual_type ->
-        [Typ.TType (qual_type_to_sil_type tenv qual_type)]
+        (* A template argument is part of the specialization's identity, so a function type has to
+           keep its signature here. Translated as [Tfun None] it prints as [_fn_] and every
+           [Fn<R()>], [Fn<R(int)>], ... collapses onto the same [Typ.Name], sharing one tenv
+           entry. *)
+        [Typ.TType (qual_type_to_sil_type_expanding_fn tenv qual_type)]
     | `Expression | `TemplateExpansion | `Template | `Declaration _ ->
         [Typ.TOpaque]
     | `Integral i -> (
@@ -624,6 +628,11 @@ and get_template_args tenv (template_args : Clang_ast_t.template_instantiation_a
 
 and qual_type_to_sil_type tenv qual_type =
   CType_to_sil_type.qual_type_to_sil_type add_types_from_decl_to_tenv tenv qual_type
+
+
+and qual_type_to_sil_type_expanding_fn tenv qual_type =
+  CType_to_sil_type.qual_type_to_sil_type ~expand_function_prototype:true
+    add_types_from_decl_to_tenv tenv qual_type
 
 
 and get_template_info tenv (fdi : Clang_ast_t.function_decl_info) =

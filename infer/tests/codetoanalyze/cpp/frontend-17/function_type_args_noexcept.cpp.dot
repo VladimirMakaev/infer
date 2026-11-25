@@ -1,0 +1,22 @@
+/* @generated */
+digraph cfg {
+"zero_init_param_function_type_tem.ca7930cf1936d4b9_1" [label="1: Start zero_init_param_function_type_template_arg_ok\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "zero_init_param_function_type_tem.ca7930cf1936d4b9_1" -> "zero_init_param_function_type_tem.ca7930cf1936d4b9_3" ;
+"zero_init_param_function_type_tem.ca7930cf1936d4b9_2" [label="2: Exit zero_init_param_function_type_template_arg_ok \n  " color=yellow style=filled]
+	
+
+"zero_init_param_function_type_tem.ca7930cf1936d4b9_3" [label="3:  CXXNewExpr \n   n$0=_fun___new(sizeof(t=SigHost;nullable=false):unsigned long) [line 69, column 10]\n " shape="box"]
+	
+
+	 "zero_init_param_function_type_tem.ca7930cf1936d4b9_3" -> "zero_init_param_function_type_tem.ca7930cf1936d4b9_4" ;
+"zero_init_param_function_type_tem.ca7930cf1936d4b9_4" [label="4:  CXXNewExpr \n   *n$0.f.impl_.x:int=0 [line 69, column 14]\n " shape="box"]
+	
+
+	 "zero_init_param_function_type_tem.ca7930cf1936d4b9_4" -> "zero_init_param_function_type_tem.ca7930cf1936d4b9_5" ;
+"zero_init_param_function_type_tem.ca7930cf1936d4b9_5" [label="5:  Return Stmt \n   *&return:SigHost*=n$0 [line 69, column 3]\n " shape="box"]
+	
+
+	 "zero_init_param_function_type_tem.ca7930cf1936d4b9_5" -> "zero_init_param_function_type_tem.ca7930cf1936d4b9_2" ;
+}

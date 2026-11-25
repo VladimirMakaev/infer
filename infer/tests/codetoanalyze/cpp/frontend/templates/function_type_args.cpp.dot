@@ -1,0 +1,94 @@
+/* @generated */
+digraph cfg {
+"member_resolution_through_functio.acd19c176ec21cdc_1" [label="1: Start member_resolution_through_function_type_args_ok\nFormals: \nLocals:  outer:Fn<(_fn_ [] -> void)> inner:Fn<(_fn_ [int] -> void)> \n  " color=yellow style=filled]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_1" -> "member_resolution_through_functio.acd19c176ec21cdc_8" ;
+"member_resolution_through_functio.acd19c176ec21cdc_2" [label="2: Exit member_resolution_through_function_type_args_ok \n  " color=yellow style=filled]
+	
+
+"member_resolution_through_functio.acd19c176ec21cdc_3" [label="3:  Return Stmt \n   n$0=*&inner.x:int [line 62, column 10]\n  n$1=*&outer.impl_.x:int [line 62, column 20]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_3" -> "member_resolution_through_functio.acd19c176ec21cdc_4" ;
+"member_resolution_through_functio.acd19c176ec21cdc_4" [label="4:  Return Stmt \n   *&return:int=(n$0 + n$1) [line 62, column 3]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_4" -> "member_resolution_through_functio.acd19c176ec21cdc_2" ;
+"member_resolution_through_functio.acd19c176ec21cdc_5" [label="5:  BinaryOperatorStmt: Assign \n   *&outer.impl_.x:int=2 [line 61, column 3]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_5" -> "member_resolution_through_functio.acd19c176ec21cdc_3" ;
+"member_resolution_through_functio.acd19c176ec21cdc_6" [label="6:  BinaryOperatorStmt: Assign \n   *&inner.x:int=1 [line 60, column 3]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_6" -> "member_resolution_through_functio.acd19c176ec21cdc_5" ;
+"member_resolution_through_functio.acd19c176ec21cdc_7" [label="7:  DeclStmt \n   VARIABLE_DECLARED(outer:Fn<(_fn_ [] -> void)>); [line 59, column 3]\n  n$2=_fun_Fn<(_fn_ [] -> void)>::Fn(&outer:Fn<(_fn_ [] -> void)>*) [line 59, column 14]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_7" -> "member_resolution_through_functio.acd19c176ec21cdc_6" ;
+"member_resolution_through_functio.acd19c176ec21cdc_8" [label="8:  DeclStmt \n   VARIABLE_DECLARED(inner:Fn<(_fn_ [int] -> void)>); [line 58, column 3]\n  n$3=_fun_Fn<(_fn_ [int] -> void)>::Fn(&inner:Fn<(_fn_ [int] -> void)>*) [line 58, column 17]\n " shape="box"]
+	
+
+	 "member_resolution_through_functio.acd19c176ec21cdc_8" -> "member_resolution_through_functio.acd19c176ec21cdc_7" ;
+"zero_init_distinct_template_arg_o.844f4480e5cb7454_1" [label="1: Start zero_init_distinct_template_arg_ok\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "zero_init_distinct_template_arg_o.844f4480e5cb7454_1" -> "zero_init_distinct_template_arg_o.844f4480e5cb7454_3" ;
+"zero_init_distinct_template_arg_o.844f4480e5cb7454_2" [label="2: Exit zero_init_distinct_template_arg_ok \n  " color=yellow style=filled]
+	
+
+"zero_init_distinct_template_arg_o.844f4480e5cb7454_3" [label="3:  CXXNewExpr \n   n$0=_fun___new(sizeof(t=PlainHost;nullable=false):unsigned long) [line 52, column 58]\n " shape="box"]
+	
+
+	 "zero_init_distinct_template_arg_o.844f4480e5cb7454_3" -> "zero_init_distinct_template_arg_o.844f4480e5cb7454_4" ;
+"zero_init_distinct_template_arg_o.844f4480e5cb7454_4" [label="4:  CXXNewExpr \n   *n$0.f.impl_.x:int=0 [line 52, column 62]\n " shape="box"]
+	
+
+	 "zero_init_distinct_template_arg_o.844f4480e5cb7454_4" -> "zero_init_distinct_template_arg_o.844f4480e5cb7454_5" ;
+"zero_init_distinct_template_arg_o.844f4480e5cb7454_5" [label="5:  Return Stmt \n   *&return:PlainHost*=n$0 [line 52, column 51]\n " shape="box"]
+	
+
+	 "zero_init_distinct_template_arg_o.844f4480e5cb7454_5" -> "zero_init_distinct_template_arg_o.844f4480e5cb7454_2" ;
+"zero_init_function_type_template_.b18b39219d9298e9_1" [label="1: Start zero_init_function_type_template_arg_bad\nFormals: \nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "zero_init_function_type_template_.b18b39219d9298e9_1" -> "zero_init_function_type_template_.b18b39219d9298e9_3" ;
+"zero_init_function_type_template_.b18b39219d9298e9_2" [label="2: Exit zero_init_function_type_template_arg_bad \n  " color=yellow style=filled]
+	
+
+"zero_init_function_type_template_.b18b39219d9298e9_3" [label="3:  CXXNewExpr \n   n$0=_fun___new(sizeof(t=Host;nullable=false):unsigned long) [line 32, column 59]\n " shape="box"]
+	
+
+	 "zero_init_function_type_template_.b18b39219d9298e9_3" -> "zero_init_function_type_template_.b18b39219d9298e9_4" ;
+"zero_init_function_type_template_.b18b39219d9298e9_4" [label="4:  CXXNewExpr \n   *n$0.f.impl_.x:int=0 [line 32, column 63]\n " shape="box"]
+	
+
+	 "zero_init_function_type_template_.b18b39219d9298e9_4" -> "zero_init_function_type_template_.b18b39219d9298e9_5" ;
+"zero_init_function_type_template_.b18b39219d9298e9_5" [label="5:  Return Stmt \n   *&return:Host*=n$0 [line 32, column 52]\n " shape="box"]
+	
+
+	 "zero_init_function_type_template_.b18b39219d9298e9_5" -> "zero_init_function_type_template_.b18b39219d9298e9_2" ;
+"Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_1" [label="1: Start Fn<(_fn_ [] -> void)>::Fn\nFormals:  this:Fn<(_fn_ [] -> void)>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_1" -> "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_3" ;
+"Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_2" [label="2: Exit Fn<(_fn_ [] -> void)>::Fn \n  " color=yellow style=filled]
+	
+
+"Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_3" [label="3:  Constructor Init \n   n$1=*&this:Fn<(_fn_ [] -> void)>* [line 20, column 8]\n " shape="box"]
+	
+
+	 "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_3" -> "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_4" ;
+"Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_4" [label="4:  Constructor Init \n   n$2=_fun_Fn<(_fn_ [int] -> void)>::Fn(n$1.impl_:Fn<(_fn_ [int] -> void)>*) [line 20, column 8]\n " shape="box"]
+	
+
+	 "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_4" -> "Fn#Fn<(_fn_ [] -> void)>#{1461862.2074b2f0c62c1c24_2" ;
+"Fn#Fn<(_fn_ [int] -> void)>#{3079.ff668a1b9d14618c_1" [label="1: Start Fn<(_fn_ [int] -> void)>::Fn\nFormals:  this:Fn<(_fn_ [int] -> void)>*\nLocals:  \n  " color=yellow style=filled]
+	
+
+	 "Fn#Fn<(_fn_ [int] -> void)>#{3079.ff668a1b9d14618c_1" -> "Fn#Fn<(_fn_ [int] -> void)>#{3079.ff668a1b9d14618c_2" ;
+"Fn#Fn<(_fn_ [int] -> void)>#{3079.ff668a1b9d14618c_2" [label="2: Exit Fn<(_fn_ [int] -> void)>::Fn \n  " color=yellow style=filled]
+	
+
+}
