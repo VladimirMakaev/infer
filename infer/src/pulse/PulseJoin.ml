@@ -265,6 +265,7 @@ let join_one_sided_attribute (attr : Attribute.t) =
   | MustBeInitialized _
   | MustBeNonNull _
   | MustBeValid _
+  | MustNotBeEndOfCollection _
   | MustNotBeTainted _
   | PropagateTaintFrom _
   | Tainted _
@@ -379,6 +380,8 @@ let join_two_sided_attribute join_state (attr1 : Attribute.t) (attr2 : Attribute
       (* arbitrary, doesn't matter much which side *) Some attr1
   | MustBeValid _, MustBeValid _ ->
       (* TODO: join must_be_valid_reason *) Some attr1
+  | MustNotBeEndOfCollection (timestamp1, _), MustNotBeEndOfCollection (timestamp2, _) ->
+      Some (if Int.(Timestamp.compare timestamp1 timestamp2 <= 0) then attr1 else attr2)
   | MustNotBeTainted sinks1, MustNotBeTainted sinks2 ->
       let sinks = Attribute.TaintSinkMap.union (fun _ sink1 _sink2 -> Some sink1) sinks1 sinks2 in
       Some (MustNotBeTainted sinks)

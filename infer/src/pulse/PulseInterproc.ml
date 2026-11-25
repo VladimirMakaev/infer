@@ -1551,6 +1551,15 @@ let check_all_valid path ~source_actuals call_state =
           else to_check
         in
         let to_check =
+          match
+            UnsafeAttributes.get_must_not_be_end_of_collection addr_pre pre.BaseDomain.attrs
+          with
+          | None ->
+              to_check
+          | Some data ->
+              (addr_pre, addr_hist_caller, `MustNotBeEndOfCollection data) :: to_check
+        in
+        let to_check =
           match UnsafeAttributes.get_must_be_valid addr_pre pre.BaseDomain.attrs with
           | None ->
               to_check
@@ -1574,14 +1583,26 @@ let check_all_valid path ~source_actuals call_state =
   let timestamp_of_check = function
     | `MustBeValid (timestamp, _, _)
     | `MustBeNonNull (timestamp, _, _, _)
+    | `MustNotBeEndOfCollection (timestamp, _)
     | `MustBeInitialized (timestamp, _) ->
         timestamp
     | `MustBeAwaited ->
         Timestamp.t0
   in
+  let priority_of_check = function
+    | `MustNotBeEndOfCollection _ ->
+        1
+    | `MustBeValid _ | `MustBeNonNull _ | `MustBeInitialized _ | `MustBeAwaited ->
+        0
+  in
   List.sort addresses_to_check ~compare:(fun (_, _, check1) (_, _, check2) ->
-      (* smaller timestamp first *)
-      Timestamp.compare (timestamp_of_check check1) (timestamp_of_check check2) )
+      (* Preserve ordinary invalidation diagnostics when both requirements belong to one access. *)
+      let timestamp_order =
+        Timestamp.compare (timestamp_of_check check1) (timestamp_of_check check2)
+      in
+      if Int.equal timestamp_order 0 then
+        Int.compare (priority_of_check check1) (priority_of_check check2)
+      else timestamp_order )
   |> List.fold_result ~init:call_state.astate ~f:(fun astate (addr_pre, addr_hist, check) ->
       let addr_caller, hist_caller = addr_hist in
       let mk_access_trace callee_access_trace =
@@ -1631,6 +1652,25 @@ let check_all_valid path ~source_actuals call_state =
                       ; may_depend_on_an_unknown_value=
                           call_state.astate.AbductiveDomain.unknown_values
                       ; must_be_valid_reason }
+                ; astate } )
+      | `MustNotBeEndOfCollection (_timestamp, callee_access_trace) ->
+          let access_trace = mk_access_trace callee_access_trace in
+          AddressAttributes.check_not_end_of_collection path call_location access_trace addr_caller
+            astate
+          |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
+              AccessResult.ReportableError
+                { diagnostic=
+                    AccessToInvalidAddress
+                      { calling_context= []
+                      ; invalid_address=
+                          decompile_invalid_address ~source_actuals call_state astate ~addr_pre
+                            ~addr_caller ~hist_caller
+                      ; invalidation
+                      ; invalidation_trace
+                      ; access_trace
+                      ; may_depend_on_an_unknown_value=
+                          call_state.astate.AbductiveDomain.unknown_values
+                      ; must_be_valid_reason= None }
                 ; astate } )
       | `MustBeNonNull (_timestamp, callee_access_trace, callee, position) ->
           let access_trace = mk_access_trace callee_access_trace in

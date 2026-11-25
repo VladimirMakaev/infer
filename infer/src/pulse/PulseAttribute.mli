@@ -260,6 +260,10 @@ type t =
           source's fields, so there the source has no cells to mark, while its address is a value
           the pre already mentions. Carries no payload: it only ever suppresses a report, so it
           never appears in a trace. Appended to preserve existing ranks. *)
+  | MustNotBeEndOfCollection of Timestamp.t * Trace.t
+      (** an iterator operation requires this incoming value not to be past the end; copying or
+          comparing an end iterator imposes no such requirement. Appended to preserve existing ranks
+          and serialized attribute tags. *)
 [@@deriving compare, equal, yojson_of]
 
 val pp : F.formatter -> t -> unit
@@ -354,6 +358,8 @@ module Attributes : sig
     t -> (Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option) option
 
   val remove_must_be_valid : t -> t
+
+  val get_must_not_be_end_of_collection : t -> (Timestamp.t * Trace.t) option
 
   val get_must_be_non_null : t -> (Timestamp.t * Trace.t * CallEvent.t * int) option
 

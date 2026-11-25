@@ -482,15 +482,15 @@ module Internal = struct
         | _ ->
             false
       in
-      let is_must_be_valid_on_unknown_effect =
+      let is_access_requirement_on_unknown_effect =
         match (attribute : Attribute.t) with
-        | MustBeValid _ ->
+        | MustBeValid _ | MustNotBeEndOfCollection _ ->
             BaseAddressAttributes.has_unknown_effect address (astate.post :> base_domain).attrs
         | _ ->
             false
       in
       let new_pre =
-        if is_must_be_initialized_on_written || is_must_be_valid_on_unknown_effect then (
+        if is_must_be_initialized_on_written || is_access_requirement_on_unknown_effect then (
           L.d_printfln "No abducing %a:%a, the address has been written" CanonValue.pp address
             Attribute.pp attribute ;
           astate.pre )
@@ -804,6 +804,16 @@ module Internal = struct
       abduce_one addr
         (MustBeValid (path.PathContext.timestamp, access_trace, must_be_valid_reason))
         astate
+
+
+    let check_not_end_of_collection path location access_trace addr astate =
+      if is_end_of_collection addr astate then
+        Error (Invalidation.EndIterator, Trace.Immediate {location; history= ValueHistory.epoch})
+      else
+        Ok
+          (abduce_one addr
+             (MustNotBeEndOfCollection (path.PathContext.timestamp, access_trace))
+             astate )
 
 
     let check_non_null path access_trace callee position addr astate =
@@ -3318,6 +3328,11 @@ module AddressAttributes = struct
 
   let check_non_null path trace callee position v astate =
     SafeAttributes.check_non_null path trace callee position (CanonValue.canon' astate v) astate
+
+
+  let check_not_end_of_collection path location trace v astate =
+    SafeAttributes.check_not_end_of_collection path location trace (CanonValue.canon' astate v)
+      astate
 
 
   let check_initialized path trace v astate =

@@ -228,6 +228,15 @@ module AddressAttributes : sig
     -> t
     -> (t, Invalidation.t * Trace.t) result
 
+  val check_not_end_of_collection :
+       PathContext.t
+    -> Location.t
+    -> Trace.t
+    -> AbstractValue.t
+    -> t
+    -> (t, Invalidation.t * Trace.t) result
+  (** Check the post end fact and abduce a non-end requirement for an incoming value. *)
+
   val check_non_null :
        PathContext.t
     -> Trace.t

@@ -134,7 +134,8 @@ module Iterator : sig
   val internal_pointer : Fieldname.t
 
   val check_not_end :
-       Location.t
+       PathContext.t
+    -> Location.t
     -> ?index:AbstractValue.t * ValueHistory.t
     -> AbstractValue.t * ValueHistory.t
     -> AbductiveDomain.t

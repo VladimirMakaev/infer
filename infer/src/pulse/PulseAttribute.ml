@@ -354,6 +354,9 @@ module Attribute = struct
       (* Read out of an object by a copy that gave its destination unknown contents, so
          nothing records that the copy holds it. Post-only, payload-free; appended to
          preserve existing ranks. *)
+    | MustNotBeEndOfCollection of Timestamp.t * Trace.t
+      (* An iterator use requires a non-end value. Appended to preserve existing ranks and
+         serialized attribute tags. *)
   [@@deriving compare, equal, variants, yojson_of]
 
   type rank = int
@@ -421,6 +424,8 @@ module Attribute = struct
   let must_be_non_null_rank = Variants.mustbenonnull.rank
 
   let must_be_valid_rank = Variants.mustbevalid.rank
+
+  let must_not_be_end_of_collection_rank = Variants.mustnotbeendofcollection.rank
 
   let must_not_be_tainted_rank = Variants.mustnotbetainted.rank
 
@@ -541,6 +546,11 @@ module Attribute = struct
           (timestamp :> int)
     | MustNotBeTainted sinks ->
         F.fprintf f "MustNotBeTainted%a" (TaintSinkMap.pp ~pp_value:TaintSink.pp) sinks
+    | MustNotBeEndOfCollection (timestamp, trace) ->
+        F.fprintf f "MustNotBeEndOfCollection(@[@[%a@],@;t=%d@])"
+          (Trace.pp ~pp_immediate:(pp_string_if_debug "access"))
+          trace
+          (timestamp :> int)
     | JavaResourceReleased ->
         F.pp_print_string f "Released"
     | CSharpResourceReleased ->
@@ -600,6 +610,7 @@ module Attribute = struct
     | MustBeAwaited
     | MustBeNonNull _
     | MustBeValid _
+    | MustNotBeEndOfCollection _
     | MustBeInitialized _
     | MustNotBeTainted _
     | UsedAsBranchCond _ ->
@@ -662,6 +673,7 @@ module Attribute = struct
     | MustBeNonNull _
     | MustNotBeTainted _
     | MustBeValid _
+    | MustNotBeEndOfCollection _
     | UnreachableAt _
     | UsedAsBranchCond _ ->
         false
@@ -753,6 +765,7 @@ module Attribute = struct
     | MustBeInitialized _
     | MustBeNonNull _
     | MustBeValid _
+    | MustNotBeEndOfCollection _
     | MustNotBeTainted _
     | PropagateTaintFrom _
     | ReturnedFromUnknown _
@@ -814,6 +827,8 @@ module Attribute = struct
         MustBeNonNull (timestamp, add_call_to_trace trace, callee, position)
     | MustBeValid (_timestamp, trace, reason) ->
         MustBeValid (timestamp, add_call_to_trace trace, reason)
+    | MustNotBeEndOfCollection (_timestamp, trace) ->
+        MustNotBeEndOfCollection (timestamp, add_call_to_trace trace)
     | MustBeInitialized (_timestamp, trace) ->
         MustBeInitialized (timestamp, add_call_to_trace trace)
     | MustNotBeTainted sinks ->
@@ -1020,6 +1035,7 @@ module Attribute = struct
       | MustBeInitialized _
       | MustBeNonNull _
       | MustBeValid _
+      | MustNotBeEndOfCollection _
       | MustNotBeTainted _
       | SourceOriginOfCopy _
       | StaticType _
@@ -1248,6 +1264,12 @@ module Attributes = struct
 
 
   let remove_must_be_valid = remove_by_rank Attribute.must_be_valid_rank
+
+  let get_must_not_be_end_of_collection =
+    get_by_rank Attribute.must_not_be_end_of_collection_rank
+      ~dest:(function[@warning "-partial-match"]
+        | Attribute.MustNotBeEndOfCollection (timestamp, trace) -> (timestamp, trace) )
+
 
   let get_must_be_non_null =
     get_by_rank Attribute.must_be_non_null_rank ~dest:(function[@warning "-partial-match"]

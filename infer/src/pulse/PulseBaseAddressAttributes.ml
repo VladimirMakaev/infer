@@ -310,6 +310,8 @@ let is_copied_from_unmovable_source address attrs =
 
 let get_must_be_valid = get_attribute Attributes.get_must_be_valid
 
+let get_must_not_be_end_of_collection = get_attribute Attributes.get_must_not_be_end_of_collection
+
 let get_must_be_non_null = get_attribute Attributes.get_must_be_non_null
 
 let is_must_be_awaited address attrs =
@@ -532,6 +534,8 @@ module type S = sig
     key -> t -> (Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option) option
 
   val get_must_be_non_null : key -> t -> (Timestamp.t * Trace.t * CallEvent.t * int) option
+
+  val get_must_not_be_end_of_collection : key -> t -> (Timestamp.t * Trace.t) option
 
   val get_must_not_be_tainted : key -> t -> Attribute.TaintSink.t Attribute.TaintSinkMap.t
 

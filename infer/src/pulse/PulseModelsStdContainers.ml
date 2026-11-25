@@ -158,7 +158,7 @@ let copy_iterator ~has_token path location event ~src ~dst astate =
 let check_iterator ?(elem_storage_only = false) ~has_token ~allow_end path location iter astate =
   let* astate, elem = load_field path location iter node_field astate in
   let* astate =
-    if allow_end then Ok astate else Collection.Iterator.check_not_end location elem astate
+    if allow_end then Ok astate else Collection.Iterator.check_not_end path location elem astate
   in
   let* astate =
     if has_token then

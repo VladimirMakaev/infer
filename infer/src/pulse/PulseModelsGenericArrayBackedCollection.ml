@@ -234,28 +234,26 @@ module Iterator = struct
         record_vector_index path location (new_position, history) (index, hist) astate
 
 
-  let check_not_end location ?index pointer astate =
-    if
-      AddressAttributes.is_end_of_collection (fst pointer) astate
-      || Option.exists index ~f:(fun (index, _) ->
-          AddressAttributes.is_end_of_collection index astate )
-    then
-      let invalidation_trace = Trace.Immediate {location; history= ValueHistory.epoch} in
-      let access_trace = Trace.Immediate {location; history= snd pointer} in
-      FatalError
-        ( ReportableError
+  let check_not_end path location ?index pointer astate =
+    let access_trace = Trace.Immediate {location; history= snd pointer} in
+    let check address astate =
+      AddressAttributes.check_not_end_of_collection path location access_trace address astate
+      |> Result.map_error ~f:(fun (invalidation, invalidation_trace) ->
+          ReportableError
             { diagnostic=
                 Diagnostic.AccessToInvalidAddress
                   { calling_context= []
                   ; invalid_address= Decompiler.find (fst pointer) astate
-                  ; invalidation= EndIterator
+                  ; invalidation
                   ; invalidation_trace
                   ; access_trace
                   ; may_depend_on_an_unknown_value= astate.AbductiveDomain.unknown_values
                   ; must_be_valid_reason= None }
-            ; astate }
-        , [] )
-    else Ok astate
+            ; astate } )
+      |> PulseResult.fatal_of_result
+    in
+    let* astate = check (fst pointer) astate in
+    match index with None -> Ok astate | Some (index, _) -> check index astate
 
 
   let to_elem_pointed_by_iterator path mode ?(step = None) location iterator astate =
@@ -266,7 +264,7 @@ module Iterator = struct
     (* Check if not end iterator *)
     let is_minus_minus = match step with Some `MinusMinus -> true | _ -> false in
     let* astate =
-      if is_minus_minus then Ok astate else check_not_end location ~index pointer astate
+      if is_minus_minus then Ok astate else check_not_end path location ~index pointer astate
     in
     (* We do not want to create internal array if iterator pointer has an invalid value *)
     let* astate = PulseOperations.check_addr_access path Read location index astate in
