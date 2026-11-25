@@ -117,6 +117,61 @@ let test_4 _ =
   assert (Env.equal_integer_source (classify (Exp.int (IntLit.of_int 300))) (Env.Integer None))
 
 
+let test_unknown_source_guards _ =
+  let pname = Procname.from_string_c_fun "integer_conversion_unit" in
+  let pvar = Pvar.mk (Mangled.from_string "modeled_source") pname in
+  let path = Symb.SymbolPath.of_pvar pvar in
+  let env = environment [] in
+  let check label value =
+    let id = Ident.create_fresh Ident.knormal in
+    assert_bool "guard fixture must have unknown source kind"
+      (Env.equal_integer_source (env.Env.integer_source_of_exp (Exp.Var id)) Env.Unknown) ;
+    let mem =
+      Dom.Mem.init (fun _ -> None) env |> Dom.Mem.add_stack (AbsLoc.Loc.of_var (Var.of_id id)) value
+    in
+    let cast = Exp.Cast (Typ.mk (Typ.Tint Typ.IUInt), Exp.Var id) in
+    let converted = Sem.eval widths cast mem in
+    assert_bool label (phys_equal value converted)
+  in
+  check "unknown-source bottom was made reachable" Dom.Val.bot ;
+  let pointer = Dom.Val.of_loc (AbsLoc.Loc.of_pvar pvar) in
+  assert_bool "pointer fixture has no locations"
+    (not (AbsLoc.PowLoc.is_bot (Dom.Val.get_all_locs pointer))) ;
+  check "unknown-source cast discarded pointer locations" pointer ;
+  let array = Dom.Val.of_literal_string widths "model" in
+  assert_bool "array fixture has no array block"
+    (not (BO.ArrayBlk.is_bot (Dom.Val.get_array_blk array))) ;
+  check "unknown-source cast discarded array position and size" array ;
+  let non_integer = Dom.Val.of_itv (Itv.of_normal_path ~unsigned:false ~non_int:true path) in
+  assert_bool "symbol fixture is not a modeled non-integer"
+    (Symb.SymbolSet.exists Symb.Symbol.is_non_int (Itv.get_symbols (Dom.Val.get_itv non_integer))) ;
+  check "unknown-source cast discarded non-integer symbols" non_integer
+
+
+let test_unknown_source_fits _ =
+  let env = environment [] in
+  List.iter
+    [ (Typ.IUChar, interval 0 255, true, interval 0 255)
+    ; (Typ.IUChar, interval 0 256, false, interval 0 255)
+    ; (Typ.ISChar, interval (-128) 127, true, interval (-128) 127)
+    ; (Typ.ISChar, interval (-129) 127, false, interval (-128) 127)
+    ; (Typ.IBool, Itv.zero, true, Itv.zero)
+    ; (Typ.IBool, Itv.one, true, Itv.one) ]
+    ~f:(fun (kind, input, fits, expected) ->
+      let id = Ident.create_fresh Ident.knormal in
+      assert_bool "fits fixture must have unknown source kind"
+        (Env.equal_integer_source (env.Env.integer_source_of_exp (Exp.Var id)) Env.Unknown) ;
+      let value = Dom.Val.set_itv_updated_by_addition (Dom.Val.of_itv input) in
+      let mem =
+        Dom.Mem.init (fun _ -> None) env
+        |> Dom.Mem.add_stack (AbsLoc.Loc.of_var (Var.of_id id)) value
+      in
+      let converted = Sem.eval widths (Exp.Cast (Typ.mk (Typ.Tint kind), Exp.Var id)) mem in
+      assert_interval expected (Dom.Val.get_itv converted) ;
+      if fits then
+        assert_bool "fitting cast lost its value or metadata" (phys_equal value converted) )
+
+
 let test_5 _ =
   let known = Ident.create_fresh Ident.knormal in
   let unknown = Ident.create_fresh Ident.knormal in
@@ -134,9 +189,9 @@ let test_5 _ =
   List.iter
     [ (Typ.ISChar, "-128", "127")
     ; (Typ.IUChar, "0", "255")
-    ; (Typ.IInt, "-2147483648", "2147483647")
-    ; (Typ.IUInt, "0", "4294967295")
-    ; (Typ.IULongLong, "0", "18446744073709551615")
+    ; (Typ.IInt, "300", "300")
+    ; (Typ.IUInt, "300", "300")
+    ; (Typ.IULongLong, "300", "300")
     ; (Typ.IBool, "0", "1") ]
     ~f:(fun (kind, lower, upper) ->
       let expected =
@@ -259,6 +314,8 @@ let tests =
        ; "independent eight-bit oracle" >:: test_3
        ; "source kinds are captured types, not observed numeric values" >:: test_4
        ; "unknown source is top for width; known source converts" >:: test_5
+       ; "unknown source preserves bottom and modeled values" >:: test_unknown_source_guards
+       ; "unknown source preserves fitting values and widens others" >:: test_unknown_source_fits
        ; "value-preserving widening keeps symbolic values" >:: test_6
        ; "non-negative value plus source type" >:: test_nonnegative_type_bound
        ; "Boolean identity and consumer-typed loads" >:: test_boolean_identity

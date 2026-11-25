@@ -15,10 +15,15 @@ module BoField = BufferOverrunField
 module L = Logging
 module TraceSet = BufferOverrunTrace.Set
 
-let record_unknown_integer_cast ikind exp =
+let record_unknown_integer_cast ~fits ikind exp =
   if Config.bo_debug > 0 then (
-    StatsLogging.log_count ~label:"inferbo_integer_cast_unknown_source" ~value:1 ;
-    L.debug BufferOverrun Verbose "Top-for-width integer cast with unknown source: (%s) %a@."
+    let label =
+      if fits then "inferbo_integer_cast_unknown_source_fits"
+      else "inferbo_integer_cast_unknown_source"
+    in
+    StatsLogging.log_count ~label ~value:1 ;
+    L.debug BufferOverrun Verbose "Integer cast with unknown source (%s): (%s) %a@."
+      (if fits then "fits" else "widens")
       (Typ.ikind_to_string ikind) Exp.pp exp )
 
 
@@ -213,13 +218,24 @@ let rec eval : ?typ:Typ.t -> IntegerWidths.t -> Exp.t -> Mem.t -> Val.t =
           | Some ikind, BufferOverrunOndemandEnv.Integer source ->
               Val.cast_integer ?source integer_type_widths ikind v
           | Some ikind, BufferOverrunOndemandEnv.Unknown ->
-              record_unknown_integer_cast ikind e ;
-              let lower, upper =
-                if Typ.equal_ikind ikind Typ.IBool then (Z.zero, Z.one)
-                else IntegerWidths.range_of_ikind integer_type_widths ikind
-              in
-              Val.of_itv ~traces:(Val.get_traces v)
-                (Itv.join (Itv.of_big_int lower) (Itv.of_big_int upper))
+              if not (Val.is_plain_integer_value v) then (
+                if Config.bo_debug > 0 then (
+                  StatsLogging.log_count ~label:"inferbo_integer_cast_unknown_value" ~value:1 ;
+                  L.debug BufferOverrun Verbose
+                    "Unchanged integer cast of a modeled value: (%s) %a@."
+                    (Typ.ikind_to_string ikind) Exp.pp e ) ;
+                v )
+              else if Itv.cast_is_identity integer_type_widths ikind (Val.get_itv v) then (
+                record_unknown_integer_cast ~fits:true ikind e ;
+                v )
+              else (
+                record_unknown_integer_cast ~fits:false ikind e ;
+                let lower, upper =
+                  if Typ.equal_ikind ikind Typ.IBool then (Z.zero, Z.one)
+                  else IntegerWidths.range_of_ikind integer_type_widths ikind
+                in
+                Val.of_itv ~traces:(Val.get_traces v)
+                  (Itv.join (Itv.of_big_int lower) (Itv.of_big_int upper)) )
           | _ ->
               if Typ.is_unsigned_int t && Val.is_mone v then
                 let ikind = Option.value_exn (Typ.get_ikind_opt t) in

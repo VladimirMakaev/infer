@@ -97,6 +97,9 @@ module Val : sig
   val is_bot : t -> bool
   (** Check if the value is bottom *)
 
+  val is_plain_integer_value : t -> bool
+  (** Return true if the value has no locations, array block, or non-integer symbols. *)
+
   val is_unknown : t -> bool
   (** Return true if the value represents an unknown value. Note that this does not mean that it is
       identical with Dom.Val.unknown. This is because an unknown value is bound to a particular
