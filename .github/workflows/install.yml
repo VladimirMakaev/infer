@@ -1,11 +1,6 @@
 name: build
 
 on:
-  push:
-    branches:
-      - "main"
-    tags:
-      - "v*"
   pull_request: {}
 
 env:
@@ -61,8 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macOS-latest
-          - ubuntu-24.04
+          - macos-26-intel
         ocaml-compiler:
           - ocaml-variants.5.4.1+options,ocaml-option-flambda
     runs-on: ${{ matrix.os }}
@@ -70,6 +64,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: 38ad901c423f7f7ab529b29f6abe961841a30ae9
+      - name: Verify tested revision
+        shell: bash
+        env:
+          EXPECTED_SHA: 38ad901c423f7f7ab529b29f6abe961841a30ae9
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Install Required Apt Packages for Ubuntu
         if: runner.os == 'Linux'
