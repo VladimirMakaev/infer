@@ -1,11 +1,6 @@
 name: build
 
 on:
-  push:
-    branches:
-      - "main"
-    tags:
-      - "v*"
   pull_request: {}
 
 env:
@@ -61,8 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macOS-latest
-          - ubuntu-24.04
+          - macos-26-intel
         ocaml-compiler:
           - ocaml-variants.5.4.1+options,ocaml-option-flambda
     runs-on: ${{ matrix.os }}
@@ -70,6 +64,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: 38ad901c423f7f7ab529b29f6abe961841a30ae9
+      - name: Verify tested revision
+        shell: bash
+        env:
+          EXPECTED_SHA: 38ad901c423f7f7ab529b29f6abe961841a30ae9
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Install Required Apt Packages for Ubuntu
         if: runner.os == 'Linux'
@@ -161,6 +162,103 @@ jobs:
           opam install --deps-only --locked opam/ocamlformat.opam.locked
           opam install ocamlformat.$(grep -e '^version:' ./opam/ocamlformat.opam.locked | cut -d ' ' -f 2 | tr -d \")
           opam exec -- ocamlformat --version
+
+      - name: Validate Python embedding for Intel tests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ctypes
+          import os
+          import pathlib
+          import platform
+          import shlex
+          import shutil
+          import subprocess
+          import sys
+          import sysconfig
+          import tempfile
+
+          try:
+              if sys.platform != "darwin" or platform.machine() != "x86_64":
+                  raise RuntimeError("expected the Intel macOS runner")
+              if sys.version_info[:2] != (3, 10):
+                  raise RuntimeError("expected Python 3.10, got " + sys.version)
+              libdir = pathlib.Path(sysconfig.get_config_var("LIBDIR") or "")
+              libname = sysconfig.get_config_var("LDLIBRARY")
+              if not libdir.is_absolute() or libname != "libpython3.10.dylib":
+                  raise RuntimeError("selected Python has no usable shared-library metadata")
+              library = (libdir / libname).resolve(strict=True)
+              if not library.is_file():
+                  raise RuntimeError("Python shared library is not a file: " + str(library))
+              if any(c.isspace() for c in str(library.parent)):
+                  raise RuntimeError("legacy PyML needs a library directory without whitespace")
+              ctypes.CDLL(str(library))
+              metadata = libdir / "pkgconfig"
+              if not (metadata / "python-3.10-embed.pc").is_file():
+                  raise RuntimeError("selected Python has no embedding pkg-config metadata")
+              real_pkg = pathlib.Path(shutil.which("pkg-config") or "").resolve(strict=True)
+              if not real_pkg.is_file():
+                  raise RuntimeError("pkg-config is unavailable")
+              environment = dict(os.environ)
+              pkg_path = str(metadata) + os.pathsep + environment.get("PKG_CONFIG_PATH", "")
+              environment["PKG_CONFIG_PATH"] = pkg_path
+              flags = subprocess.check_output(
+                  [str(real_pkg), "--libs", "python-3.10-embed"], env=environment, text=True
+              ).strip()
+              words = shlex.split(flags)
+              directories = [pathlib.Path(w[2:]).resolve() for w in words if w.startswith("-L")]
+              if library.parent not in directories or "-lpython3.10" not in words:
+                  raise RuntimeError("embedding metadata does not identify the selected library")
+              temporary = pathlib.Path(environment["RUNNER_TEMP"])
+              if not temporary.is_absolute() or not temporary.is_dir():
+                  raise RuntimeError("RUNNER_TEMP is unavailable")
+              directory = pathlib.Path(tempfile.mkdtemp(prefix="python-embedding-", dir=temporary))
+              shim = directory / "pkg-config"
+              real = shlex.quote(str(real_pkg))
+              shim.write_text(
+                  "#!/bin/sh\nset -eu\n"
+                  'if [ "$#" -eq 2 ] && [ "$1" = --libs ] && [ "$2" = python-3.10 ]; then\n'
+                  "  exec " + real + " --libs python-3.10-embed\nfi\n"
+                  'exec ' + real + ' "$@"\n'
+              )
+              shim.chmod(0o755)
+              redirected = subprocess.check_output(
+                  [str(shim), "--libs", "python-3.10"], env=environment, text=True
+              ).strip()
+              if redirected != flags:
+                  raise RuntimeError("Python embedding query was not redirected correctly")
+              environment["PATH"] = str(directory) + os.pathsep + environment["PATH"]
+              probe = directory / "probe.ml"
+              probe.write_text(
+                  'let () = Py.initialize ~interpreter:Sys.argv.(1) (); '
+                  'let actual = Py.get_version () in '
+                  'if not (String.starts_with ~prefix:(Sys.argv.(2) ^ " ") actual) then '
+                  'failwith ("Python version mismatch: " ^ actual); '
+                  'ignore (Py.Import.import_module "ast"); '
+                  'print_endline ("PYML EMBEDDING READY: " ^ actual)\n'
+              )
+              executable = directory / "probe"
+              subprocess.run(
+                  ["opam", "exec", "--", "ocamlfind", "ocamlopt", "-package", "pyml",
+                   "-linkpkg", "-o", str(executable), str(probe)], env=environment, check=True
+              )
+              subprocess.run(
+                  ["opam", "exec", "--", str(executable), "python3", platform.python_version()],
+                  env=environment, check=True
+              )
+              values = [str(directory), pkg_path, str(library)]
+              if any("\n" in v or "\r" in v or "\0" in v for v in values):
+                  raise RuntimeError("invalid path in Python embedding setup")
+              with open(environment["GITHUB_PATH"], "a") as output:
+                  output.write(str(directory) + "\n")
+              with open(environment["GITHUB_ENV"], "a") as output:
+                  output.write("PKG_CONFIG_PATH=" + pkg_path + "\n")
+                  output.write("PYML_EMBED_LIBRARY=" + str(library) + "\n")
+              print("PYML EMBEDDING LIBRARY: " + str(library))
+          except Exception as error:
+              print("::error::PYML LIBRARY SETUP FAILED: " + str(error).replace("\n", " "), file=sys.stderr)
+              raise SystemExit(1)
+          PY
 
       - name: Test infer
         run: make test -k NDKBUILD=no
