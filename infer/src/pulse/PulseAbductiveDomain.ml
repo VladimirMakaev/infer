@@ -2140,21 +2140,25 @@ let should_havoc_if_unknown () =
       `ShouldHavoc
 
 
-let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) hist x astate =
+let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) ?(havoc_in_place = false) hist x astate
+    =
   let x = CanonValue.canon' astate x in
-  let havoc_accesses hist addr heap =
+  let havoc_accesses hist addr heap attrs =
     match BaseMemory.find_opt addr heap with
     | None ->
-        heap
+        (heap, attrs)
     | Some edges ->
+        let attrs_ref = ref attrs in
         let edges =
           SafeBaseMemory.Edges.mapi astate edges ~f:(fun access value ->
               if havoc_filter (downcast addr) (downcast_access access) (downcast_fst value) then (
+                if havoc_in_place then
+                  attrs_ref := BaseAddressAttributes.remove_allocation_attr (fst value) !attrs_ref ;
                 L.d_printfln_escaped "havoc'ing access %a" BaseMemory.Access.pp access ;
                 (AbstractValue.mk_fresh (), hist) )
               else downcast_fst value )
         in
-        BaseMemory.add addr edges heap
+        (BaseMemory.add addr edges heap, !attrs_ref)
   in
   let post = (astate.post :> BaseDomain.t) in
   let heap, attrs =
@@ -2164,10 +2168,11 @@ let apply_unknown_effect ?(havoc_filter = fun _ _ _ -> true) hist x astate =
         match should_havoc_if_unknown () with
         | `ShouldHavoc ->
             let attrs =
-              BaseAddressAttributes.remove_allocation_attr addr attrs
+              ( if havoc_in_place then attrs
+                else BaseAddressAttributes.remove_allocation_attr addr attrs )
               |> BaseAddressAttributes.initialize addr
             in
-            let heap = havoc_accesses hist addr heap in
+            let heap, attrs = havoc_accesses hist addr heap attrs in
             Continue (heap, attrs)
         | `ShouldOnlyHavocResources ->
             let attrs = BaseAddressAttributes.remove_allocation_attr addr attrs in

@@ -354,13 +354,17 @@ val should_havoc_if_unknown : unit -> [> `ShouldHavoc | `ShouldOnlyHavocResource
 
 val apply_unknown_effect :
      ?havoc_filter:(AbstractValue.t -> PulseAccess.t -> AbstractValue.t * ValueHistory.t -> bool)
+  -> ?havoc_in_place:bool
   -> ValueHistory.t
   -> AbstractValue.t
   -> t
   -> t
 (** do as much as possible to assume "the best" happened at that location: deallocate and initialize
     everything reachable from the address, then havoc all the edges starting from the address
-    passing [havoc_filter] (by default everything passes the filter) *)
+    passing [havoc_filter] (by default everything passes the filter). With [havoc_in_place], keep
+    allocations of the overwritten cells and forget allocations of their old values instead. The
+    same filter selects edges for both effects; a dereference-only filter preserves the field and
+    array structure when overwriting mutable cell contents. *)
 
 val is_local : Var.t -> t -> bool
 
